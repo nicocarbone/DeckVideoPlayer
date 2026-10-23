@@ -1,4 +1,3 @@
-# Shows the "Sponsor" button on the repository page.
-# github: needs an approved GitHub Sponsors profile (github.com/sponsors).
-github: nicocarbone
+# Shows the "Sponsor" button on the repository page (Ko-fi link).
+# GitHub Sponsors may be added later (needs an approved Sponsors profile).
 ko_fi: nicocarbone

@@ -277,10 +277,8 @@ touch input.
 Deck Video Player is free and will stay free. If it is useful to you and
 you'd like to say thanks:
 
-- **[Ko-fi](https://ko-fi.com/nicocarbone)**: a quick one-off tip by card
-  or PayPal, no account needed.
-- **[GitHub Sponsors](https://github.com/sponsors/nicocarbone)**: if you
-  already use GitHub, one-off or monthly.
+Ko-fi takes quick one-off tips by card or PayPal, no account needed:
+**[ko-fi.com/nicocarbone](https://ko-fi.com/nicocarbone)**.
 
 Bug reports and testing on other devices help just as much.
 

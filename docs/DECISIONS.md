@@ -547,9 +547,11 @@ reproduced) before fixing:
 - **Disclaimer:** beta, tested only on a Steam Deck OLED, no warranty: at
   the top of the README and INSTALL, in the About panel ("Status") and in
   the metainfo description.
-- **Funding:** `.github/FUNDING.yml` (GitHub Sponsors + Ko-fi), a "Support
-  the project" README section, About rows and a metainfo donation URL.
-  GitHub Sponsors needs the owner's approved Sponsors profile.
+- **Funding:** Ko-fi only for now (one-off tips by card/PayPal):
+  `.github/FUNDING.yml`, a "Support the project" README section, an About
+  row and the metainfo donation URL. GitHub Sponsors was considered and
+  postponed by the owner; adding it later is one `github:` line in
+  FUNDING.yml plus a README/About line.
 - **Checked and fine:** no secrets anywhere in the git history; Steam
   artwork is original (app name and generic shapes, no Valve marks); the
   only third-party files in the repo are the HRTF data (no restrictions)
