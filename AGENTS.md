@@ -66,6 +66,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   2026-10-23: fixes and declined items are recorded in DECISIONS D20–D26.
 - Verified in headless/nested gamescope on a desktop (HDR10 swapchain
   switch, refresh property, VA-API, SDL gamepad enabled in the Flatpak).
-  **Not yet verified on a real Steam Deck**: see the on-device checklist in
-  `docs/DEVELOPMENT.md` §8.
+- v0.1.0 released 2026-10-23 (tag `v0.1.0`, GitHub release built by CI)
+  after a first test on a real Steam Deck by the owner. The full on-device
+  checklist in `docs/DEVELOPMENT.md` §8 has not been formally completed.
 - Planned: network shares (SMB/NFS), Plex/Jellyfin, thumbnails, touch input.
