@@ -15,6 +15,7 @@ download. Every request is logged to stderr with its auth headers so tests
 can check them.
 """
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -60,12 +61,19 @@ class Handler(BaseHTTPRequestHandler):
             state["quota"] = q.get("query") == "quota"
             data = []
             langs = q.get("languages", "en").split(",")
+            # MOCK_TITLE (e.g. "Sintel.2010") makes release names realistic
+            # for screenshots; the defaults are what the tests expect.
+            title = os.environ.get("MOCK_TITLE")
             if "moviehash" in q:
-                data.append(result(100, langs[0], "Exact.Hash.Release", 12, True))
+                data.append(result(100, langs[0], title + ".1080p.BluRay.x264-DVP" if title else "Exact.Hash.Release", 12, True))
             if "query" in q:
                 for i, lang in enumerate(langs):
-                    data.append(result(200 + i, lang, "%s.%s.Release" % (q["query"].title().replace(" ", "."), lang), 1500 * (i + 1)))
-                data.append(result(300, "fr", "Other.Language", 99999))
+                    name = (title + [".720p.BluRay.x264-SPARKS", ".2160p.WEB-DL.DDP5.1.HDR"][i % 2]) if title \
+                        else "%s.%s.Release" % (q["query"].title().replace(" ", "."), lang)
+                    data.append(result(200 + i, lang, name, 1500 * (i + 1)))
+                    if title:
+                        data.append(result(250 + i, lang, title + ".1080p.WEBRip.x265-RARBG", 41200 // (i + 1)))
+                data.append(result(300, "fr", title + ".FRENCH.1080p.BluRay" if title else "Other.Language", 99999))
             return self.send_json(200, {"total_count": len(data), "data": data})
         if url.path.startswith("/files/"):
             file_id, lang = url.path[len("/files/"):-len(".srt")].split("-")

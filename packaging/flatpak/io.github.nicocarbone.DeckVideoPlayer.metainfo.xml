@@ -26,6 +26,20 @@
       <li>Subtitle downloads from OpenSubtitles.com (free personal API key)</li>
     </ul>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Playback with the controller overlay</caption>
+      <image>https://raw.githubusercontent.com/nicocarbone/DeckVideoPlayer/main/docs/screenshots/playback.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>Library with watched marks and resume progress</caption>
+      <image>https://raw.githubusercontent.com/nicocarbone/DeckVideoPlayer/main/docs/screenshots/library.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Audio tracks and headphone surround</caption>
+      <image>https://raw.githubusercontent.com/nicocarbone/DeckVideoPlayer/main/docs/screenshots/audio.jpg</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.nicocarbone.DeckVideoPlayer.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <supports>

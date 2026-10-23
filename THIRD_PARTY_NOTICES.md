@@ -32,6 +32,9 @@ Included in this repository:
 | `app/share/deckvideoplayer/hrtf/mit_kemar_normal_pinna.sofa` (MIT KEMAR HRTF, W. G. Gardner and K. D. Martin, 1995) | "Provided without any usage restrictions"; citation requested (see `hrtf/README.md`) |
 | `helper/gamescope-control.xml` (gamescope protocol definition) | MIT, © 2023 Valve Corporation (notice kept in the file) |
 
+Screenshots in `docs/screenshots/` show frames of the *Sintel* trailer,
+© Blender Foundation (durian.blender.org), licensed CC BY 3.0.
+
 **Combined work.** Because FFmpeg is built as GPL-3.0-or-later, the Flatpak
 bundle as a whole is distributed under the terms of the GPL version 3 (or
 later). All other components, including this app's GPL-2.0-or-later code,

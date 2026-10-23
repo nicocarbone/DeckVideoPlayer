@@ -34,6 +34,27 @@ there is a single process and nothing between the video and the screen.
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).
 
+## Screenshots
+
+![Playback with the controls overlay: title, 1080p / HW / 48 Hz badges, chapter ticks and button hints](docs/screenshots/playback.jpg)
+
+| | |
+|---|---|
+| ![Library: a Movies folder with watched marks and resume progress](docs/screenshots/library.png) | ![Resume dialog over the library](docs/screenshots/resume.png) |
+| Library with watched marks and progress | Resume where you left off |
+| ![Audio menu with a 5.1 track and the headphone surround toggle](docs/screenshots/audio.jpg) | ![Download subtitles menu listing OpenSubtitles results](docs/screenshots/subtitles.jpg) |
+| Audio tracks and headphone surround | Subtitle download |
+| ![Playback menu: tracks, subtitle size and delay, picture, refresh-rate matching](docs/screenshots/menu.jpg) | ![Playback info: hardware decoding, HDR state, matched refresh rate, audio output](docs/screenshots/info.jpg) |
+| Playback menu | Playback info (View button) |
+
+Taken at the Steam Deck's 1280×800 in gamescope (headless), with the Deck
+OLED profile. Video: *Sintel* trailer, © Blender Foundation,
+[durian.blender.org](https://durian.blender.org), licensed
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The other titles
+in the library are Blender open movies used as sample file names, and the
+subtitle results come from the project's local test server
+(`tools/mock-opensubtitles.py`), not from OpenSubtitles.
+
 ## Why another video player?
 
 The Steam Deck can already play video, so this needs explaining. The gap

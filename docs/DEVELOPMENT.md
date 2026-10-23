@@ -176,6 +176,17 @@ MODE=flatpak HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN k
 
 Screenshots of HDR (PQ) frames look oversaturated as PNG. That is normal.
 
+**README screenshots** (`docs/screenshots/`) were made this way: a demo
+library in `.dev/screens/Videos` whose files are symlinks to the *Sintel*
+trailer (Blender Foundation, CC BY 3.0) remuxed with a stereo and a 5.1
+track, three subtitle tracks and chapters; a hand-written `resume.json` in
+`.dev/headless/data/` for the watched/progress marks (`KEEP=1` keeps it);
+and `KEEP=1 MEDIA=… DEVICE=deck-oled XWAYLAND2=1 RATES=45,48,60,72,90
+SURROUND=1 OSMOCK=1 MOCK_TITLE=Sintel.2010 tools/headless-run.sh -- …`
+with `gshot:` steps. Seek right before a shot (`raw:["seek",…]`) to get the
+same frame each time; seeking with `key:RIGHT` also shows the overlay.
+Video shots are saved as JPEG (`ffmpeg -q:v 3`), flat UI shots as PNG.
+
 Notes and pitfalls:
 - Unix socket paths must be under ~108 characters; the tool uses
   `/tmp/dvp-ipc.sock`.
