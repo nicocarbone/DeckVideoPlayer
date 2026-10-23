@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="430"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#18222E"/><stop offset="1" stop-color="#090C10"/></linearGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5CC3FF"/><stop offset="1" stop-color="#1A7FFF"/></linearGradient><radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#1A9FFF" stop-opacity="0.45"/><stop offset="1" stop-color="#1A9FFF" stop-opacity="0"/></radialGradient></defs>
+<rect width="920" height="430" fill="url(#bg)"/>
+<circle cx="220" cy="215" r="260" fill="url(#glow)"/>
+<circle cx="220" cy="215" r="110" fill="none" stroke="url(#ring)" stroke-width="22.0"/><path d="M194.70 164.40 L279.40 215 L194.70 265.60 Z" fill="#fff" stroke="#fff" stroke-width="13.20" stroke-linejoin="round"/>
+<text x="400" y="200" font-family="Inter" font-weight="800" font-size="66" fill="#fff">Deck</text>
+<text x="400" y="272" font-family="Inter" font-weight="800" font-size="66" fill="#fff">Video Player</text>
+<text x="402" y="330" font-family="Inter" font-weight="600" font-size="22" fill="#5CC3FF" letter-spacing="5">HDR · 4K · ANY FORMAT</text>
+</svg>

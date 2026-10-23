@@ -1,0 +1,75 @@
+#!/bin/sh
+# Deck Video Player launcher.
+#
+# Works both inside the Flatpak (files under /app) and straight from a source
+# checkout (files next to this script), which is handy for development.
+
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+APPDIR=${DVP_APPDIR:-"$here/../share/deckvideoplayer"}
+MPV=${DVP_MPV:-mpv}
+
+CONFIG_DIR=${DVP_CONFIG_DIR:-"$HOME/.config/deckvideoplayer"}
+DATA_DIR=${DVP_DATA_DIR:-"${XDG_DATA_HOME:-$HOME/.local/share}/deckvideoplayer"}
+CONFIG_FILE="$CONFIG_DIR/config.ini"
+
+mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+if [ ! -f "$CONFIG_FILE" ]; then
+    cp "$APPDIR/config.ini" "$CONFIG_FILE"
+fi
+
+# Read a single key from config.ini: ini_get <section> <key>
+ini_get() {
+    awk -v section="$1" -v key="$2" '
+        /^[[:space:]]*[#;]/ { next }
+        /^[[:space:]]*\[/ {
+            s = $0; gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", s); cur = tolower(s); next
+        }
+        cur == section {
+            line = $0
+            i = index(line, "=")
+            if (i == 0) next
+            k = substr(line, 1, i - 1); v = substr(line, i + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            if (tolower(k) == key) val = v
+        }
+        END { print val }
+    ' "$CONFIG_FILE"
+}
+
+set -- \
+    --config-dir="$APPDIR/mpv" \
+    --script-opts-append=deckplayer-config_file="$CONFIG_FILE" \
+    --script-opts-append=deckplayer-data_dir="$DATA_DIR" \
+    "$@"
+
+# Under gamescope (SteamOS game mode) render through X11 + Vulkan so the
+# gamescope WSI layer can hand mpv an HDR10 swapchain.
+gpu_context=$(ini_get display gpu_context)
+case "${gpu_context:-auto}" in
+    auto)
+        if [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ]; then
+            set -- --gpu-context=x11vk "$@"
+            # SteamOS sets this already; make sure the layer is active.
+            export ENABLE_GAMESCOPE_WSI=1
+        fi
+        ;;
+    *)
+        set -- --gpu-context="$gpu_context" "$@"
+        ;;
+esac
+
+# Controller input needs an mpv built with SDL2 gamepad support (the Flatpak
+# is); other builds would reject the option.
+if "$MPV" --list-options 2>/dev/null | grep -q -- '--input-gamepad '; then
+    set -- --input-gamepad=yes "$@"
+fi
+
+# Optional user overrides for mpv itself.
+if [ -f "$CONFIG_DIR/mpv.conf" ]; then
+    set -- "$@" --include="$CONFIG_DIR/mpv.conf"
+fi
+
+exec "$MPV" "$@"

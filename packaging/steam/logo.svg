@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="320"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#18222E"/><stop offset="1" stop-color="#090C10"/></linearGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5CC3FF"/><stop offset="1" stop-color="#1A7FFF"/></linearGradient><radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#1A9FFF" stop-opacity="0.45"/><stop offset="1" stop-color="#1A9FFF" stop-opacity="0"/></radialGradient></defs>
+<circle cx="160" cy="160" r="120" fill="none" stroke="url(#ring)" stroke-width="24.0"/><path d="M132.40 104.80 L224.80 160 L132.40 215.20 Z" fill="#fff" stroke="#fff" stroke-width="14.40" stroke-linejoin="round"/>
+<text x="320" y="197" font-family="Inter" font-weight="800" font-size="104" fill="#fff">Deck Video Player</text>
+</svg>

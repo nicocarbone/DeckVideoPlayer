@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y mpv
+      - run: tests/run.sh
+
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          bundle: DeckVideoPlayer.flatpak
+          manifest-path: packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml
+          cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/*.yml') }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Package installer
+        run: |
+          mkdir -p dist DeckVideoPlayer/dist DeckVideoPlayer/packaging
+          find artifacts -name '*.flatpak' -exec cp {} dist/DeckVideoPlayer.flatpak \;
+          cp dist/DeckVideoPlayer.flatpak DeckVideoPlayer/dist/
+          cp -r scripts DeckVideoPlayer/
+          cp -r packaging/steam DeckVideoPlayer/packaging/
+          cp README.md DeckVideoPlayer/
+          tar czf DeckVideoPlayer-${GITHUB_REF_NAME}.tar.gz DeckVideoPlayer
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DeckVideoPlayer-*.tar.gz
+            dist/DeckVideoPlayer.flatpak

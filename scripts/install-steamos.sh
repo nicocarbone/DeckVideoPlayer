@@ -1,0 +1,120 @@
+#!/bin/bash
+# Install Deck Video Player on SteamOS (run once from Desktop Mode, in Konsole).
+#
+#   scripts/install-steamos.sh [BUNDLE]   install/upgrade and add to Steam
+#   scripts/install-steamos.sh --artwork  (re)install Steam library artwork
+#   scripts/install-steamos.sh --uninstall
+#
+# BUNDLE defaults to dist/DeckVideoPlayer.flatpak next to this script.
+# Everything is installed per-user: nothing touches SteamOS's read-only
+# system partition, so it survives SteamOS updates.
+
+set -euo pipefail
+
+APP_ID=io.github.nicocarbone.DeckVideoPlayer
+RUNTIME_BRANCH=25.08
+here=$(cd -- "$(dirname -- "$0")" && pwd)
+root=$(cd -- "$here/.." && pwd)
+config_dir="$HOME/.config/deckvideoplayer"
+
+say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
+
+steam_running() { pgrep -x steam >/dev/null 2>&1; }
+
+desktop_file() {
+    local f
+    for f in "$HOME/.local/share/flatpak/exports/share/applications/$APP_ID.desktop" \
+             "/var/lib/flatpak/exports/share/applications/$APP_ID.desktop"; do
+        [ -f "$f" ] && { echo "$f"; return 0; }
+    done
+    return 1
+}
+
+install_artwork() {
+    # Steam writes shortcuts.vdf shortly after a shortcut is added.
+    for _ in $(seq 1 15); do
+        if python3 "$here/steam_shortcut.py" artwork >/dev/null 2>&1; then
+            say "Steam library artwork installed (visible after restarting Steam)."
+            return 0
+        fi
+        sleep 2
+    done
+    warn "Could not find the Steam shortcut yet. After restarting Steam run:"
+    warn "  $0 --artwork"
+}
+
+add_to_steam() {
+    if python3 "$here/steam_shortcut.py" status 2>/dev/null | grep -q 'app id'; then
+        say "Already in your Steam library."
+        python3 "$here/steam_shortcut.py" artwork >/dev/null 2>&1 || true
+        return 0
+    fi
+    if steam_running; then
+        if command -v steamos-add-to-steam >/dev/null 2>&1 && desktop=$(desktop_file); then
+            say "Adding to Steam..."
+            steamos-add-to-steam "$desktop"
+            install_artwork
+        else
+            warn "Steam is running: close Steam and run this script again,"
+            warn "or add it manually: Steam > Add a Game > Add a Non-Steam Game > Deck Video Player."
+        fi
+    else
+        say "Adding to Steam..."
+        python3 "$here/steam_shortcut.py" add
+    fi
+}
+
+case "${1:-}" in
+    --artwork)
+        python3 "$here/steam_shortcut.py" artwork
+        exit 0
+        ;;
+    --uninstall)
+        if steam_running; then
+            warn "Close Steam first so the shortcut can be removed."
+        else
+            python3 "$here/steam_shortcut.py" remove || true
+        fi
+        flatpak uninstall --user -y "$APP_ID" || true
+        say "Uninstalled. Your settings remain in $config_dir"
+        exit 0
+        ;;
+esac
+
+bundle=${1:-"$root/dist/DeckVideoPlayer.flatpak"}
+if [ ! -f "$bundle" ]; then
+    echo "Flatpak bundle not found: $bundle" >&2
+    echo "Download DeckVideoPlayer.flatpak or build it with scripts/build-flatpak.sh" >&2
+    exit 1
+fi
+
+say "Setting up Flathub (user installation)..."
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+say "Installing Deck Video Player..."
+flatpak install --user -y --reinstall "$bundle"
+
+say "Installing the gamescope Vulkan layer (needed for HDR in game mode)..."
+flatpak install --user -y --noninteractive flathub "org.freedesktop.Platform.VulkanLayer.gamescope//$RUNTIME_BRANCH" \
+    || warn "Could not install the gamescope layer; HDR videos will be tone-mapped to SDR."
+
+if [ ! -f "$config_dir/config.ini" ]; then
+    mkdir -p "$config_dir"
+    flatpak run --command=cat "$APP_ID" /app/share/deckvideoplayer/config.ini > "$config_dir/config.ini"
+    say "Created $config_dir/config.ini (set your video folders there)."
+fi
+
+add_to_steam
+
+cat <<EOF
+
+Done! Return to Gaming Mode and launch "Deck Video Player" from your library
+(Non-Steam section).
+
+Tips:
+  * Edit $config_dir/config.ini to set your video folders.
+  * For HDR, enable HDR in Settings > Display (Steam Deck OLED / HDR TVs).
+  * On an external 4K screen, set the game's Properties > Game Resolution to
+    "Native" so the app renders at full resolution.
+EOF

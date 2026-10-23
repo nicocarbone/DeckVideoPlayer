@@ -1,0 +1,214 @@
+id: io.github.nicocarbone.DeckVideoPlayer
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: deckvideoplayer
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0:ro
+  # GPU, VA-API and game controllers (SDL reads /dev/input and /dev/hidraw).
+  - --device=all
+  # gamescope (SteamOS game mode): the gamescope WSI Vulkan layer talks to
+  # this socket to give mpv HDR10 swapchains.
+  - --filesystem=xdg-run/gamescope-0:ro
+  # Video library: home folder, microSD card / USB drives, other mounts.
+  - --filesystem=home:ro
+  - --filesystem=/run/media:ro
+  - --filesystem=/media:ro
+  - --filesystem=/mnt:ro
+  # App settings live in ~/.config/deckvideoplayer so they are easy to edit.
+  - --filesystem=xdg-config/deckvideoplayer:create
+  - --env=LC_NUMERIC=C
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - /share/doc
+  - '*.la'
+  - '*.a'
+
+modules:
+  - name: luajit
+    no-autogen: true
+    make-args:
+      - BUILDMODE=dynamic
+      - PREFIX=${FLATPAK_DEST}
+    make-install-args:
+      - PREFIX=${FLATPAK_DEST}
+    cleanup:
+      - /bin
+    sources:
+      - type: git
+        url: https://github.com/openresty/luajit2.git
+        tag: v2.1-20260724
+        commit: 982cd8323eafd8604a9e5f2a916aa50b9f67d9ed
+
+  - name: libXpresent
+    buildsystem: autotools
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/xorg/lib/libxpresent.git
+        tag: libXpresent-1.0.2
+        commit: 4d92149372461bf575e8a09b1064a2884c38c3aa
+
+  # Subtitle encoding detection (non-UTF-8 .srt files).
+  - name: uchardet
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_STATIC=0
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    cleanup:
+      - /bin
+    sources:
+      - type: archive
+        url: https://www.freedesktop.org/software/uchardet/releases/uchardet-0.0.8.tar.xz
+        sha256: e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0
+
+  - name: libass
+    config-opts:
+      - --disable-static
+      - --enable-asm
+      - --enable-harfbuzz
+      - --enable-fontconfig
+    sources:
+      - type: git
+        url: https://github.com/libass/libass.git
+        tag: 0.17.5
+        commit: 4a05d8127f525943ebf45fdc6497c9e665947f0d
+
+  - name: zimg
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        archive-type: tar
+        url: https://api.github.com/repos/sekrit-twc/zimg/tarball/release-3.0.6
+        sha256: 15140e491c4ce9db5f02a038d8a1eb53e9151b55eeed06a2899425a6ebfef367
+
+  # FFmpeg trimmed to what a player needs: every decoder/demuxer, hardware
+  # decoding through VA-API and Vulkan, no encoders besides screenshot ones.
+  - name: ffmpeg
+    config-opts:
+      - --disable-debug
+      - --disable-doc
+      - --disable-static
+      - --disable-programs
+      - --enable-shared
+      - --enable-gpl
+      - --enable-version3
+      - --enable-gnutls
+      - --enable-libdav1d
+      - --enable-libxml2
+      - --enable-libdrm
+      - --enable-vaapi
+      - --enable-vulkan
+      - --disable-encoders
+      - --enable-encoder=png,mjpeg
+    cleanup:
+      - /share/ffmpeg
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n9.0.1
+        commit: bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=enabled
+      - -Dshaderc=enabled
+      - -Ddemos=false
+      - -Dtests=false
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dbuild-date=false
+      - -Dwerror=false
+      - -Dcplayer=true
+      - -Dlibmpv=false
+      - -Dlua=luajit
+      - -Djavascript=disabled
+      - -Dsdl2-gamepad=enabled
+      - -Dsdl2-audio=disabled
+      - -Dsdl2-video=disabled
+      - -Dvulkan=enabled
+      - -Dvaapi=enabled
+      - -Dvaapi-x11=enabled
+      - -Dvaapi-wayland=enabled
+      - -Dx11=enabled
+      - -Dwayland=enabled
+      - -Ddmabuf-wayland=enabled
+      - -Dpipewire=enabled
+      - -Dpulse=enabled
+      - -Dalsa=enabled
+      - -Duchardet=enabled
+      - -Dzimg=enabled
+      - -Dlcms2=enabled
+      - -Dlibarchive=enabled
+      - -Diconv=enabled
+      - -Dzlib=enabled
+      - -Djpeg=enabled
+      - -Drubberband=disabled
+      - -Dvapoursynth=disabled
+      - -Dlibbluray=disabled
+      - -Ddvdnav=disabled
+      - -Dcdda=disabled
+      - -Ddvbin=disabled
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+    cleanup:
+      - /share/applications
+      - /share/icons
+      - /share/bash-completion
+      - /share/zsh
+      - /share/fish
+      - /etc/mpv
+    sources:
+      - type: git
+        url: https://github.com/mpv-player/mpv.git
+        tag: v0.41.0
+        commit: 41f6a645068483470267271e1d09966ca3b9f413
+
+  # UI font (SIL Open Font License).
+  - name: inter-font
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 -t ${FLATPAK_DEST}/share/fonts/inter extras/ttf/Inter-Regular.ttf extras/ttf/Inter-Bold.ttf
+      - install -Dm644 LICENSE.txt ${FLATPAK_DEST}/share/licenses/inter/LICENSE.txt
+    sources:
+      - type: archive
+        url: https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+        sha256: 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e
+        strip-components: 0
+
+  - name: deckvideoplayer
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 app/bin/deckvideoplayer ${FLATPAK_DEST}/bin/deckvideoplayer
+      - mkdir -p ${FLATPAK_DEST}/share/deckvideoplayer
+      - cp -r app/share/deckvideoplayer/. ${FLATPAK_DEST}/share/deckvideoplayer/
+      - install -Dm644 packaging/flatpak/${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 packaging/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      - install -Dm644 packaging/icons/${FLATPAK_ID}.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      - install -Dm644 packaging/icons/${FLATPAK_ID}-256.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .dev
+          - .flatpak-builder
+          - build-dir
+          - dist
+          - repo

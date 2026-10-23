@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Deck Video Player
+GenericName=Video Player
+Comment=Controller-friendly HDR video player for Steam Deck and SteamOS
+Exec=deckvideoplayer %F
+Icon=io.github.nicocarbone.DeckVideoPlayer
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=video;movie;mpv;steam deck;hdr;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/mp2t;video/x-m4v;
+StartupWMClass=deckvideoplayer
