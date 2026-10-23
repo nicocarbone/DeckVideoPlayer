@@ -6,6 +6,14 @@ A lightweight, controller-driven video player for the **Steam Deck** and
 controls, menus) is drawn by Lua scripts on mpv's own on-screen display, so
 there is a single process and nothing between the video and the screen.
 
+> [!WARNING]
+> **Beta software.** Deck Video Player is, at best, beta quality. It has
+> only been tested on a **Steam Deck OLED** in SteamOS game mode; the Deck
+> LCD, other handhelds, DIY Steam Machines and desktop Linux are untested.
+> Expect bugs, and please [report them](https://github.com/nicocarbone/DeckVideoPlayer/issues).
+> The installer edits Steam's `shortcuts.vdf` (it keeps a `.bak` copy).
+> Provided **without any warranty**, as described in the GPL (`LICENSE`).
+
 - Plays essentially every format (FFmpeg), with **hardware decoding** through
   VA-API on the Deck's AMD APU (H.264, HEVC 8/10-bit, VP9, AV1).
 - **Real HDR** in game mode: HDR10/HLG videos go to gamescope as HDR10
@@ -109,6 +117,7 @@ Our own caveats:
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, unit/headless/Flatpak/on-device testing, building, releasing, recipes |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Planned releases (v0.2 audio/subtitles, v0.3 Plex) and guiding rules |
 | [AGENTS.md](AGENTS.md) | Quick orientation for AI agents and new contributors |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licences of bundled components, source availability, trademarks |
 
 ## Install on SteamOS
 
@@ -263,9 +272,28 @@ touch input.
 - Whether the Deck dims the screen during long videos in game mode
   (gamescope has no idle-inhibit protocol) still needs checking.
 
+## Support the project
+
+Deck Video Player is free and will stay free. If it is useful to you and
+you'd like to say thanks:
+
+- **[Ko-fi](https://ko-fi.com/nicocarbone)**: a quick one-off tip by card
+  or PayPal, no account needed.
+- **[GitHub Sponsors](https://github.com/sponsors/nicocarbone)**: if you
+  already use GitHub, one-off or monthly.
+
+Bug reports and testing on other devices help just as much.
+
 ## License
 
-GPL-2.0-or-later (same as mpv). The bundled Inter font is under the SIL Open
-Font License. The HRTF data used for headphone surround (MIT KEMAR, Gardner
-and Martin 1995) has no usage restrictions; see
-`app/share/deckvideoplayer/hrtf/README.md`.
+© 2026 nicocarbone. Licensed under the **GNU General Public License v2.0
+or later** (`LICENSE`), the same licence as mpv. The Flatpak bundle also
+contains third-party software (mpv, FFmpeg, libplacebo, libass, LuaJIT, the
+Inter font, …), and because FFmpeg is built as GPL-3.0-or-later the bundle
+as a whole is distributed under GPL-3.0-or-later terms. Every release
+includes the complete corresponding source
+(`DeckVideoPlayer-<version>-sources.tar.gz`). Details and every component's
+licence: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Steam, Steam Deck and SteamOS are trademarks of Valve Corporation. This
+project is not affiliated with or endorsed by Valve.

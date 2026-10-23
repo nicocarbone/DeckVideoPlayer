@@ -11,6 +11,9 @@ M.REPO = "github.com/nicocarbone/DeckVideoPlayer"
 M.LICENSE = "GPL-2.0-or-later"
 M.DEVELOPER = "nicocarbone"
 M.COPYRIGHT = "© 2026 nicocarbone"
+M.STATUS = "Beta · tested on Steam Deck OLED"
+M.TIP = "ko-fi.com/nicocarbone"
+M.SPONSOR = "github.com/sponsors/nicocarbone"
 
 -- Pure: parses the build-info file written by scripts/build-info.sh.
 function M.parse_build_info(text)
@@ -55,12 +58,16 @@ function M.items(ctx)
     local function header(label) return {label = label, header = true} end
     return {
         row("Version", version),
+        row("Status", M.STATUS),
         row("Build", M.build_text(info)),
         row("Developer", M.DEVELOPER),
         row("Source code", M.REPO),
         row("License", M.LICENSE),
         {label = M.COPYRIGHT},
         {label = "Free software, provided without any warranty"},
+        header("Support the project"),
+        row("Tip (card/PayPal)", M.TIP),
+        row("GitHub Sponsors", M.SPONSOR),
         header("System"),
         row("Player", runtime()),
         row("Device", DEVICES[ctx.display.device] or ctx.display.device),

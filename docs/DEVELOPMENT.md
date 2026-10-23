@@ -222,9 +222,11 @@ Manifest maintenance:
 `.github/workflows/build.yml`:
 - `tests`: installs mpv on Ubuntu and runs `tests/run.sh`.
 - `flatpak`: builds the bundle in `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08`.
-- `release` (tags `v*`): attaches `DeckVideoPlayer.flatpak` and
-  `DeckVideoPlayer-<tag>.tar.gz` (bundle + scripts + artwork + README) to a
-  GitHub release. Users install from the tarball.
+- `release` (tags `v*`): attaches `DeckVideoPlayer.flatpak`,
+  `DeckVideoPlayer-<tag>.tar.gz` (bundle + scripts + artwork + README) and
+  `DeckVideoPlayer-<tag>-sources.tar.gz` (complete corresponding source,
+  required by the GPL; `scripts/make-source-archive.py`, D36) to a GitHub
+  release. Users install from the installer tarball.
 
 The About panel shows the build date and commit automatically
 (`scripts/build-info.sh`, D34); a bundle built with uncommitted changes

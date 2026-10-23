@@ -1,5 +1,9 @@
 # Installation, usage and troubleshooting
 
+> **Beta software**, tested only on a Steam Deck OLED so far. See the
+> warning in the [README](../README.md); please report problems on the
+> [issue tracker](https://github.com/nicocarbone/DeckVideoPlayer/issues).
+
 ## Requirements
 
 - SteamOS 3.x (Steam Deck LCD/OLED) or any Linux with Flatpak, gamescope and

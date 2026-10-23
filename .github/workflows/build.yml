@@ -48,6 +48,11 @@ jobs:
           cp -r packaging/steam DeckVideoPlayer/packaging/
           cp README.md DeckVideoPlayer/
           tar czf DeckVideoPlayer-${GITHUB_REF_NAME}.tar.gz DeckVideoPlayer
+      # GPL: publish the complete corresponding source of the bundle (D36).
+      - name: Corresponding source archive
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y python3-yaml
+          scripts/make-source-archive.py DeckVideoPlayer-${GITHUB_REF_NAME}-sources.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
           files: |

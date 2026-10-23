@@ -81,6 +81,8 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   Deck: checklist items 11–12 (surround listening, real download).
 - The repo is meant to become public: never commit API keys, tokens or
   passwords. OpenSubtitles keys are per user, in their `config.ini` (D29).
+- Adding or upgrading a Flatpak module: update `THIRD_PARTY_NOTICES.md`;
+  `scripts/make-source-archive.py` picks the new pins up by itself (D36).
 - Planned: see `docs/ROADMAP.md` (v0.3 Plex; later Jellyfin, SMB/NFS,
   thumbnails, touch input).
 - Network code must stay asynchronous (`command_native_async` + curl) and

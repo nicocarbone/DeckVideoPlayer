@@ -526,3 +526,33 @@ reproduced) before fixing:
 - **Release metadata (3.1):** 0.2.0 `<release>` and features added to the
   metainfo (plus homepage/bugtracker URLs). 3.2 (ROADMAP/AGENTS status)
   is done in the release commit.
+
+## D36. Going public: GPL source, notices, beta disclaimer, funding
+
+- **Corresponding source:** the release Flatpak contains GPL binaries
+  (mpv; FFmpeg built `--enable-gpl --enable-version3`, i.e.
+  GPL-3.0-or-later, which makes the bundle as a whole GPL-3.0-or-later).
+  Pointing at upstream repositories is not enough for GPLv2 §3 / GPLv3 §6,
+  so every release carries `DeckVideoPlayer-<tag>-sources.tar.gz`, made by
+  `scripts/make-source-archive.py` from the manifest: each git source at
+  its pinned commit with submodules, each archive checksum-verified, the
+  app's own `git archive`, the manifest and a `SOURCES.md` index (~70 MB).
+  CI builds it in the release job. The runtime and the gamescope layer come
+  from Flathub and are not ours to provide.
+- **Notices:** `THIRD_PARTY_NOTICES.md` lists every bundled component and
+  its licence, the files vendored in the repo (HRTF data, gamescope
+  protocol XML) and the trademark statement. flatpak-builder already
+  installs each module's licence files in
+  `/app/share/licenses/<app-id>/<module>/`.
+- **Disclaimer:** beta, tested only on a Steam Deck OLED, no warranty: at
+  the top of the README and INSTALL, in the About panel ("Status") and in
+  the metainfo description.
+- **Funding:** `.github/FUNDING.yml` (GitHub Sponsors + Ko-fi), a "Support
+  the project" README section, About rows and a metainfo donation URL.
+  GitHub Sponsors needs the owner's approved Sponsors profile.
+- **Checked and fine:** no secrets anywhere in the git history; Steam
+  artwork is original (app name and generic shapes, no Valve marks); the
+  only third-party files in the repo are the HRTF data (no restrictions)
+  and gamescope's MIT protocol XML (notice kept). Commit metadata carries
+  the owner's name and e-mail; left as is (rewriting published history
+  would be destructive).

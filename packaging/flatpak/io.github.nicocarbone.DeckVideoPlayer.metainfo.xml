@@ -14,6 +14,9 @@
       mode: browse your video folders and control playback entirely with the
       Steam Deck controls.
     </p>
+    <p>
+      Beta software: so far it has only been tested on the Steam Deck OLED.
+    </p>
     <ul>
       <li>Plays virtually every video format, with hardware decoding</li>
       <li>Real HDR output under gamescope (Steam Deck OLED, HDR TVs)</li>
@@ -31,6 +34,7 @@
   </supports>
   <url type="homepage">https://github.com/nicocarbone/DeckVideoPlayer</url>
   <url type="bugtracker">https://github.com/nicocarbone/DeckVideoPlayer/issues</url>
+  <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
     <release version="0.2.0" date="2026-10-23">

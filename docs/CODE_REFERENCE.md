@@ -463,6 +463,7 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
 | `helper/build.sh [OUTDIR]` | Builds the refresh-rate helper (D31). |
+| `scripts/make-source-archive.py OUT [--manifest M]` | GPL corresponding-source archive of a release from the manifest's pinned sources (D36). |
 | `scripts/build-info.sh OUTFILE` | Writes `date=` and `commit=` for the About panel; run by the Flatpak manifest (D34). |
 | `tools/mock-opensubtitles.py [PORT]` | Fake OpenSubtitles API for tests (D30); used by `OSMOCK=1 tools/headless-run.sh`. |
 | `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
