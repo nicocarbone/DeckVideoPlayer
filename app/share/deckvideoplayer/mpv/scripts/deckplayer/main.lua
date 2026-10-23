@@ -87,6 +87,9 @@ local state = {
     pending_start = {},   -- path -> start position chosen in the browser
     current_path = nil,
     last_played = nil,
+    from_ui = false,      -- set once the library has started any playback
+    external = false,     -- launched with files (CLI / "Open with"): quit when done
+    resumed_at = nil,     -- position restored automatically, announced on load
 }
 
 local toast_layer = ui.layer(60)
@@ -120,6 +123,7 @@ end
 
 local function play(list, start)
     if #list == 0 then return end
+    state.from_ui = true
     state.pending_start = {[list[1]] = start or 0}
     mp.commandv("loadfile", list[1], "replace")
     for i = 2, #list do mp.commandv("loadfile", list[i], "append") end
@@ -221,8 +225,10 @@ mp.add_hook("on_load", 50, function()
     state.pending_start[path] = nil
     local entry = resume:get(path)
     if start == nil and cfg.playback.resume then
-        -- Auto-advanced playlist entries continue where they were left.
+        -- Auto-advanced playlist entries and files opened from outside the
+        -- library continue where they were left (announced with a toast).
         start = resume:position(path)
+        state.resumed_at = start
     end
     if start and start > 0 then
         mp.set_property("file-local-options/start", tostring(start))
@@ -241,6 +247,9 @@ mp.add_hook("on_unload", 50, function()
 end)
 
 mp.register_event("start-file", function()
+    -- Playback that the library didn't start came from the command line or
+    -- a file manager: behave like a plain player and quit when it ends.
+    if not state.from_ui then state.external = true end
     state.screen = "player"
     browser:hide()
     menu:close_all()
@@ -252,7 +261,11 @@ mp.register_event("file-loaded", function()
     state.last_played = state.current_path
     local fps = mp.get_property_number("container-fps")
     player.refresh_hz = display:match(fps)
-    player:render()
+    player:on_file_loaded()
+    if state.resumed_at then
+        toast("Resumed at " .. util.format_time(state.resumed_at))
+        state.resumed_at = nil
+    end
 end)
 
 mp.register_event("end-file", function(ev)
@@ -273,6 +286,10 @@ end)
 
 mp.observe_property("idle-active", "bool", function(_, idle)
     if not idle or state.quitting then return end
+    if state.external then
+        quit()
+        return
+    end
     state.screen = "browser"
     menu:close_all()
     player:stop_screen()

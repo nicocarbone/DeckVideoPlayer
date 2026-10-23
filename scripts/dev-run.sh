@@ -33,7 +33,9 @@ if [ ! -f "$DVP_CONFIG_DIR/config.ini" ]; then
 fi
 if [ -n "$media" ]; then
     # Point the dev config at the requested folder.
-    sed -i "s|^folder = .*|folder = $media|" "$DVP_CONFIG_DIR/config.ini"
+    # Escape characters special in a sed replacement (\, &, and the | delimiter).
+    media_esc=$(printf '%s' "$media" | sed 's/[\\&|]/\\&/g')
+    sed -i "s|^folder = .*|folder = $media_esc|" "$DVP_CONFIG_DIR/config.ini"
 fi
 
 if [ "$window" = 1 ]; then

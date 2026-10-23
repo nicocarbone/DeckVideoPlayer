@@ -36,7 +36,8 @@ Runs inside the Flatpak (`/app/bin`) and from the source tree.
    - `--script-opts-append=deckplayer-config_file=…`, `deckplayer-data_dir=…`
      (read by `main.lua` through `mp.options`)
    - `--gpu-context=x11vk` + `ENABLE_GAMESCOPE_WSI=1` under gamescope (D5)
-   - `--input-gamepad=yes` if `mpv --list-options` has it (D17)
+   - `--input-gamepad=yes` inside the Flatpak (`/.flatpak-info`), otherwise
+     only if `mpv --list-options` has it (D17, D26)
    - `--include=$CONFIG_DIR/mpv.conf` if the user created one
    - then any arguments passed to the launcher (files, extra mpv options)
 
@@ -100,15 +101,21 @@ Responsibilities:
 - Input dispatch (see ARCHITECTURE §4).
 - Lifecycle hooks:
   - `on_load` hook: start position from `state.pending_start[path]` (set by
-    `play`), else the resume position for auto-advanced playlist entries;
-    restores `aid`/`sid` from the resume entry (as `file-local-options`).
+    `play`), else the resume position (auto-advanced playlist entries and
+    external launches; remembered in `state.resumed_at` and announced with a
+    toast on `file-loaded`); restores `aid`/`sid` from the resume entry (as
+    `file-local-options`).
   - `on_unload` hook: `save_progress()` + flush. Properties are still
     readable here, for every end reason.
-  - `start-file`: switch to the player screen.
-  - `file-loaded`: remember the path, refresh-rate match on `container-fps`.
+  - `start-file`: switch to the player screen. If the library never started
+    playback (`state.from_ui` false), the session is external
+    (`state.external`, D21).
+  - `file-loaded`: remember the path, refresh-rate match on `container-fps`,
+    `player:on_file_loaded()`, "Resumed at" toast.
   - `end-file` with `reason == "error"`: toast.
-  - `idle-active` true: back to the browser, restore the refresh rate,
-    move the cursor to the last played file.
+  - `idle-active` true: external session → quit; otherwise back to the
+    browser, restore the refresh rate, move the cursor to the last played
+    file.
   - `pause`: save on pause; tell the player (overlay stays while paused).
   - `osd-dimensions`: re-render everything (resolution changes, e.g. dock
     or undock).
@@ -222,7 +229,8 @@ entries). Thresholds are `M.MIN_POSITION`, `M.END_MARGIN_MIN` and
 Language names (ISO 639-1/2), codec display names (DTS profile aware),
 `track_label(t)` ("English · Commentary"), `track_detail(t)` ("TrueHD · 7.1 ·
 Default"), `tracks(kind)`, `selected_track(kind)`,
-`hdr_state()` → `source, output_hdr, video_params, target_params` (source:
+`hdr_state(video_track?)` (pass a cached video track to avoid re-reading
+`track-list`) → `source, output_hdr, video_params, target_params` (source:
 `HDR10`/`HLG`/`Dolby Vision`/`SDR`; output from `video-target-params`), and
 `resolution_badge(w, h)`.
 
@@ -260,14 +268,19 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `selected`, `scroll`, `cursor[path]` (remembered selection per folder),
 `sort`.
 
+- `refresh_sources()`: re-reads `library.sources()`; clears `is_root` on the
+  top folder when the setup is no longer single-source (D23). Called by
+  `show()`, `reload()` and when listing the root.
 - `load()`: root (sources list) or folder listing. With exactly one source
   the root is skipped and that folder becomes the top level (`is_root`).
+- `reload()`: refresh sources + listing, keeping the cursor. `at_start()`:
+  true at the top level.
 - Navigation: `enter`, `go_back` (top level → quit dialog), `select_path`.
 - Playback: `open_file(index, from_start)` shows the resume dialog when
   there is a position; `playlist_from(index)` returns the folder's files
   from the chosen one (if `autoplay_next`).
-- `open_menu()`: sort, reload, go to library start, mark (un)watched,
-  controls, quit.
+- `open_menu()`: sort, reload, go to library start (whenever not
+  `at_start()`), mark (un)watched, controls, quit.
 - `render()`: background, header (title, breadcrumb, counts), rows (icon,
   label, status: chevron / ✓ / progress bar + time), scrollbar, empty
   states, footer hints that depend on the selected entry.
@@ -276,7 +289,13 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 
 ## `dvp/player.lua`: playback screen
 
-- Lifecycle: `start()` (on start-file), `stop_screen()`, `show_overlay()`
+- Cached per-file data (D25): `title_text` (set in `start()`),
+  `video_track` (set in `on_file_loaded()`), `chapters` (property
+  observer).
+- Picture mode (D20): `zoom_mode()` derives Fit/Fill/Stretch/Custom from
+  `panscan`/`keepaspect`; `set_zoom()` marks `zoom_touched`; `start()`
+  restores `zoom_defaults` captured at script start.
+- Lifecycle: `start()` (on start-file), `on_file_loaded()`, `stop_screen()`, `show_overlay()`
   (auto-hides after `overlay_timeout`; stays while paused or while a menu is
   open), `hide_overlay()`, `update_timer()` (the 0.5 s timer runs only while
   something is visible).
@@ -316,10 +335,10 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 |---|---|
 | `scripts/build-flatpak.sh [--install]` | Builds with flatpak-builder (or the `org.flatpak.Builder` Flatpak) into `build-dir/` and `repo/`, branch `stable`, then exports `dist/DeckVideoPlayer.flatpak`. Uses `--disable-rofiles-fuse` (needed where FUSE isn't available). |
 | `scripts/install-steamos.sh [BUNDLE] \| --artwork \| --uninstall` | End-user installer for SteamOS (see INSTALL.md). |
-| `scripts/steam_shortcut.py add\|artwork\|remove\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). Never writes while Steam runs. Keeps a `.bak`. |
+| `scripts/steam_shortcut.py add\|artwork\|remove\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
-| `tests/run.sh`, `tests/run.lua` | Unit tests, executed inside mpv (so `mp.*` exists). |
+| `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
 | `.github/workflows/build.yml` | CI: unit tests, Flatpak bundle; on `v*` tags a GitHub release with the bundle and an installer tarball. |

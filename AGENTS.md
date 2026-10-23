@@ -49,18 +49,21 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   be in `mpv.conf` or the launcher.
 - Every config key goes through `SCHEMA` in `config.lua`, the documented
   `config.ini` template and `docs/CONFIGURATION.md`.
-- New pure logic gets unit tests in `tests/run.lua`.
+- New pure logic gets unit tests: Lua in `tests/run.lua`, Python helpers in
+  `tests/test_steam_shortcut.py` (both run by `tests/run.sh`).
 - Keep the controls consistent: if you change a button, update the hint
   bars, `help()` in `main.lua`, README and `docs/DECISIONS.md` D10.
 - Don't touch the user's real `~/.config/deckvideoplayer` or Steam files in
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-22)
+## Current state (2026-10-23)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
   installer + Steam artwork.
+- External audit (`ISSUES.md`, by Gemini) reviewed and resolved on
+  2026-10-23: fixes and declined items are recorded in DECISIONS D20–D26.
 - Verified in headless/nested gamescope on a desktop (HDR10 swapchain
   switch, refresh property, VA-API, SDL gamepad enabled in the Flatpak).
   **Not yet verified on a real Steam Deck**: see the on-device checklist in

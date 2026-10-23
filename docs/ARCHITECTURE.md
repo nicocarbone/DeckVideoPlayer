@@ -79,6 +79,9 @@ window open with no file loaded.
 ```
 
 - `state.screen` in `main.lua` is `"browser"` or `"player"`.
+- Files passed on the command line ("Open with") start playback before the
+  library is ever used: such an *external* session quits when it ends
+  instead of returning to the browser (DECISIONS D21).
 - `start-file` event → player screen; `idle-active == true` → browser.
 - A **menu stack** (`dvp/menu.lua`) can sit on top of either screen; while a
   menu is open it receives all input.

@@ -1,5 +1,11 @@
 #!/bin/sh
-# Run the Lua unit tests with the system mpv (no window, no audio).
+# Run all unit tests:
+#   - Lua modules, inside the system mpv (no window, no audio)
+#   - the Steam shortcut helper, with Python's unittest
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec mpv --no-config --idle=once --vo=null --ao=null --really-quiet \
-    --msg-level=all=error,run=info --script="$here/run.lua"
+status=0
+mpv --no-config --idle=once --vo=null --ao=null --really-quiet \
+    --msg-level=all=error,run=info --script="$here/run.lua" || status=1
+out=$(python3 -m unittest "$here/test_steam_shortcut.py" 2>&1) || status=1
+printf '%s\n' "$out" | tail -n 3
+exit $status

@@ -22,8 +22,20 @@ function M.new(ctx)
     self.overlay_visible = false
     self.info_visible = false
     self.active = false
-    self.zoom = "fit"
     self.refresh_hz = nil
+    -- Per-file data that doesn't change every frame, cached so the 0.5 s
+    -- overlay redraw doesn't re-marshal track/chapter lists from mpv.
+    self.title_text = ""
+    self.video_track = nil
+    self.chapters = {}
+    mp.observe_property("chapter-list", "native", function(_, list) self.chapters = list or {} end)
+    -- Picture mode is per file: remember the user's configured defaults
+    -- (mpv.conf / user mpv.conf) and restore them when a new file starts.
+    self.zoom_defaults = {
+        panscan = mp.get_property_number("panscan", 0),
+        keepaspect = mp.get_property_bool("keepaspect", true),
+    }
+    self.zoom_touched = false
     self.timer = mp.add_periodic_timer(0.5, function() self:tick() end)
     self.timer:kill()
     self.hide_timer = nil
@@ -37,7 +49,21 @@ end
 function M:start()
     self.active = true
     self.refresh_hz = nil
+    self.video_track = nil
+    local name = util.basename(mp.get_property("path") or "")
+    self.title_text = library.display_name(name, false, self.cfg.interface.clean_names)
+    if self.zoom_touched then
+        mp.set_property_number("panscan", self.zoom_defaults.panscan)
+        mp.set_property_bool("keepaspect", self.zoom_defaults.keepaspect)
+        self.zoom_touched = false
+    end
     self:show_overlay()
+end
+
+-- Called by main.lua once the file's tracks are known.
+function M:on_file_loaded()
+    self.video_track = media.selected_track("video")
+    self:render()
 end
 
 function M:stop_screen()
@@ -108,7 +134,7 @@ function M:chapter(dir)
         if dir < 0 then
             -- Like most players: jump to the start of the current chapter
             -- first, unless we are already near it.
-            local list = mp.get_property_native("chapter-list") or {}
+            local list = self.chapters
             local pos = mp.get_property_number("time-pos", 0)
             local ch = list[cur + 1]
             if ch and pos - ch.time > 3 then
@@ -235,12 +261,22 @@ function M:open_subtitle_menu()
 end
 
 local ZOOM_MODES = {"fit", "fill", "stretch"}
-local ZOOM_LABELS = {fit = "Fit", fill = "Fill (crop)", stretch = "Stretch"}
+local ZOOM_LABELS = {fit = "Fit", fill = "Fill (crop)", stretch = "Stretch", custom = "Custom"}
+
+-- Current picture mode, read from mpv so it is always truthful (a user
+-- mpv.conf may set its own panscan).
+function M:zoom_mode()
+    if not mp.get_property_bool("keepaspect", true) then return "stretch" end
+    local panscan = mp.get_property_number("panscan", 0)
+    if panscan >= 0.99 then return "fill" end
+    if panscan <= 0.01 then return "fit" end
+    return "custom"
+end
 
 function M:set_zoom(mode)
-    self.zoom = mode
     mp.set_property_number("panscan", mode == "fill" and 1.0 or 0.0)
     mp.set_property_bool("keepaspect", mode ~= "stretch")
+    self.zoom_touched = true
 end
 
 local function cycle(list, current, dir)
@@ -287,8 +323,8 @@ function M:main_menu_items()
             mp.set_property_number("speed", util.clamp(prop_num("speed", 1) + d * 0.25, 0.25, 3))
         end}
     items[#items + 1] = {label = "Picture",
-        value = function() return ZOOM_LABELS[self.zoom] end,
-        adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self.zoom, d)) end}
+        value = function() return ZOOM_LABELS[self:zoom_mode()] end,
+        adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self:zoom_mode(), d)) end}
     local pl_pos = mp.get_property_number("playlist-pos", 0)
     local pl_count = mp.get_property_number("playlist-count", 1)
     if pl_pos + 1 < pl_count then
@@ -315,9 +351,7 @@ end
 ---------------------------------------------------------------------------
 
 function M:title()
-    local path = mp.get_property("path") or ""
-    local name = util.basename(path)
-    return library.display_name(name, false, self.cfg.interface.clean_names)
+    return self.title_text
 end
 
 function M:badges()
@@ -325,7 +359,7 @@ function M:badges()
     local vp = mp.get_property_native("video-params") or {}
     local res = media.resolution_badge(vp.w, vp.h)
     if res then out[#out + 1] = {text = res} end
-    local source, output_hdr = media.hdr_state()
+    local source, output_hdr = media.hdr_state(self.video_track)
     if source and source ~= "SDR" then
         if output_hdr then
             out[#out + 1] = {text = source, color = ui.theme.warn}
@@ -397,7 +431,7 @@ function M:render()
         a:rect(bx0, bar_y - 4, math.max(8, bw * frac), 8, {radius = 4, color = t.accent})
     end
     if duration > 0 then
-        for _, ch in ipairs(mp.get_property_native("chapter-list") or {}) do
+        for _, ch in ipairs(self.chapters) do
             if ch.time and ch.time > 0 and ch.time < duration then
                 a:rect(bx0 + bw * ch.time / duration - 1.5, bar_y - 4, 3, 8, {color = t.black, opacity = 0.6})
             end
@@ -414,7 +448,7 @@ function M:render()
         a:text(bx1, ty, "-" .. util.format_time(remaining, force_h), {size = 24, align = 6, outline = 1})
         local ends = os.date("%H:%M", os.time() + math.floor(remaining))
         local chapter = ""
-        local list = mp.get_property_native("chapter-list") or {}
+        local list = self.chapters
         local cur = mp.get_property_number("chapter", -1)
         if list[cur + 1] and list[cur + 1].title and list[cur + 1].title ~= "" then
             chapter = list[cur + 1].title .. "  ·  "
@@ -449,7 +483,7 @@ function M:info_lines()
     local lines = {}
     local function add(k, v) if v and v ~= "" then lines[#lines + 1] = {k, v} end end
     local vp = mp.get_property_native("video-params") or {}
-    local vt = media.selected_track("video")
+    local vt = self.video_track
     local fps = mp.get_property_number("container-fps")
     if vt then
         local v = media.codec(vt.codec)
@@ -459,7 +493,7 @@ function M:info_lines()
     end
     local hw = mp.get_property("hwdec-current")
     add("Decoder", (hw and hw ~= "" and hw ~= "no") and ("Hardware (" .. hw .. ")") or "Software")
-    local source, output_hdr, _, target = media.hdr_state()
+    local source, output_hdr, _, target = media.hdr_state(self.video_track)
     if source then
         local s = source
         if vp.primaries then s = s .. " · " .. vp.primaries end

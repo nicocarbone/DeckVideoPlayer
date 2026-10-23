@@ -34,6 +34,13 @@ ARTWORK = {
 
 
 # --- binary VDF ------------------------------------------------------------
+#
+# Type bytes: 0x00 map, 0x01 string, 0x02 int32, 0x07 uint64, 0x08 end of map.
+# Every value read is written back with the same type (round-trip safe).
+
+
+class UInt64(int):
+    """Marks a value read as VDF type 0x07 so it is written back as such."""
 
 def _read_cstr(data, i):
     end = data.index(b"\x00", i)
@@ -56,7 +63,7 @@ def vdf_load(data, i=0):
             out[key] = struct.unpack_from("<i", data, i)[0]
             i += 4
         elif t == 0x07:
-            out[key] = struct.unpack_from("<Q", data, i)[0]
+            out[key] = UInt64(struct.unpack_from("<Q", data, i)[0])
             i += 8
         else:
             raise ValueError("unsupported VDF type 0x%02x at %d" % (t, i))
@@ -71,6 +78,8 @@ def vdf_dump(obj):
             out += b"\x00" + k + vdf_dump(value)
         elif isinstance(value, str):
             out += b"\x01" + k + value.encode("utf-8") + b"\x00"
+        elif isinstance(value, UInt64):
+            out += b"\x07" + k + struct.pack("<Q", value)
         elif isinstance(value, int):
             out += b"\x02" + k + struct.pack("<i", value)
         else:
@@ -117,6 +126,23 @@ def load_shortcuts(config_dir):
         data, _ = vdf_load(f.read())
     data.setdefault("shortcuts", {})
     return path, data
+
+
+def save_shortcuts(path, data):
+    """Serialise first, then replace the file atomically, keeping a backup.
+
+    Serialising before touching the file means an error can never leave
+    shortcuts.vdf truncated (it holds all of the user's non-Steam games).
+    """
+    payload = vdf_dump(data)
+    if os.path.exists(path):
+        shutil.copyfile(path, path + ".bak")
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def find_ours(shortcuts):
@@ -181,10 +207,7 @@ def cmd_add(_):
             data["shortcuts"][key] = sc
         sc["icon"] = install_artwork(config_dir, sc["appid"])
         os.makedirs(config_dir, exist_ok=True)
-        if os.path.exists(path):
-            shutil.copyfile(path, path + ".bak")
-        with open(path, "wb") as f:
-            f.write(vdf_dump(data))
+        save_shortcuts(path, data)
         print("Added to %s (app id %d)" % (path, unsigned(sc["appid"])))
 
 
@@ -212,8 +235,7 @@ def cmd_remove(_):
         del data["shortcuts"][key]
         # Keep keys contiguous ("0", "1", ...), as Steam writes them.
         data["shortcuts"] = {str(i): v for i, v in enumerate(data["shortcuts"].values())}
-        with open(path, "wb") as f:
-            f.write(vdf_dump(data))
+        save_shortcuts(path, data)
         for suffix in ARTWORK:
             p = os.path.join(config_dir, "grid", "%d%s" % (unsigned(sc.get("appid", 0)), suffix))
             if os.path.exists(p):

@@ -77,7 +77,14 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     sock = connect(sys.argv[1])
-    for step in sys.argv[2:]:
+    try:
+        run_steps(sock, sys.argv[2:])
+    except (BrokenPipeError, ConnectionResetError):
+        print("mpv exited (IPC connection closed)", file=sys.stderr)
+
+
+def run_steps(sock, steps):
+    for step in steps:
         kind, _, value = step.partition(":")
         reply = None
         if kind == "key":

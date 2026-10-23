@@ -198,3 +198,73 @@ the one tapped.
   shortcuts Steam creates, we read the id back from `shortcuts.vdf`.
 - **Note:** the shortcut's LaunchOptions don't pin a Flatpak branch, so both
   `stable` and `master` installs work.
+
+## D20. Picture mode is per file
+
+- **Decision:** Fit / Fill / Stretch from the playback menu applies to the
+  current file only. When the next file starts, `panscan`/`keepaspect` go
+  back to the values that were in effect at startup (the app defaults, or
+  a user `mpv.conf`). The menu label is derived from mpv's actual
+  properties (`Custom` for other `panscan` values), so it can't drift.
+- **Why:** a "Fill" chosen for a 2.39:1 film would otherwise crop the next
+  16:9 episode. Source: external audit (ISSUES.md 1.3).
+
+## D21. Files opened from outside the library ("Open with", command line)
+
+- **Decision:** if playback starts without the library starting it, the
+  session is "external": the saved position is resumed automatically and
+  announced with a "Resumed at …" toast, and the app quits when playback
+  stops or the playlist ends, instead of showing the library.
+- **Why:** this matches what a normal desktop player does, and there is no
+  library context to return to. Library playback still asks Resume / Start
+  over. Auto-advanced playlist entries also show the toast.
+  Source: ISSUES.md 1.4.
+
+## D22. Safe `shortcuts.vdf` writes, lossless 64-bit values
+
+- **Decision:** `steam_shortcut.py` serialises the whole file first, then
+  writes a temp file, fsyncs it and `os.replace`s it over the original,
+  keeping `shortcuts.vdf.bak`, for both `add` and `remove`. VDF type `0x07`
+  (uint64) values are read as `UInt64` and written back as `0x07`.
+- **Why:** the previous code opened the file for writing (truncating it)
+  before serialising, so any serialisation error erased all of the user's
+  non-Steam games. Covered by `tests/test_steam_shortcut.py`
+  (byte-identical round trip, failed save leaves the file intact).
+  Source: ISSUES.md 1.2, plus the truncation problem found while reviewing
+  it.
+
+## D23. Library sources are re-read whenever the library is shown
+
+- **Decision:** `browser:refresh_sources()` runs on `show()` (returning
+  from playback), on "Reload library" and at the source list. If a
+  single-source setup gains a second source (SD card inserted), the
+  top-level folder stops being the top (`is_root` cleared), so B goes back
+  to the source list. "Go to library start" is offered whenever the user
+  isn't at the top level. Source: ISSUES.md 1.1.
+
+## D24. Audit suggestions deliberately not adopted
+
+Recorded so they are not re-proposed without new evidence:
+- **Splitting `readdir` into "dirs"/"files" to save `stat()` calls**
+  (ISSUES.md 2.1): mpv's `utils.readdir` with a filter calls `stat()` on
+  every entry itself (`player/lua.c`, `script_readdir`), so this would
+  double the calls. One `stat` per entry is the minimum needed to tell
+  folders from files, and it runs only when a folder is opened.
+- **Keeping a persistent X11 connection for the refresh property**
+  (ISSUES.md 2.3): it is used about twice per file load; a long-lived
+  connection adds failure modes (stale display) for no measurable gain.
+
+## D25. Per-file data cached in the player
+
+- **Decision:** the overlay redraw (every 0.5 s while visible) uses cached
+  per-file data: the title (computed on `start-file`), the video track (on
+  `file-loaded`) and the chapter list (`observe_property`, so it updates
+  only when it changes). `media.hdr_state(video_track)` accepts the cached
+  track. Source: ISSUES.md 2.2.
+
+## D26. Gamepad probe skipped inside the Flatpak
+
+- **Decision:** the launcher skips `mpv --list-options` when
+  `/.flatpak-info` exists (the bundled mpv always has `sdl2-gamepad`).
+- **Why:** saves one extra mpv start (≈25–90 ms) per launch. Source:
+  ISSUES.md 2.4.

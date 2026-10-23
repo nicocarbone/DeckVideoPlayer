@@ -50,10 +50,15 @@ Edit Lua files and restart. There is no build step for the UI.
 ## 4. Unit tests
 
 ```sh
-tests/run.sh        # prints "[run] N checks, 0 failures", exit code 0/1
+tests/run.sh        # "[run] N checks, 0 failures" + "Ran N tests … OK"; exit code 0/1
 ```
 
-`tests/run.lua` runs inside mpv (`--script`), so modules that `require
+Two suites:
+- `tests/test_steam_shortcut.py` (Python `unittest`) covers the Steam helper:
+  byte-identical VDF round trip including uint64 values, idempotent
+  add/remove, and a failed save leaving `shortcuts.vdf` intact. Runs under a
+  temporary fake `HOME`.
+- `tests/run.lua` runs inside mpv (`--script`), so modules that `require
 "mp.utils"` load normally. It covers the pure logic: util (time format,
 UTF-8, natural sort, paths), config parsing (lists, enums, invalid values,
 warnings), refresh-rate selection (OLED discrete list, LCD range, NTSC
@@ -74,7 +79,8 @@ test config in `.dev/headless/`, the library pointing at the test media),
 waits for the IPC socket, runs the steps with `tools/mpv-ipc.py`, quits,
 and prints the relevant log lines (`[deckplayer]`, Lua errors, gamescope
 WSI swapchain colorspace). Variables: `MODE=dev|flatpak`, `W`, `H`,
-`HDR=1`, `DEVICE=deck-oled|deck-lcd|tv`, `MEDIA`, `LOG`, `TIMEOUT`.
+`HDR=1`, `DEVICE=deck-oled|deck-lcd|tv`, `MEDIA`, `LOG`, `TIMEOUT`,
+`KEEP=1` (keep resume data from the previous run).
 
 Step syntax (see `tools/mpv-ipc.py`): `key:DOWN`, `key:ENTER`, `key:BS`,
 `key:x`, `key:y`, `key:m`, `key:i`, `sleep:2`, `get:hwdec-current`,
@@ -110,6 +116,16 @@ DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:ENTER s
 # Resume: play the 5-minute film, skip 2 min, stop, reopen -> dialog
 tools/headless-run.sh -- key:DOWN key:DOWN key:ENTER sleep:1.5 key:PGDWN key:PGDWN \
     sleep:1 key:BS sleep:1 gshot:/tmp/resume-row.png key:ENTER gshot:/tmp/resume-dialog.png
+
+# Picture mode is per file: Fill on one movie, next file is back to Fit
+tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 key:m \
+    key:DOWN key:DOWN key:DOWN key:DOWN key:DOWN key:DOWN key:DOWN key:DOWN key:RIGHT get:panscan \
+    key:BS key:BS sleep:1 key:UP key:ENTER sleep:1.5 get:panscan      # 1.0, then 0.0
+
+# External launch ("Open with"): auto-resume + toast, quits on stop.
+# Run the resume recipe above first, then (KEEP=1 keeps its resume data):
+KEEP=1 tools/headless-run.sh -- "raw:[\"loadfile\",\"$PWD/.dev/test-media/Videos/A Long Film (2023).mkv\"]" \
+    sleep:1.2 shot:/tmp/toast.png get:time-pos key:BS    # then "mpv exited"
 
 # Same tests against the installed Flatpak (LuaJIT, SDL gamepad, bundled font, sandbox)
 MODE=flatpak HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN \

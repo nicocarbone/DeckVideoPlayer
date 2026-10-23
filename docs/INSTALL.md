@@ -93,6 +93,14 @@ See the controls table in the [README](../README.md#controls). Notes:
   beginning*. **X** starts from the beginning directly.
 - Videos after the chosen one in the same folder play automatically
   (`autoplay_next`).
+- **Picture** (Fit / Fill / Stretch) in the playback menu applies to the
+  current video only; the next one starts with your normal setting.
+- **Opening a file from a file manager or the command line** (Desktop Mode
+  "Open with", `flatpak run … file.mkv`) plays it like a normal player: it
+  resumes where you left off ("Resumed at …"), and the app closes when
+  playback ends or you press B.
+- Inserted an SD card or USB drive while the app was open? It appears when
+  you return to the library, or use *Menu → Reload library*.
 - **View** during playback shows the info panel: use it to confirm hardware
   decoding (`Hardware (vaapi)`), HDR (`HDR passthrough`) and the matched
   refresh rate.

@@ -110,10 +110,12 @@ end
 
 -- Describes the HDR state of the current video:
 -- source = "HDR10" | "HLG" | "Dolby Vision" | "SDR" | nil, output_hdr = bool
-function M.hdr_state()
+-- `video_track` may be passed (cached by the caller) to avoid re-reading
+-- the whole track-list.
+function M.hdr_state(video_track)
     local vp = mp.get_property_native("video-params") or {}
     local target = mp.get_property_native("video-target-params") or {}
-    local vt = M.selected_track("video") or {}
+    local vt = video_track or M.selected_track("video") or {}
     local source
     if vt["dolby-vision-profile"] then
         source = "Dolby Vision"

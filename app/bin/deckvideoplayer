@@ -61,9 +61,10 @@ case "${gpu_context:-auto}" in
         ;;
 esac
 
-# Controller input needs an mpv built with SDL2 gamepad support (the Flatpak
-# is); other builds would reject the option.
-if "$MPV" --list-options 2>/dev/null | grep -q -- '--input-gamepad '; then
+# Controller input needs an mpv built with SDL2 gamepad support. The Flatpak's
+# mpv always has it, so skip the probe there (it costs an extra mpv start);
+# other builds would reject the option, hence the check.
+if [ -f /.flatpak-info ] || "$MPV" --list-options 2>/dev/null | grep -q -- '--input-gamepad '; then
     set -- --input-gamepad=yes "$@"
 fi
 

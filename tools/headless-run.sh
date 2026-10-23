@@ -13,6 +13,7 @@
 #   DEVICE=deck-oled   device profile written to the test config
 #   LOG=FILE           where to write the combined log (default: .dev/headless.log)
 #   TIMEOUT=60         hard time limit in seconds
+#   KEEP=1             keep resume data (.dev/headless/data) from the previous run
 #
 # Examples:
 #   tools/headless-run.sh -- gshot:/tmp/library.png
@@ -41,9 +42,12 @@ if [ ! -d "$MEDIA" ]; then
     exit 1
 fi
 
-rm -rf "$CFG" "$SOCK"
+# KEEP=1 keeps resume data from the previous run (to test resume behaviour).
+if [ "${KEEP:-0}" = 1 ]; then rm -rf "$CFG/config" "$SOCK"; else rm -rf "$CFG" "$SOCK"; fi
 mkdir -p "$CFG/config" "$CFG/data" "$(dirname "$LOG")"
-sed -e "s|^folder = .*|folder = $MEDIA|" \
+# Escape characters special in a sed replacement (\, &, and the | delimiter).
+media_esc=$(printf '%s' "$MEDIA" | sed 's/[\\&|]/\\&/g')
+sed -e "s|^folder = .*|folder = $media_esc|" \
     -e "s|^device = .*|device = $DEVICE|" \
     -e "s|^removable_media = .*|removable_media = no|" \
     "$root/app/share/deckvideoplayer/config.ini" > "$CFG/config/config.ini"

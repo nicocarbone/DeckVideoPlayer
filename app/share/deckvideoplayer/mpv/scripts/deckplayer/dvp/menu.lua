@@ -156,7 +156,7 @@ function M:render()
         pw = math.min(500, W * 0.45)
         px, py, ph = W - pw, 0, H
         a:rect(px - 60, 0, pw + 60, H, {color = t.black, opacity = 0.5, blur = 40})
-        a:rect(px, py, pw, ph, {color = t.panel, opacity = 0.94})
+        a:rect(px, py, pw, ph, {color = t.panel, opacity = 0.98})
         list_top = 104
         max_rows = math.floor((H - list_top - 80) / ROW_H)
     end

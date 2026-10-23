@@ -37,14 +37,26 @@ local function loc_key(loc)
     return loc and loc.path or "<root>"
 end
 
+-- Re-reads the configured folders and mounted drives, so an SD card or USB
+-- drive inserted while the app runs shows up. Cheap (reads mountinfo).
+function M:refresh_sources()
+    self.sources = library.sources(self.cfg)
+    local top = self.stack[1]
+    if top and top.is_root and #self.sources ~= 1 then
+        -- No longer single-source: the folder becomes a normal level, so B
+        -- goes back to the source list instead of offering to quit.
+        top.is_root = nil
+    end
+end
+
 -- Rebuilds the entry list for the current location.
 function M:load()
     local loc = self:location()
     self.error = nil
     if not loc then
-        self.sources = library.sources(self.cfg)
+        self:refresh_sources()
         -- With a single source there is no point in showing the root list.
-        if #self.sources == 1 and not self.root_forced then
+        if #self.sources == 1 then
             self.stack = {{path = self.sources[1].path, label = self.sources[1].name, is_root = true}}
             return self:load()
         end
@@ -69,8 +81,23 @@ end
 
 function M:show()
     self.active = true
+    self:refresh_sources()
     self:load()
     self:render()
+end
+
+function M:reload()
+    local cur = self.entries[self.selected]
+    self:refresh_sources()
+    self:load()
+    if cur then self:select_path(cur.path) end
+    self:render()
+end
+
+-- True at the top level (source list, or the only source's folder).
+function M:at_start()
+    local top = self.stack[1]
+    return #self.stack == 0 or (#self.stack == 1 and top.is_root == true)
 end
 
 function M:hide()
@@ -170,11 +197,12 @@ function M:open_menu()
     local items = {
         {label = "Sort by", value = function() return self.sort == "name" and "Name" or "Date" end,
          adjust = function() self:toggle_sort() end},
-        {label = "Reload library", action = function() self:load(); self:render() end},
+        {label = "Reload library", action = function() self:reload() end},
     }
-    if #self.stack > 0 and self.sources and #self.sources > 1 then
+    if not self:at_start() then
         table.insert(items, {label = "Go to library start", action = function()
-            self.stack = {}
+            local top = self.stack[1]
+            self.stack = (top and top.is_root) and {top} or {}
             self:load()
             self:render()
         end})
