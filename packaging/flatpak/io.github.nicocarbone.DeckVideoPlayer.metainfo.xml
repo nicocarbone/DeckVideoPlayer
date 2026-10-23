@@ -19,6 +19,8 @@
       <li>Real HDR output under gamescope (Steam Deck OLED, HDR TVs)</li>
       <li>Matches the Steam Deck refresh rate to the video frame rate</li>
       <li>Audio and subtitle track selection, resume playback</li>
+      <li>Headphone surround: 5.1/7.1 soundtracks as 3D sound on headphones</li>
+      <li>Subtitle downloads from OpenSubtitles.com (free personal API key)</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.github.nicocarbone.DeckVideoPlayer.desktop</launchable>
@@ -27,7 +29,23 @@
     <control>gamepad</control>
     <control>keyboard</control>
   </supports>
+  <url type="homepage">https://github.com/nicocarbone/DeckVideoPlayer</url>
+  <url type="bugtracker">https://github.com/nicocarbone/DeckVideoPlayer/issues</url>
   <releases>
+    <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.2.0" date="2026-10-23">
+      <description>
+        <p>Better audio and subtitles, and fixes from the first tests on a Steam Deck.</p>
+        <ul>
+          <li>Headphone surround for 5.1 and 7.1 audio (audio menu)</li>
+          <li>Download subtitles from OpenSubtitles.com (subtitle menu)</li>
+          <li>Refresh-rate matching works on current SteamOS, with an on/off toggle</li>
+          <li>SD card and USB drives shown by name, with icons</li>
+          <li>Long names scroll instead of overflowing; About panel</li>
+          <li>Audio/subtitle choices and delays no longer carry over to the next video</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-23">
       <description><p>First version.</p></description>
     </release>

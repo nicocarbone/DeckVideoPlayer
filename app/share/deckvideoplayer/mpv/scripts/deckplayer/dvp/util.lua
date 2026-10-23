@@ -136,6 +136,12 @@ function M.is_dir(path)
     return info ~= nil and info.is_dir
 end
 
+function M.file_exists(path)
+    local utils = require "mp.utils"
+    local info = utils.file_info(path)
+    return info ~= nil and info.is_file
+end
+
 function M.mkdir_p(path)
     if M.is_dir(path) then return true end
     local r = mp.command_native({

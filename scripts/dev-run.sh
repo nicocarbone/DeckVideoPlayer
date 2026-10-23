@@ -15,6 +15,12 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export DVP_CONFIG_DIR="$root/.dev/config"
 export DVP_DATA_DIR="$root/.dev/data"
 mkdir -p "$DVP_CONFIG_DIR" "$DVP_DATA_DIR"
+# Refresh-rate helper (part of the Flatpak); harmless if the build fails.
+if "$root/helper/build.sh" "$root/.dev/bin" 2>/dev/null; then
+    export PATH="$root/.dev/bin:$PATH"
+else
+    echo "note: helper/build.sh failed (needs cc, wayland-scanner, libwayland-dev); refresh matching off" >&2
+fi
 
 window=0
 nested=0

@@ -12,7 +12,8 @@ SteamOS. You need:
 | `ffmpeg` with libx264/libx265 | test media, rendering SVG artwork (librsvg decoder) |
 | `python3` | IPC driver, Steam shortcut helper |
 | `flatpak` + `org.flatpak.Builder` (or `flatpak-builder`) | building the bundle |
-| `xprop` (optional) | refresh-rate fallback with non-LuaJIT mpv |
+| `xprop` (optional) | reads gamescope's refresh feedback with non-LuaJIT mpv |
+| `cc`, `wayland-scanner`, `libwayland-dev` | build the refresh-rate helper (`helper/build.sh`, run automatically by the dev scripts) |
 
 Install the builder with `flatpak install --user flathub org.flatpak.Builder`.
 `scripts/build-flatpak.sh` installs the Freedesktop SDK automatically.
@@ -22,10 +23,12 @@ Install the builder with `flatpak install --user flathub org.flatpak.Builder`.
 ```
 app/                    exactly what gets installed under /app in the Flatpak
   bin/deckvideoplayer   launcher
-  share/deckvideoplayer/config.ini, mpv/mpv.conf, mpv/scripts/deckplayer/{main.lua,dvp/*.lua}
+  share/deckvideoplayer/config.ini, mpv/mpv.conf, mpv/scripts/deckplayer/{main.lua,dvp/*.lua},
+                        hrtf/ (headphone-surround data)
+helper/                 dvp-gamescope-refresh.c + gamescope-control.xml + build.sh (D31)
 packaging/              flatpak manifest, desktop/metainfo, icons, Steam artwork
 scripts/                build-flatpak, install-steamos, steam_shortcut.py, dev-run
-tools/                  test tooling: make-test-media, headless-run, mpv-ipc.py
+tools/                  test tooling: make-test-media, headless-run, mpv-ipc.py, mock-opensubtitles.py
 tests/                  unit tests (run inside mpv)
 docs/                   this documentation
 .dev/                   (git-ignored) dev config, resume data, test media, logs
@@ -61,9 +64,21 @@ Two suites:
 - `tests/run.lua` runs inside mpv (`--script`), so modules that `require
 "mp.utils"` load normally. It covers the pure logic: util (time format,
 UTF-8, natural sort, paths), config parsing (lists, enums, invalid values,
-warnings), refresh-rate selection (OLED discrete list, LCD range, NTSC
-rates), library names and mountinfo parsing, resume thresholds, and media
-labels. **Add a test for every pure function you add or change.**
+warnings), refresh-rate selection and helper output parsing (OLED discrete list, LCD range, NTSC
+rates), library names and mountinfo parsing, resume thresholds, media
+labels, the surround filter string and escaping, and the OpenSubtitles
+helpers (hash against reference values, release-name parsing, languages,
+query strings, result ranking, error texts) plus `menu:update`. **Add a
+test for every pure function you add or change.**
+
+The distro mpv usually runs Lua 5.2; the Flatpak runs LuaJIT. Run the
+suite on LuaJIT too after touching Lua (needs the Flatpak installed):
+
+```sh
+flatpak run --command=mpv --filesystem=$PWD io.github.nicocarbone.DeckVideoPlayer \
+    --no-config --idle=once --vo=null --ao=null --really-quiet \
+    --msg-level=all=error,run=info --script=$PWD/tests/run.lua
+```
 
 ## 5. Headless UI testing (no monitor needed)
 
@@ -109,9 +124,19 @@ tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
 HDR=1 tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:ENTER sleep:2.5 \
     key:i sleep:1 shot:/tmp/hdr.png get:video-target-params
 
-# Refresh matching (Deck OLED profile): expect "refresh rate -> 48 Hz for 24.000 fps"
-DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
-    get:display-fps-override
+# Refresh matching. Headless gamescope reports a single rate, so nothing is
+# switched by default. RATES forces a list to exercise request + verify:
+# expect "requested 48 Hz for 23.976 fps", then "requested 48 Hz but the
+# display is at 60 Hz" (headless can't switch) and "Display: 60 Hz (asked
+# for 48 Hz)" in the info panel. Only a real Deck shows "48 Hz (matched)".
+RATES=48,60 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN \
+    key:ENTER sleep:3.5 key:i sleep:1 shot:/tmp/refresh.png
+# Same with the Deck's layout (app on gamescope's second Xwayland, feedback
+# not readable): expect "48 Hz (requested)". Toggle: m, 9x DOWN, ENTER.
+XWAYLAND2=1 RATES=48,60 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN \
+    key:DOWN key:ENTER sleep:3.5 key:i sleep:1 shot:/tmp/refresh2.png
+# Talk to gamescope directly (inside any gamescope session):
+#   .dev/bin/dvp-gamescope-refresh info
 
 # Resume: play the 5-minute film, skip 2 min, stop, reopen -> dialog
 tools/headless-run.sh -- key:DOWN key:DOWN key:ENTER sleep:1.5 key:PGDWN key:PGDWN \
@@ -126,6 +151,23 @@ tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 k
 # Run the resume recipe above first, then (KEEP=1 keeps its resume data):
 KEEP=1 tools/headless-run.sh -- "raw:[\"loadfile\",\"$PWD/.dev/test-media/Videos/A Long Film (2023).mkv\"]" \
     sleep:1.2 shot:/tmp/toast.png get:time-pos key:BS    # then "mpv exited"
+
+# Headphone surround: switch the test movie to its 5.1 track; expect the
+# dvp-surround lavfi filter in "af" and "· headphone surround" in the info panel
+SURROUND=1 tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
+    'raw:["set_property","aid",2]' sleep:1 get:af key:y shot:/tmp/audio.png key:BS key:i sleep:1 shot:/tmp/info.png
+
+# Online subtitles against the mock API (no key or quota needed): X, UP to
+# "Download subtitles…", A, A on the first result. Expect the mock's request
+# log ("mock: GET /api/v1/subtitles…") and the new track selected.
+OSMOCK=1 tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
+    key:x key:UP key:ENTER sleep:1.5 shot:/tmp/results.png key:ENTER sleep:1.5 \
+    get:current-tracks/sub/title
+# OSMOCK_LOGIN=1 adds an account (expect "POST /api/v1/login" and auth=yes on
+# the download). Network failure: add the step
+#   "sh:pkill -f 'mock-opensubtitles[.]py 8765'"
+# before opening the menu (the [.] keeps pkill from matching the IPC
+# driver, whose arguments contain this text).
 
 # Same tests against the installed Flatpak (LuaJIT, SDL gamepad, bundled font, sandbox)
 MODE=flatpak HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN \
@@ -162,7 +204,9 @@ flatpak build build-dir sh -c 'mpv -v --no-config --vo=null --ao=null /dev/null 
 ```
 
 Expect `luajit sdl2-gamepad vaapi vulkan x11 wayland` among the features and
-`Inter-Regular.ttf: "Inter" "Regular"`.
+`Inter-Regular.ttf: "Inter" "Regular"`. The headphone-surround filter needs
+FFmpeg's `--enable-libmysofa` (libmysofa comes from the runtime); check
+with the `SURROUND=1` recipe in §5 in flatpak mode.
 
 Manifest maintenance:
 - Versions/commits are copied from Flathub's `io.mpv.Mpv` manifest
@@ -182,8 +226,14 @@ Manifest maintenance:
   `DeckVideoPlayer-<tag>.tar.gz` (bundle + scripts + artwork + README) to a
   GitHub release. Users install from the tarball.
 
-To release: bump `<release>` in the metainfo, commit, `git tag v0.x.y`,
-push the tag.
+The About panel shows the build date and commit automatically
+(`scripts/build-info.sh`, D34); a bundle built with uncommitted changes
+shows `<commit>-modified`.
+
+To release: bump `dvp/version.lua` (and the year in `About.COPYRIGHT` if
+needed) and add a `<release>` to the metainfo,
+update `docs/ROADMAP.md` and the "Current state" of `AGENTS.md`, commit,
+`git tag -a v0.x.y`, push the tag.
 
 ## 8. On-device test checklist (Steam Deck OLED)
 
@@ -196,9 +246,14 @@ DECISIONS.md or the README "Known limitations".
    Steam Input's virtual pad).
 3. HDR on: play an HDR10 file. Info panel shows `HDR passthrough · pq /
    bt.2020`; the picture is visibly HDR. HDR off: `SDR`, tone-mapped image.
-4. Refresh: 23.976 fps → info panel `48 Hz (matched)`; Steam's performance
-   overlay (level 1+) shows the panel refresh. Back in the library the
-   previous rate is restored.
+4. Refresh (D31): 23.976 fps → Steam's performance overlay shows 48 Hz
+   (the Quick Access Menu slider keeps showing Steam's own value), the Hz
+   badge appears and the info panel says `48 Hz (requested)`. Verified
+   2026-10-23 on an OLED. The menu toggle *Match refresh rate* switches
+   back to 90 Hz and again to 48 Hz. Then open the
+   Quick Access Menu, close it, pause/unpause: the rate should come back to
+   48 Hz. Back in the library the previous rate is restored. Try with
+   Steam's "Use per-game profile" both off and on.
 5. Hardware decoding for H.264, HEVC 10-bit, AV1: `Decoder: Hardware (vaapi)`.
 6. Battery: note the battery draw (W) in the performance overlay for a
    1080p HEVC and a 4K HDR file at fixed brightness, with `quality =
@@ -210,6 +265,14 @@ DECISIONS.md or the README "Known limitations".
 9. SD card: shows up as a source; files play.
 10. Docked to a 4K HDR TV with Game Resolution = Native: UI sharp, HDR
     works, `tv`/`deck` profile as expected.
+11. Headphone surround (v0.2): with headphones, a film with a 5.1 track.
+    Toggle in the audio menu: dialogue stays centred, effects move around
+    and behind, loudness doesn't jump; the info panel says
+    `· headphone surround`. A stereo video sounds the same either way.
+12. Online subtitles (v0.2): over Wi-Fi in game mode, X → *Download
+    subtitles…* on a real film. Results in your language, "Exact" on
+    matching releases, download selects it, the toast shows downloads
+    left, and the subtitle is back after replaying the film.
 
 ## 9. Recipes for common changes
 

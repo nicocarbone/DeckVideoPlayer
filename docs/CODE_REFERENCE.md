@@ -79,18 +79,23 @@ See [CONFIGURATION.md](CONFIGURATION.md).
 Responsibilities:
 
 - Sets `package.path` so `require "dvp.x"` works on every mpv version.
-- Reads script-opts `config_file`, `data_dir`; loads config (warnings are
-  logged with `msg.warn`).
+- Reads script-opts `config_file`, `data_dir` and the development-only
+  `opensubtitles_url` (mock server, D30); loads config (warnings are logged
+  with `msg.warn`).
 - `apply_playback_options()` translates `[playback]` into mpv properties
   (`alang`, `slang`, subtitle selection mode (D9), volume, `audio-spdif`,
   `hwdec`; `auto` → `vaapi,vulkan,auto-safe`).
-- Creates the services: `display` (D6), `resume`, `menu`, toast layer, and
-  the two screens `browser` and `player` with a shared `ctx`:
+- Creates the services: `display` (D6), `surround` (D27; the HRTF path is
+  derived from the script directory: `…/share/deckvideoplayer/hrtf/`),
+  `resume`, `menu`, toast layer, `subtitles` (D28), and the two screens
+  `browser` and `player` with a shared `ctx`:
 
   | ctx field | Meaning |
   |---|---|
   | `cfg` | parsed config |
   | `resume`, `menu`, `display` | service instances |
+  | `surround` | headphone surround (`dvp/surround.lua`) |
+  | `subtitles` | online subtitle search/download (`dvp/subdownload.lua`) |
   | `play(list, start)` | load `list[1]` (replace) with start position `start`, append the rest |
   | `stop()` | save progress, `stop` → idle → browser |
   | `quit()` | save, restore refresh rate, `quit` |
@@ -100,11 +105,15 @@ Responsibilities:
 
 - Input dispatch (see ARCHITECTURE §4).
 - Lifecycle hooks:
-  - `on_load` hook: start position from `state.pending_start[path]` (set by
+  - `on_load` hook: sets `aid`, `sid`, `sub-delay`, `audio-delay`
+    file-locally to their defaults (D35), then the start position from
+    `state.pending_start[path]` (set by
     `play`), else the resume position (auto-advanced playlist entries and
     external launches; remembered in `state.resumed_at` and announced with a
     toast on `file-loaded`); restores `aid`/`sid` from the resume entry (as
     `file-local-options`).
+  - `on_preloaded` hook: `subtitles:load_stored(path)` adds subtitles
+    downloaded earlier for this video before track selection (D28).
   - `on_unload` hook: `save_progress()` + flush. Properties are still
     readable here, for every end reason.
   - `start-file`: switch to the player screen. If the library never started
@@ -131,8 +140,13 @@ Responsibilities:
 `format_time(sec, force_hours)`, `ass_escape` (makes text literal for
 libass, same technique as mpv's osc), `utf8_len`, `utf8_truncate(s, n)`
 (adds `…`), `natural_key` (zero-pads digit runs to 12 → "Ep 2" < "Ep 10"),
-`read_file`, `write_file_atomic` (tmp + rename), `is_dir`, `mkdir_p` (mpv
-subprocess), `shallow_copy`.
+`read_file`, `write_file_atomic` (tmp + rename), `is_dir`, `file_exists`,
+`mkdir_p` (mpv subprocess), `shallow_copy`.
+
+## `dvp/version.lua`
+
+Returns the app version string (`"0.2.0"`), used in the OpenSubtitles
+User-Agent. Bump it with the metainfo `<release>` when releasing.
 
 ## `dvp/config.lua`: config.ini parser and schema
 
@@ -164,13 +178,20 @@ subprocess), `shallow_copy`.
     `polygon(points, o)`
   - `text(x, y, str, o)`: o = `size, color, opacity, align` (ASS numpad;
     default 4 = left-middle), `bold, italic, outline, clip, font`
-  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_check`,
-    `icon_play`, `icon_pause`, `icon_triangle(dir)`
+  - `text` never wraps (`\q2`).
+  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_sdcard`,
+    `icon_check`, `icon_play`, `icon_pause`, `icon_triangle(dir)`
   - `button(btn, x, cy, s, o)`: controller glyphs `A B X Y`, `L1 R1 L2 R2`,
     `MENU`, `VIEW`, `DPAD`, `DPAD_LR`, `DPAD_UD`. Returns the width.
   - `hints({{btn, label}, …}, x_right, cy, o)`: right-aligned hint bar.
-- `text_width(str, size)` and `fit_text(str, size, max_w)`: estimates
-  (D12).
+- `text_width(str, size, bold)` and `fit_text(str, size, max_w, bold)`:
+  per-character-class estimates calibrated on Inter (D32).
+- `marquee(redraw)` → scroller for one long text per screen:
+  `m:begin()` at the start of a render, `m:draw(ass, key, x, y, text,
+  max_w, opts)` for the text that may scroll (plain text when it fits),
+  `m:finish()` at the end (starts/stops its 24 Hz timer), `m:reset()` when
+  the screen hides. `marquee_offset(t, overflow)` is the pure timing
+  function (rest, scroll, rest, three passes, then nil).
 - `rrect_path` (exported) builds rounded rectangles with cubic Béziers
   (0.4477·r control offset ≈ circle).
 
@@ -188,10 +209,15 @@ key.
 
 ## `dvp/library.lua`: sources and listings
 
-- `sources(cfg)` → `{name, path, kind}`: configured folders that exist,
-  plus removable media mount points (`kind = "removable"`) when enabled.
-- `parse_mountinfo(text)` → mount points under `/run/media/…` or
-  `/media/…` (handles `\040` escapes).
+- `sources(cfg)` → `{name, path, kind}`: configured folders that exist
+  (`kind = "folder"`), plus removable media mount points when enabled
+  (`kind = "sdcard" | "usb" | "removable"`, D33).
+- `parse_mountinfo(text)` → `{path, source}` for mount points under
+  `/run/media/…` or `/media/…` (handles `\040` escapes; pseudo
+  filesystems such as `tmpfs` are skipped); `source` is the device, e.g.
+  `/dev/mmcblk0p1`.
+- `removable_info(path, source)` → `kind, name` ("SD Card", "SD Card
+  (Label)", "USB drive", a real label, or the folder name).
 - `list(path, cfg, sort_mode)` → entries `{name, label, key, path, is_dir,
   mtime, size}`. Hidden files are skipped unless `show_hidden`; files are
   filtered by extension; folders come first; sorted by `natural_key` or by
@@ -214,21 +240,38 @@ entries). Thresholds are `M.MIN_POSITION`, `M.END_MARGIN_MIN` and
   (`Jupiter`) or `tv`.
 - `in_gamescope()`: `GAMESCOPE_WAYLAND_DISPLAY` set or
   `XDG_CURRENT_DESKTOP=gamescope`.
-- `parse_rates("45-90" | "48,60,72")`, `choose_rate(fps, rates, prefer)`
-  (pure, unit-tested).
-- `get_root_cardinal(name)` / `set_root_cardinal(name, value|nil)`: X11
-  root property access via LuaJIT FFI (`libX11.so.6`), falling back to
-  `xprop`. `get` returns a number, `false` (unset) or `nil` (error).
-- Instance: `new(cfg)` resolves device, quality and rates; `apply_profile()`
-  applies `dvp-quality-*`, HDR off, display-resample; `match(fps)` → Hz or
-  nil (stores the original value first; disables itself if X11 can't be
-  reached); `restore()`.
+- `parse_rates("45-90" | "48,60,72")`, `choose_rate(fps, rates, prefer)`,
+  `parse_helper_info(text)` (pure, unit-tested).
+- `get_root_cardinal(name)`: X11 root property read via LuaJIT FFI
+  (`libX11.so.6`), falling back to `xprop`; returns a number, `false`
+  (unset) or `nil` (error).
+- Instance (D31): `new(cfg)` resolves device and quality; fields
+  `requested_hz`, `actual_hz` (confirmed by gamescope), `original_hz`.
+  `apply_profile()` applies `dvp-quality-*`, HDR off, display-resample.
+  `match(fps, on_result)` runs `dvp-gamescope-refresh info`, chooses a rate,
+  sends `set HZ` and schedules `verify()` (2 s) which reads
+  `GAMESCOPE_DISPLAY_REFRESH_RATE_FEEDBACK` and calls `on_result`.
+  `current_hz()` reads the live rate. `reassert(on_result)` re-sends when the
+  live rate drifted. `restore()` asks for the previous rate or native.
+  `refresh_possible` (gamescope + helper work) vs `refresh_on` (user
+  choice); `set_matching(on, fps, on_result)` is the menu toggle.
+  `verified`: true / false / nil (nil = feedback unreadable, the Deck case).
+
+## `helper/dvp-gamescope-refresh.c`
+
+C client of gamescope's private `gamescope_control` Wayland protocol
+(vendored XML: `helper/gamescope-control.xml`, MIT). `info` prints
+`connector=… internal=0|1 only_refresh=0|1 rates=45,47,…`; `set HZ` sends
+`set_app_target_refresh_cycle(HZ, flags)` then prints the same line. Exit 2
+when not under gamescope. Built by `helper/build.sh OUTDIR` (wayland-scanner
++ cc), used by the Flatpak manifest (→ `/app/bin`) and by the dev scripts
+(→ `.dev/bin`, put on `PATH`).
 
 ## `dvp/media.lua`: descriptions
 
 Language names (ISO 639-1/2), codec display names (DTS profile aware),
 `track_label(t)` ("English · Commentary"), `track_detail(t)` ("TrueHD · 7.1 ·
-Default"), `tracks(kind)`, `selected_track(kind)`,
+Default"; external subtitle files show "External" instead of the codec), `tracks(kind)`, `selected_track(kind)`,
 `hdr_state(video_track?)` (pass a cached video track to avoid re-reading
 `track-list`) → `source, output_hdr, video_params, target_params` (source:
 `HDR10`/`HLG`/`Dolby Vision`/`SDR`; output from `video-target-params`), and
@@ -260,7 +303,79 @@ Handling: up/down move (wraps, skips disabled), L1/R1 jump to first/last,
 left/right call `adjust(-1|1)`, A runs `action` (the menu is popped
 **before** the action runs, so actions can open other menus or start
 playback; `keep_open = true` prevents that) or `adjust(1)`, B pops, Menu
-closes all side menus. `render()` draws the top menu only.
+closes all side menus. `render()` draws the top menu only. A list with no
+selectable item ("Searching…") shows no cursor.
+
+Long text (D32): `Menu.split_row(avail, label_need, value_need, extra,
+gap)` shares a row between label and value (pure); the selected row's cut
+text scrolls through a `ui.marquee`; title and subtitle are shortened.
+`Menu.side_width(W)` is the side panel width (also used by the player to
+keep its title clear of the panel).
+
+`menu:update(spec, fields)` changes fields (usually `items`) of a menu that
+may still be open, resets the cursor and redraws it if it is on top;
+returns false when the menu was closed meanwhile. Used by asynchronous
+work (subtitle search) to fill a menu in place.
+
+## `dvp/about.lua`: About panel
+
+D34. `About.open(ctx)` (ctx: `cfg`, `menu`, `display`, `app_dir`,
+`data_dir`; `main.lua` exposes it as `ctx.about()`). `About.items(ctx)`
+builds the rows. Pure: `parse_build_info(text)` → `{date, commit}`,
+`build_text(info)` → "2026-10-23 · 1a2b3c4" / "development build".
+Constants: `REPO`, `LICENSE`, `DEVELOPER`, `COPYRIGHT`.
+
+## `dvp/surround.lua`: headphone surround
+
+D27. `Surround.new(cfg, sofa_path)`; fields `available` (HRTF file exists,
+no passthrough, filter works), `enabled` (user choice), `active` (filter
+currently in the chain), `channels` (decoder output channels).
+
+- Observes `audio-params/channel-count`; `update()` adds the filter
+  (`af add`, label `@dvp-surround`) when `enabled` and channels > 2, and
+  removes it otherwise. A failed `af add` makes the feature unavailable.
+- `toggle()` → new `enabled` state.
+- Pure: `escape_lavfi(value)` (two-level FFmpeg escaping),
+  `filter_string(sofa_path, gain)` (the `af add` argument, `%len%`-quoted),
+  `GAIN = 6` (level match with mpv's downmix).
+
+## `dvp/opensubtitles.lua`: OpenSubtitles API client
+
+D28/D29. Pure helpers (all unit-tested):
+
+| Function | Meaning |
+|---|---|
+| `moviehash_from(size, head, tail)` / `moviehash(path)` | OpenSubtitles hash (64-bit sum done as two 32-bit halves for Lua 5.1). `moviehash` returns `nil, size` for files < 128 KiB. |
+| `parse_release(path)` | `{title, year, season, episode}` from a file name (episode markers, years, release junk, show folder for bare `S01E02` names). |
+| `languages(slang)` | ISO 639-2 list → OpenSubtitles codes (`pob` → `pt-br`), English if empty. |
+| `query_string(params)` | sorted, lowercase, URL-encoded. |
+| `curl_quote(s)` | quoted string for a curl config file. |
+| `parse_results(json)` / `rank(lists, languages)` | flatten `/subtitles` responses; merge, de-duplicate and order them. |
+| `result_value(r)` | right-hand text: `Exact`, `SDH`, `Auto` (machine translated) or the download count. |
+| `error_message(code, body, during)` | user-facing error text. |
+
+Client: `OpenSubtitles.new{api_key, username, password, api_url}`,
+`:enabled()`, `:http(req, cb)` (async curl, config on stdin), `:search(params,
+cb)`, `:ensure_login(cb)` (once per session, follows `base_url`),
+`:download(file_id, dest, cb)` (download request, then fetch the link to
+`dest.part`, rename). Constants: `API_URL`, `USER_AGENT`. There is no built-in key (D29):
+`SubDownload` passes `cfg.opensubtitles.api_key`.
+
+## `dvp/subdownload.lua`: online subtitles UI and storage
+
+D28. `SubDownload.new(ctx, data_dir, api_url)`.
+
+- `available(path)`: an API key exists and `path` is a local file.
+- `open(path)`: results menu ("Searching…" → results via `menu:update`).
+  `search(path, info, cb)` runs the hash and name searches in parallel.
+- `download(path, result)`: stores the file as
+  `<data_dir>/subtitles/<key>/<release> #<file_id>.<lang>.srt` and selects
+  it (or selects the stored file if that upload was downloaded before).
+- `stored(path)` / `load_stored(path)`: downloaded files of a video, added
+  with `sub-add … auto <title> <lang>` from the `on_preloaded` hook.
+- Pure: `file_name(release, lang, file_id)`, `parse_file_name(name)` (→
+  `{title, lang, file_id}`),
+  `video_key(path)` (moviehash, or `small-<size>` for tiny files).
 
 ## `dvp/browser.lua`: library screen
 
@@ -281,9 +396,11 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
   from the chosen one (if `autoplay_next`).
 - `open_menu()`: sort, reload, go to library start (whenever not
   `at_start()`), mark (un)watched, controls, quit.
-- `render()`: background, header (title, breadcrumb, counts), rows (icon,
-  label, status: chevron / ✓ / progress bar + time), scrollbar, empty
-  states, footer hints that depend on the selected entry.
+- `render()`: background, header (title, breadcrumb, counts), rows (icon:
+  folder / SD card / drive / video, label, status: chevron / ✓ / progress
+  bar + time), scrollbar, empty states, footer hints that depend on the
+  selected entry. The selected label scrolls when cut (`self.marquee`,
+  D32; not while a menu is open over the library).
 
 Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 
@@ -303,17 +420,22 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   Short seeks are `relative+exact`, long seeks `relative+keyframes`.
   `chapter(dir)`: going back first jumps to the start of the current chapter
   when more than 3 s into it; with no chapters it seeks ±300 s.
-- Menus: `open_audio_menu`, `open_subtitle_menu` (with "Off"),
+- Menus: `open_audio_menu` (tracks, then the *Headphone surround* toggle
+  when `ctx.surround.available`; `toggle_surround()` toasts the result),
+  `open_subtitle_menu` (with "Off", then *Download subtitles…* when
+  `ctx.subtitles:available(path)`),
   `open_main_menu` (live values through `rebuild`): tracks, subtitle
   size/position/delay, audio delay, volume, speed, picture (fit / fill =
-  `panscan 1` / stretch = `keepaspect no`), next video, info, stats, stop,
-  quit.
+  `panscan 1` / stretch = `keepaspect no`), match refresh rate
+  (`toggle_refresh()`, shown when `display.refresh_possible`), next video,
+  info, stats, stop, quit.
 - `render()`: blurred top/bottom gradients, title, badges (resolution, HDR
   state, HW, matched Hz), pause icon, progress bar with buffered range and
   chapter ticks, elapsed / remaining / "Ends at" / chapter title, hint bar
   (hidden while a menu is open).
 - `render_info()` / `info_lines()`: codec, resolution, fps, decoder, HDR
-  source and output, mastering peak, display Hz, audio, audio output,
+  source and output, mastering peak, display Hz, audio, audio output
+  (plus "· headphone surround" while the filter is active),
   dropped/late/mistimed frames, cache.
 - `refresh_hz` is set by `main.lua` after `display:match()`.
 
@@ -338,7 +460,10 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `scripts/steam_shortcut.py add\|artwork\|remove\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs. |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
+| `helper/build.sh [OUTDIR]` | Builds the refresh-rate helper (D31). |
+| `scripts/build-info.sh OUTFILE` | Writes `date=` and `commit=` for the About panel; run by the Flatpak manifest (D34). |
+| `tools/mock-opensubtitles.py [PORT]` | Fake OpenSubtitles API for tests (D30); used by `OSMOCK=1 tools/headless-run.sh`. |
 | `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
 | `.github/workflows/build.yml` | CI: unit tests, Flatpak bundle; on `v*` tags a GitHub release with the bundle and an installer tarball. |

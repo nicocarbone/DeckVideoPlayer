@@ -22,10 +22,16 @@ local Resume = require "dvp.resume"
 local Menu = require "dvp.menu"
 local Browser = require "dvp.browser"
 local Player = require "dvp.player"
+local Surround = require "dvp.surround"
+local SubDownload = require "dvp.subdownload"
+local About = require "dvp.about"
 
 local opts = {
     config_file = "",
     data_dir = "",
+    -- Development only: point the subtitle client at a mock server
+    -- (tools/mock-opensubtitles.py).
+    opensubtitles_url = "",
 }
 options.read_options(opts, "deckplayer")
 
@@ -78,6 +84,11 @@ apply_playback_options()
 ---------------------------------------------------------------------------
 -- Shared state and services
 ---------------------------------------------------------------------------
+
+-- The app's share directory (…/share/deckvideoplayer) is three levels above
+-- this script (mpv/scripts/deckplayer).
+local app_dir = script_dir and util.dirname(util.dirname(util.dirname(script_dir)))
+local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna.sofa"))
 
 local resume = Resume.new(opts.data_dir)
 local menu = Menu.new()
@@ -186,8 +197,11 @@ end
 local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
-    help = help, toast = toast,
+    help = help, toast = toast, surround = surround,
+    app_dir = app_dir, data_dir = opts.data_dir,
 }
+ctx.about = function() About.open(ctx) end
+ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
 local browser = Browser.new(ctx)
 local player = Player.new(ctx)
 
@@ -202,7 +216,11 @@ input.init(function(action)
     end
     if menu:is_open() then
         menu:handle(action)
-        if state.screen == "player" then player:render() end
+        if state.screen == "player" then
+            player:render()
+        elseif not menu:is_open() then
+            browser:render()   -- the selected entry may scroll again
+        end
         return
     end
     if state.screen == "player" then
@@ -219,8 +237,17 @@ end)
 -- Decide the start position (resume) and restore track choices before the
 -- file is opened.
 mp.add_hook("on_load", 50, function()
+    state.resumed_at = nil   -- may be left over from a file that failed to open
     local path = mp.get_property("path")
     if not path then return end
+    -- Track choices and sync offsets are per file: set them file-locally so
+    -- whatever the user changes during this file is undone when it ends
+    -- (mpv otherwise keeps runtime changes of aid/sid/delays for the next
+    -- file). The saved choice from resume.json below overrides them.
+    mp.set_property("file-local-options/aid", "auto")
+    mp.set_property("file-local-options/sid", cfg.playback.subtitles == "off" and "no" or "auto")
+    mp.set_property_number("file-local-options/sub-delay", 0)
+    mp.set_property_number("file-local-options/audio-delay", 0)
     local start = state.pending_start[path]
     state.pending_start[path] = nil
     local entry = resume:get(path)
@@ -237,6 +264,12 @@ mp.add_hook("on_load", 50, function()
         if entry.aid and entry.aid ~= "no" then mp.set_property("file-local-options/aid", entry.aid) end
         if entry.sid then mp.set_property("file-local-options/sid", entry.sid) end
     end
+end)
+
+-- Subtitles downloaded earlier for this video are added after the file is
+-- opened but before tracks are selected, so they take part in selection.
+mp.add_hook("on_preloaded", 50, function()
+    ctx.subtitles:load_stored(mp.get_property("path"))
 end)
 
 -- Properties are still readable here, for every reason a file ends
@@ -260,7 +293,7 @@ mp.register_event("file-loaded", function()
     state.current_path = mp.get_property("path")
     state.last_played = state.current_path
     local fps = mp.get_property_number("container-fps")
-    player.refresh_hz = display:match(fps)
+    display:match(fps, function() player:render() end)
     player:on_file_loaded()
     if state.resumed_at then
         toast("Resumed at " .. util.format_time(state.resumed_at))
@@ -305,6 +338,10 @@ mp.observe_property("pause", "bool", function(_, paused)
     if paused and state.current_path then
         save_progress()
         resume:flush()
+    elseif paused == false then
+        -- Resuming: if Steam re-applied its own refresh setting meanwhile
+        -- (e.g. from the Quick Access Menu), ask for our rate again.
+        display:reassert(function() player:render() end)
     end
     player:on_pause_change(paused)
 end)

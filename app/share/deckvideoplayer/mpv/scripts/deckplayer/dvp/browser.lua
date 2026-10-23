@@ -26,6 +26,8 @@ function M.new(ctx)
     self.selected = 1
     self.scroll = 0
     self.active = false
+    -- The selected entry scrolls when its name doesn't fit.
+    self.marquee = ui.marquee(function() self:render() end)
     return self
 end
 
@@ -102,6 +104,7 @@ end
 
 function M:hide()
     self.active = false
+    self.marquee:reset()
     self.layer:clear()
 end
 
@@ -224,6 +227,7 @@ function M:open_menu()
         end
     end
     table.insert(items, {label = "Controls", action = function() self.ctx.help() end})
+    table.insert(items, {label = "About", action = function() self.ctx.about() end})
     table.insert(items, {label = "Quit Deck Video Player", action = function() self.ctx.quit() end})
     self.ctx.menu:open({title = "Menu", style = "side", items = items})
 end
@@ -281,6 +285,7 @@ end
 
 function M:render()
     if not self.active then return end
+    self.marquee:begin()
     local t = ui.theme
     local W, H = ui.size()
     local a = ui.ass()
@@ -294,7 +299,7 @@ function M:render()
     local loc = self:location()
     local title = loc and loc.label or "Library"
     a:text(margin, 34, "DECK VIDEO PLAYER", {size = 16, bold = true, color = t.accent})
-    a:text(margin, 72, ui.fit_text(title, 36, W * 0.6), {size = 36, bold = true})
+    a:text(margin, 72, ui.fit_text(title, 36, W * 0.6, true), {size = 36, bold = true})
     if #self.stack > 1 then
         a:text(margin, 102, ui.fit_text(self:breadcrumb(), 16, W * 0.6), {size = 16, color = t.dim})
     end
@@ -333,7 +338,9 @@ function M:render()
         local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
         local inner = sel and t.accent or t.bg
         local ix = x0 + 20
-        if e.source == "removable" then
+        if e.source == "sdcard" then
+            a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
+        elseif e.source == "usb" or e.source == "removable" then
             a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
         elseif e.is_dir then
             a:icon_folder(ix, cy, 30, {color = icon_color})
@@ -372,8 +379,12 @@ function M:render()
 
         local tx = ix + 52
         local max_w = (x1 - 22 - status_w - 24) - tx
-        a:text(tx, cy, ui.fit_text(e.label, FS, max_w), {size = FS, bold = sel,
-            color = t.text, clip = {tx, y, tx + max_w, y + ROW_H}})
+        local label_o = {size = FS, bold = sel, color = t.text}
+        if sel and not self.ctx.menu:is_open() then
+            self.marquee:draw(a, e.path or e.label, tx, cy, e.label, max_w, label_o)
+        else
+            a:text(tx, cy, ui.fit_text(e.label, FS, max_w, sel), label_o)
+        end
     end
 
     -- Scrollbar
@@ -420,6 +431,7 @@ function M:render()
     hints[#hints + 1] = {"MENU", "Menu"}
     a:hints(hints, W - margin, H - FOOTER_H / 2, {size = 28})
 
+    self.marquee:finish()
     self.layer:set(a:build())
 end
 

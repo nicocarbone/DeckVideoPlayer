@@ -8,11 +8,12 @@ local ui = require "dvp.ui"
 local util = require "dvp.util"
 local media = require "dvp.media"
 local library = require "dvp.library"
+local Menu = require "dvp.menu"
 
 local M = {}
 M.__index = M
 
--- ctx: cfg, menu, display, stop(), quit(), toast(text)
+-- ctx: cfg, menu, display, surround, subtitles, stop(), quit(), toast(text)
 function M.new(ctx)
     local self = setmetatable({}, M)
     self.ctx = ctx
@@ -22,7 +23,6 @@ function M.new(ctx)
     self.overlay_visible = false
     self.info_visible = false
     self.active = false
-    self.refresh_hz = nil
     -- Per-file data that doesn't change every frame, cached so the 0.5 s
     -- overlay redraw doesn't re-marshal track/chapter lists from mpv.
     self.title_text = ""
@@ -48,7 +48,6 @@ end
 
 function M:start()
     self.active = true
-    self.refresh_hz = nil
     self.video_track = nil
     local name = util.basename(mp.get_property("path") or "")
     self.title_text = library.display_name(name, false, self.cfg.interface.clean_names)
@@ -214,7 +213,28 @@ function M:audio_items()
         }
     end
     if #items == 0 then items[1] = {label = "No audio tracks", disabled = true} end
+    local surround = self.ctx.surround
+    if surround.available then
+        items[#items + 1] = {separator = true}
+        items[#items + 1] = {
+            label = "Headphone surround",
+            value = function() return surround.enabled and "On" or "Off" end,
+            adjust = function() self:toggle_surround() end,
+        }
+    end
     return items
+end
+
+function M:toggle_surround()
+    local surround = self.ctx.surround
+    if not surround:toggle() then
+        self.ctx.toast("Headphone surround off")
+    elseif surround.active then
+        self.ctx.toast("Headphone surround on")
+    else
+        -- Stereo source: nothing to virtualise, the filter waits for 5.1/7.1.
+        self.ctx.toast("Headphone surround on (for 5.1 and 7.1 audio)")
+    end
 end
 
 function M:subtitle_items()
@@ -236,6 +256,11 @@ function M:subtitle_items()
             end,
         }
     end
+    local path = mp.get_property("path")
+    if self.ctx.subtitles:available(path) then
+        items[#items + 1] = {separator = true}
+        items[#items + 1] = {label = "Download subtitles…", action = function() self.ctx.subtitles:open(path) end}
+    end
     return items
 end
 
@@ -249,6 +274,7 @@ end
 function M:open_audio_menu()
     local items = self:audio_items()
     self.ctx.menu:open({title = "Audio", style = "side", items = items,
+                        rebuild = function() return self:audio_items() end,
                         selected = selected_index(items), close_action = "y"})
     self:show_overlay()
 end
@@ -284,6 +310,23 @@ local function cycle(list, current, dir)
         if v == current then return list[(i - 1 + dir) % #list + 1] end
     end
     return list[1]
+end
+
+-- Session toggle for refresh-rate matching (config.ini sets the default).
+function M:toggle_refresh()
+    local display = self.ctx.display
+    local on = not display.refresh_on
+    local hz = display:set_matching(on, mp.get_property_number("container-fps"),
+                                    function() self:render() end)
+    if not on then
+        self.ctx.toast("Refresh-rate matching off")
+    elseif hz then
+        self.ctx.toast(string.format("Refresh rate: %d Hz", hz))
+    else
+        -- e.g. a 30 fps video on a 60 Hz-only screen: nothing to change.
+        self.ctx.toast("Refresh-rate matching on (no better rate for this video)")
+    end
+    self:render()
 end
 
 function M:main_menu_items()
@@ -325,6 +368,12 @@ function M:main_menu_items()
     items[#items + 1] = {label = "Picture",
         value = function() return ZOOM_LABELS[self:zoom_mode()] end,
         adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self:zoom_mode(), d)) end}
+    local display = self.ctx.display
+    if display.refresh_possible then
+        items[#items + 1] = {label = "Match refresh rate",
+            value = function() return display.refresh_on and "On" or "Off" end,
+            adjust = function() self:toggle_refresh() end}
+    end
     local pl_pos = mp.get_property_number("playlist-pos", 0)
     local pl_count = mp.get_property_number("playlist-count", 1)
     if pl_pos + 1 < pl_count then
@@ -334,6 +383,7 @@ function M:main_menu_items()
     items[#items + 1] = {label = "Advanced statistics", action = function()
         mp.commandv("script-binding", "stats/display-stats-toggle")
     end}
+    items[#items + 1] = {label = "About", action = function() self.ctx.about() end}
     items[#items + 1] = {label = "Stop and return to library", action = function() self.ctx.stop() end}
     items[#items + 1] = {label = "Quit Deck Video Player", action = function() self.ctx.quit() end}
     return items
@@ -371,7 +421,11 @@ function M:badges()
     if hw and hw ~= "" and hw ~= "no" then
         out[#out + 1] = {text = "HW"}
     end
-    if self.refresh_hz then out[#out + 1] = {text = self.refresh_hz .. " Hz"} end
+    -- A requested rate, unless gamescope contradicted it (D31).
+    local d = self.ctx.display
+    if d.requested_hz and d.verified ~= false then
+        out[#out + 1] = {text = d.requested_hz .. " Hz"}
+    end
     return out
 end
 
@@ -392,7 +446,11 @@ function M:render()
     a:rect(-100, H - 170, W + 200, 330, {color = t.black, opacity = 0.8, blur = 60})
 
     -- Title + badges
-    a:text(margin, 46, ui.fit_text(self:title(), 30, W - 2 * margin - 160), {size = 30, bold = true, outline = 1})
+    -- Leave room for an open side menu (it covers the right ~45%).
+    local title_w = W - 2 * margin - 160
+    local top = self.ctx.menu:top()
+    if top and top.style == "side" then title_w = W - Menu.side_width(W) - 2 * margin end
+    a:text(margin, 46, ui.fit_text(self:title(), 30, title_w, true), {size = 30, bold = true, outline = 1})
     local count = mp.get_property_number("playlist-count", 1)
     if count > 1 then
         local idx = mp.get_property_number("playlist-pos", 0) + 1
@@ -400,7 +458,7 @@ function M:render()
     end
     local bx = margin
     for _, b in ipairs(self:badges()) do
-        local w = ui.text_width(b.text, 16) + 20
+        local w = ui.text_width(b.text, 16, true) + 20
         a:rect(bx, 72, w, 26, {radius = 6, color = t.black, opacity = 0.35,
                                border = 1.5, border_color = b.color or t.subtext, border_opacity = 0.9})
         a:text(bx + w / 2, 85, b.text, {size = 16, bold = true, align = 5, color = b.color or t.text})
@@ -504,14 +562,11 @@ function M:info_lines()
     if vp["max-luma"] and vp["max-luma"] > 0 then
         add("Mastering", string.format("%d nits", util.round(vp["max-luma"])))
     end
-    local dfps = mp.get_property_number("display-fps")
-    local refresh = self.refresh_hz and (self.refresh_hz .. " Hz (matched)")
-        or (dfps and string.format("%.2f Hz", dfps)) or "?"
-    add("Display", refresh)
+    add("Display", self:refresh_text())
     local at = media.selected_track("audio")
     if at then add("Audio", media.track_label(at) .. " · " .. media.track_detail(at)) end
     local ao = mp.get_property("current-ao")
-    if ao then add("Audio out", ao) end
+    if ao then add("Audio out", ao .. (self.ctx.surround.active and " · headphone surround" or "")) end
     local drop = mp.get_property_number("frame-drop-count", 0)
     local vo_drop = mp.get_property_number("vo-delayed-frame-count", 0)
     local mistimed = mp.get_property_number("mistimed-frame-count", 0)
@@ -519,6 +574,22 @@ function M:info_lines()
     local cache = mp.get_property_number("demuxer-cache-duration")
     if cache then add("Buffered", string.format("%.0f s", cache)) end
     return lines
+end
+
+-- "48 Hz (matched)" (confirmed by gamescope), "48 Hz (requested)" (feedback
+-- not readable, the usual case in SteamOS game mode), "90 Hz (asked for
+-- 48 Hz)" (contradicted), or the plain current rate. Live.
+function M:refresh_text()
+    local d = self.ctx.display
+    local now = d.gamescope and d:current_hz()
+    if d.requested_hz then
+        if now == d.requested_hz then return now .. " Hz (matched)" end
+        if now then return string.format("%d Hz (asked for %d Hz)", now, d.requested_hz) end
+        return d.requested_hz .. " Hz (requested)"
+    end
+    if now then return now .. " Hz" end
+    local dfps = mp.get_property_number("display-fps")
+    return dfps and string.format("%.2f Hz", dfps) or "?"
 end
 
 function M:render_info()

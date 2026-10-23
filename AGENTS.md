@@ -16,13 +16,17 @@ non-trivial.
 | Button → action mapping | `…/dvp/input.lua` |
 | Wiring, lifecycle, resume save/restore | `…/main.lua` |
 | Settings schema | `…/dvp/config.lua` + `app/share/deckvideoplayer/config.ini` |
-| HDR / refresh rate / device detection | `…/dvp/display.lua`, `app/share/deckvideoplayer/mpv/mpv.conf`, `app/bin/deckvideoplayer` |
+| HDR / refresh rate / device detection | `…/dvp/display.lua`, `helper/dvp-gamescope-refresh.c` (D31), `app/share/deckvideoplayer/mpv/mpv.conf`, `app/bin/deckvideoplayer` |
 | Folder listing, sources (future SMB/Plex) | `…/dvp/library.lua` |
+| Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` |
+| About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
+| Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
 | Flatpak build | `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`, `scripts/build-flatpak.sh` |
 | Steam integration | `scripts/install-steamos.sh`, `scripts/steam_shortcut.py`, `packaging/steam/` |
 
 Full per-module API: `docs/CODE_REFERENCE.md`. Reasons behind each design
-choice: `docs/DECISIONS.md` (add an entry when you make a new one).
+choice: `docs/DECISIONS.md` (add an entry when you make a new one). What
+comes next: `docs/ROADMAP.md`.
 
 ## Commands
 
@@ -34,6 +38,7 @@ HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:E
 scripts/dev-run.sh --window --media .dev/test-media/Videos   # interactive, system mpv
 scripts/build-flatpak.sh [--install]           # Flatpak bundle → dist/
 MODE=flatpak tools/headless-run.sh -- …        # test the installed Flatpak
+SURROUND=1 / OSMOCK=1 tools/headless-run.sh -- …   # v0.2 features (mock subtitle API)
 ```
 
 Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
@@ -69,4 +74,14 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - v0.1.0 released 2026-10-23 (tag `v0.1.0`, GitHub release built by CI)
   after a first test on a real Steam Deck by the owner. The full on-device
   checklist in `docs/DEVELOPMENT.md` §8 has not been formally completed.
-- Planned: network shares (SMB/NFS), Plex/Jellyfin, thumbnails, touch input.
+- v0.2.0 released 2026-10-23 (tag `v0.2.0`): headphone surround (D27),
+  OpenSubtitles downloads (D28–D30), refresh matching via gamescope_control
+  (D31, confirmed on a Deck OLED), text scrolling (D32), SD card naming
+  (D33), About panel (D34), second audit resolved (D35). Still open on a
+  Deck: checklist items 11–12 (surround listening, real download).
+- The repo is meant to become public: never commit API keys, tokens or
+  passwords. OpenSubtitles keys are per user, in their `config.ini` (D29).
+- Planned: see `docs/ROADMAP.md` (v0.3 Plex; later Jellyfin, SMB/NFS,
+  thumbnails, touch input).
+- Network code must stay asynchronous (`command_native_async` + curl) and
+  only run on user request; secrets go on curl's stdin, never in argv.

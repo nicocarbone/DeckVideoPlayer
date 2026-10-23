@@ -118,8 +118,10 @@ z-order.
 
 Layers redraw **only** when something changes: input, a property observer,
 or the 0.5 s timer that runs *only while the overlay or info panel is
-visible*. During normal playback with the overlay hidden, no Lua code runs
-except a resume save every 30 s.
+visible*. A text too long for its box scrolls with a 24 Hz timer that runs
+only while it scrolls and stops by itself after three passes (D32). During
+normal playback with the overlay hidden, no Lua code runs except a resume
+save every 30 s.
 
 Coordinates are virtual: the canvas is 800 units tall (the Deck's native
 height, divided by `ui_scale`) and as wide as the screen aspect requires
@@ -160,35 +162,40 @@ recreates it as `VK_COLOR_SPACE_HDR10_ST2084_EXT`.
 
 ## 6. Refresh-rate matching
 
-gamescope reads the root-window property `GAMESCOPE_DYNAMIC_REFRESH`
-(CARDINAL, Hz) on any of its Xwayland servers. Steam uses the same property
-for the per-game refresh slider. The source is in
-gamescope `src/steamcompmgr.cpp`, `handle_property_notify`. gamescope only
-acts on it when:
+Steam's refresh slider and our app both talk to gamescope through its
+private Wayland protocol `gamescope_control`
+(`set_app_target_refresh_cycle`). gamescope applies the request when the
+display has a dynamic refresh table (Steam Deck LCD/OLED) and VRR is not
+active; it recomputes the target every frame, so the *latest* request wins
+(D31). The older `GAMESCOPE_DYNAMIC_REFRESH` X property no longer has a
+lasting effect.
 
-- the panel has a dynamic refresh table in gamescope's display profiles
-  (`scripts/00-gamescope/displays/valve.steamdeck.{lcd,oled}.lua`),
-- VRR is not active, and
-- the focused window is a "game" (a Steam-launched app, which ours is).
+```
+dvp/display.lua ──subprocess──► dvp-gamescope-refresh info|set HZ
+                                   │  (Wayland: $XDG_RUNTIME_DIR/gamescope-0)
+                                   ▼
+                               gamescope ──► panel refresh
+                                   │
+GAMESCOPE_DISPLAY_REFRESH_RATE_FEEDBACK (X root property) ◄── read back by
+dvp/display.lua (LuaJIT FFI → libX11, xprop fallback)
+```
 
-`dvp/display.lua`:
+`dvp/display.lua`, on `file-loaded`:
 
-1. Builds the list of valid rates. Deck OLED uses gamescope's discrete list
-   (45, 47, 48, 49, 50, 51, 53, 55, 56, 59, 60, 62, …, 72, …, 90). Deck LCD
-   uses 40–60. Both can be overridden by `refresh_rates`.
-2. On `file-loaded` reads `container-fps` and picks a rate that is an
-   integer multiple of it within 0.5% (`choose_rate`): the lowest by default
-   (`refresh_prefer = low`, saves battery) or the highest. Examples: 23.976
-   → 48 (or 72), 25 → 50 (75 isn't valid on the OLED), 29.97 → 60 (or 90).
-3. Saves the property's previous value once, sets the new one, and sets
-   `display-fps-override` so mpv's timing statistics match.
-4. Restores the previous value (or deletes the property) when returning to
-   the library, on quit and on shutdown.
-
-The property is written through **LuaJIT FFI to libX11** (`XChangeProperty`
-on the default root window). This works inside the Flatpak and needs no
-helper binary. With non-LuaJIT mpv builds (e.g. the distro mpv used for
-development) it falls back to the `xprop` command.
+1. `info` → the active display's valid rates as gamescope reports them
+   (or `refresh_rates` from config.ini). Fewer than two rates: nothing to do.
+2. Picks a rate that is an integer multiple of `container-fps` within 0.5%
+   (`choose_rate`): the lowest by default (`refresh_prefer = low`, saves
+   battery) or the highest. Examples on the OLED: 23.976 → 48 (or 72),
+   25 → 50 (75 isn't valid), 29.97 → 60 (or 90).
+3. Remembers the current rate once, sends `set HZ`.
+4. Two seconds later reads the feedback property. Confirmed → sets
+   `display-fps-override`, shows the Hz badge; not confirmed → logs it and
+   the info panel says "90 Hz (asked for 48 Hz)".
+5. On unpause, asks again if the live rate drifted (Steam re-applied its
+   own setting).
+6. Back in the library, on quit and on shutdown: asks for the previous rate
+   (or native).
 
 External displays and Steam Machines don't get dynamic refresh from
 gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
@@ -219,7 +226,8 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `~/.config/deckvideoplayer/config.ini` | User settings (copied from the default on first run) | user / launcher |
 | `~/.config/deckvideoplayer/mpv.conf` | Optional raw mpv overrides (`--include`d last) | user |
 | `$XDG_DATA_HOME/deckvideoplayer/resume.json` (Flatpak: `~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/`) | Resume positions, watched flags, chosen audio/sub track per file | `dvp/resume.lua` |
-| `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts | Flatpak build |
+| `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
+| `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
 
 `resume.json` format:
 
@@ -239,21 +247,34 @@ rename).
 
 - **Flatpak** `io.github.nicocarbone.DeckVideoPlayer` on runtime
   `org.freedesktop.Platform//25.08`. It builds LuaJIT, libXpresent,
-  uchardet, libass, zimg, a decode-only FFmpeg, libplacebo, mpv 0.41 (with
+  uchardet, libass, zimg, a decode-only FFmpeg (with libmysofa for the
+  headphone-surround filter), libplacebo, mpv 0.41 (with
   `sdl2-gamepad`, `lua=luajit`) and installs the Inter font plus the app
   files. Flathub's `io.mpv.Mpv` can't be used because it is built without
   SDL2 gamepad support.
 - Sandbox permissions: X11 + Wayland, PulseAudio + PipeWire, `--device=all`
   (GPU, VA-API, `/dev/input` for SDL), `xdg-run/gamescope-0` (HDR layer),
-  read-only `home`, `/run/media`, `/media`, `/mnt`, and read-write
-  `xdg-config/deckvideoplayer`.
+  read-only `home`, `/run/media`, `/media`, `/mnt`, read-write
+  `xdg-config/deckvideoplayer`, and network (online subtitles, D28).
 - **Steam integration**: `scripts/install-steamos.sh` installs the bundle
   per-user, installs the gamescope layer extension and adds a non-Steam
   shortcut (via `steamos-add-to-steam` while Steam runs, or by editing
   `shortcuts.vdf` directly when it doesn't) with grid/hero/logo/icon
   artwork.
 
-## 10. Extension points
+## 10. Optional features (v0.2)
+
+- **Headphone surround** (`dvp/surround.lua`, D27): an mpv audio filter
+  (`lavfi` → FFmpeg `sofalizer`) inserted only while the decoded audio has
+  more than two channels. Purely event-driven (one property observer), no
+  timers.
+- **Online subtitles** (`dvp/opensubtitles.lua` + `dvp/subdownload.lua`,
+  D28–D30): network work happens only when the user opens
+  *Download subtitles…*. HTTP is an asynchronous curl subprocess, so the UI
+  keeps responding; results fill the open menu in place. Downloads are
+  re-added from the `on_preloaded` hook on later plays.
+
+## 11. Extension points
 
 - **New library source kinds** (SMB, NFS, Plex, Jellyfin): `library.sources()`
   returns `{name, path, kind}` roots and `library.list()` returns entries

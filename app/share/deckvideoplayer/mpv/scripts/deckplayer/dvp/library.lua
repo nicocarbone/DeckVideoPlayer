@@ -27,31 +27,68 @@ function M.display_name(name, is_dir, clean)
     return n
 end
 
+local function unescape(s)
+    return (s:gsub("\\(%d%d%d)", function(o) return string.char(tonumber(o, 8)) end))
+end
+
+-- Not volumes: an in-memory /run/media/<user> etc. (seen in some setups).
+local PSEUDO_FS = {tmpfs = true, ramfs = true, autofs = true, overlay = true, proc = true,
+                   sysfs = true, devtmpfs = true, cgroup2 = true}
+
 -- Removable media: actual mount points under /run/media or /media (where
 -- SteamOS mounts the microSD card and USB drives), read from mountinfo.
+-- Returns {path, source} with source = the device ("/dev/mmcblk0p1"); the
+-- source survives Flatpak's bind mounts because it names the filesystem.
 function M.parse_mountinfo(text)
     local points = {}
     for line in text:gmatch("[^\n]+") do
         local mount_point = line:match("^%S+ %S+ %S+ %S+ (%S+)")
-        if mount_point then
-            mount_point = mount_point:gsub("\\(%d%d%d)", function(o) return string.char(tonumber(o, 8)) end)
+        local fstype, source = line:match(" %- (%S+) (%S+)")
+        if mount_point and not PSEUDO_FS[fstype or ""] then
+            mount_point = unescape(mount_point)
             if mount_point:match("^/run/media/.+") or mount_point:match("^/media/.+") then
-                points[#points + 1] = mount_point
+                points[#points + 1] = {path = mount_point, source = source and unescape(source) or ""}
             end
         end
     end
     return points
 end
 
+-- Mount folder names that are IDs, not names a person gave the volume:
+-- UUIDs, FAT/exFAT serials ("1A2B-3C4D"), kernel device names.
+local function is_generated_name(name)
+    return (#name >= 8 and name:match("^[%x%-]+$") ~= nil)
+        or name:match("^mmcblk%d") ~= nil or name:match("^sd%a%d*$") ~= nil
+        or name:match("^nvme%d") ~= nil
+end
+
+-- Kind and display name of a removable volume (pure, unit-tested):
+-- microSD -> "sdcard", "SD Card" / "SD Card (Label)"; USB -> "usb",
+-- the label or "USB drive"; anything else -> "removable", folder name.
+function M.removable_info(path, source)
+    local base = util.basename(path)
+    local label = not is_generated_name(base) and base or nil
+    if source:match("^/dev/mmcblk") then
+        return "sdcard", label and ("SD Card (" .. label .. ")") or "SD Card"
+    elseif source:match("^/dev/sd") or source:match("^/dev/nvme") then
+        return "usb", label or "USB drive"
+    end
+    return "removable", base
+end
+
 local function removable_roots()
-    local roots, seen = {}, {}
+    local roots, seen, names = {}, {}, {}
     local text = util.read_file("/proc/self/mountinfo") or ""
     local points = M.parse_mountinfo(text)
-    table.sort(points)
-    for _, path in ipairs(points) do
-        if not seen[path] and util.is_dir(path) then
-            seen[path] = true
-            roots[#roots + 1] = {name = util.basename(path), path = path, kind = "removable"}
+    table.sort(points, function(a, b) return a.path < b.path end)
+    for _, p in ipairs(points) do
+        if not seen[p.path] and util.is_dir(p.path) then
+            seen[p.path] = true
+            local kind, name = M.removable_info(p.path, p.source)
+            -- Two unlabelled USB drives: "USB drive", "USB drive 2".
+            names[name] = (names[name] or 0) + 1
+            if names[name] > 1 then name = name .. " " .. names[name] end
+            roots[#roots + 1] = {name = name, path = p.path, kind = kind}
         end
     end
     return roots

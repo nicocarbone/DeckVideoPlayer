@@ -8,10 +8,12 @@ local LANGS = {
     fr = "French", fre = "French", fra = "French",
     de = "German", ger = "German", deu = "German",
     it = "Italian", ita = "Italian",
-    pt = "Portuguese", por = "Portuguese",
+    pt = "Portuguese", por = "Portuguese", ["pt-pt"] = "Portuguese",
+    ["pt-br"] = "Portuguese (Brazil)", pob = "Portuguese (Brazil)",
     ja = "Japanese", jpn = "Japanese",
     ko = "Korean", kor = "Korean",
     zh = "Chinese", chi = "Chinese", zho = "Chinese",
+    ["zh-cn"] = "Chinese (Simplified)", ["zh-tw"] = "Chinese (Traditional)",
     ru = "Russian", rus = "Russian",
     nl = "Dutch", dut = "Dutch", nld = "Dutch",
     sv = "Swedish", swe = "Swedish",
@@ -34,8 +36,11 @@ local LANGS = {
     ca = "Catalan", cat = "Catalan",
     eu = "Basque", baq = "Basque", eus = "Basque",
     gl = "Galician", glg = "Galician",
-    und = "Unknown",
 }
+
+-- "Undetermined"/"no linguistic content" tags (Matroska writes "und" by
+-- default) say nothing, so labels fall back to the track title.
+local NO_LANGUAGE = {und = true, zxx = true, mis = true, mul = true}
 
 local CODECS = {
     truehd = "TrueHD", eac3 = "E-AC-3", ac3 = "AC-3", dts = "DTS", aac = "AAC",
@@ -48,7 +53,7 @@ local CODECS = {
 }
 
 function M.language(code)
-    if not code or code == "" then return nil end
+    if not code or code == "" or NO_LANGUAGE[code:lower()] then return nil end
     return LANGS[code:lower()] or code:upper()
 end
 
@@ -82,14 +87,16 @@ function M.track_label(t)
 end
 
 function M.track_detail(t)
-    local parts = {M.codec(t.codec, t["codec-profile"])}
+    -- External subtitle files (sidecar or downloaded) are nearly always
+    -- SRT: "External" says more and leaves room for the label.
+    local parts = {(t.external and t.type == "sub") and "External" or M.codec(t.codec, t["codec-profile"])}
     if t.type == "audio" then
         parts[#parts + 1] = channels(t["demux-channel-count"])
     end
     if t.forced then parts[#parts + 1] = "Forced" end
     if t["hearing-impaired"] then parts[#parts + 1] = "SDH" end
     if t.default then parts[#parts + 1] = "Default" end
-    if t.external then parts[#parts + 1] = "External" end
+    if t.external and t.type ~= "sub" then parts[#parts + 1] = "External" end
     return table.concat(parts, " · ")
 end
 

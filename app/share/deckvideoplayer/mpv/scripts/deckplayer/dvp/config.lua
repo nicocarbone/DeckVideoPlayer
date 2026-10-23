@@ -32,6 +32,7 @@ local SCHEMA = {
         volume_max         = {default = 130, type = "number"},
         audio_passthrough  = {default = "", type = "string"},
         hwdec              = {default = "auto", type = "string"},
+        headphone_surround = {default = false, type = "bool"},
     },
     display = {
         device           = {default = "auto", type = "enum", values = {"auto", "deck-oled", "deck-lcd", "tv"}},
@@ -42,6 +43,11 @@ local SCHEMA = {
         refresh_prefer   = {default = "low", type = "enum", values = {"low", "high"}},
         display_resample = {default = false, type = "bool"},
         gpu_context      = {default = "auto", type = "string"}, -- read by the launcher
+    },
+    opensubtitles = {
+        api_key          = {default = "", type = "string"},
+        username         = {default = "", type = "string"},
+        password         = {default = "", type = "string"},
     },
     interface = {
         ui_scale         = {default = 1.0, type = "number"},

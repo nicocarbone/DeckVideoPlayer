@@ -20,7 +20,10 @@ local M = {}
 M.__index = M
 
 function M.new()
-    return setmetatable({stack = {}, layer = ui.layer(50)}, M)
+    local self = setmetatable({stack = {}, layer = ui.layer(50)}, M)
+    -- The selected row scrolls when its text doesn't fit.
+    self.marquee = ui.marquee(function() self:render() end)
+    return self
 end
 
 function M:is_open()
@@ -29,6 +32,11 @@ end
 
 function M:top()
     return self.stack[#self.stack]
+end
+
+-- Width of a side menu on a canvas W units wide.
+function M.side_width(W)
+    return math.min(500, W * 0.45)
 end
 
 local function selectable(item)
@@ -75,6 +83,21 @@ function M:refresh()
         spec.selected = math.min(spec.selected, #spec.items)
     end
     self:render()
+end
+
+-- Change fields (items, subtitle…) of a menu that may still be open, e.g.
+-- when an asynchronous search finishes. Returns false if it was closed.
+function M:update(spec, fields)
+    for _, s in ipairs(self.stack) do
+        if s == spec then
+            for k, v in pairs(fields) do spec[k] = v end
+            spec.selected = first_selectable(spec.items, 1, 1)
+            spec.scroll = 0
+            if self:top() == spec then self:render() end
+            return true
+        end
+    end
+    return false
 end
 
 function M:handle(action)
@@ -130,9 +153,23 @@ local function value_text(item)
     return v
 end
 
+-- Splits the row's text area between label and value: both full when they
+-- fit; otherwise the label keeps up to 45% and the value gets the rest.
+-- Pure (unit-tested). Returns label_w, value_w (value_w includes `extra`,
+-- the space for ◀ ▶ arrows).
+function M.split_row(avail, label_need, value_need, extra, gap)
+    if value_need <= 0 then return math.min(label_need, avail), 0 end
+    value_need = value_need + extra
+    if label_need + gap + value_need <= avail then return label_need, value_need end
+    local label_w = math.min(label_need, math.max(avail * 0.45, avail - gap - value_need))
+    return label_w, avail - gap - label_w
+end
+
 function M:render()
     local spec = self:top()
+    self.marquee:begin()
     if not spec then
+        self.marquee:finish()
         self.layer:clear()
         return
     end
@@ -153,7 +190,7 @@ function M:render()
         list_top = py + 88 + (spec.message and 44 or 0)
         max_rows = rows
     else
-        pw = math.min(500, W * 0.45)
+        pw = M.side_width(W)
         px, py, ph = W - pw, 0, H
         a:rect(px - 60, 0, pw + 60, H, {color = t.black, opacity = 0.5, blur = 40})
         a:rect(px, py, pw, ph, {color = t.panel, opacity = 0.98})
@@ -161,9 +198,9 @@ function M:render()
         max_rows = math.floor((H - list_top - 80) / ROW_H)
     end
 
-    a:text(px + 32, py + 52, spec.title or "", {size = 32, bold = true})
+    a:text(px + 32, py + 52, ui.fit_text(spec.title or "", 32, pw - 64, true), {size = 32, bold = true})
     if spec.subtitle then
-        a:text(px + 32, py + 84, spec.subtitle, {size = 18, color = t.subtext})
+        a:text(px + 32, py + 84, ui.fit_text(spec.subtitle, 18, pw - 64), {size = 18, color = t.subtext})
     end
     if spec.message then
         a:text(px + 32, py + 104, ui.fit_text(spec.message, 22, pw - 64), {size = 22, color = t.subtext})
@@ -180,7 +217,8 @@ function M:render()
         local item = items[idx]
         local y = list_top + (row - 1) * ROW_H
         local cy = y + ROW_H / 2
-        local sel = idx == spec.selected
+        -- A list with nothing selectable ("Searching…") shows no cursor.
+        local sel = idx == spec.selected and selectable(item)
         if item.separator then
             a:rect(x0 + 16, cy, x1 - x0 - 32, 1.5, {color = t.dim, opacity = 0.6})
         else
@@ -201,23 +239,42 @@ function M:render()
                 tx = tx + 36
             end
             local value = value_text(item)
-            local value_w = 0
-            if value then
-                value = tostring(value)
-                value_w = ui.text_width(value, FS - 2) + (item.adjust and 44 or 0)
+            value = value and tostring(value)
+            local arrows = item.adjust and 44 or 0
+            local label_need = ui.text_width(item.label, FS, item.header)
+            local value_need = value and ui.text_width(value, FS - 2) or 0
+            local label_w, value_w = M.split_row((x1 - 18) - tx, label_need, value_need, arrows, 24)
+            local value_box = value_w - arrows
+            -- Only the selected row scrolls, and only one of its texts: the
+            -- value when it is cut (e.g. a long subtitle name), else the label.
+            -- (+0.5: value_box is computed by subtraction, so it can be a
+            -- rounding error below value_need when the value fits exactly.)
+            local scroll_value = sel and value and value_need > value_box + 0.5
+            local scroll_label = sel and not scroll_value and label_need > label_w + 0.5
+            local label_o = {size = FS, color = fg, bold = item.header}
+            if scroll_label then
+                self.marquee:draw(a, tostring(spec) .. "#" .. idx, tx, cy, item.label, label_w, label_o)
+            else
+                a:text(tx, cy, ui.fit_text(item.label, FS, label_w, item.header), label_o)
             end
-            local label_w = (x1 - 18) - tx - value_w - 12
-            a:text(tx, cy, ui.fit_text(item.label, FS, label_w), {size = FS, color = fg, bold = item.header})
             if value then
                 local vx = x1 - 18
+                local vcolor = sel and t.text or t.subtext
                 if item.adjust then
-                    a:icon_triangle(vx - 6, cy, 12, "right", {color = sel and t.text or t.subtext})
+                    a:icon_triangle(vx - 6, cy, 12, "right", {color = vcolor})
                     vx = vx - 22
                 end
-                a:text(vx, cy, value, {size = FS - 2, align = 6, color = sel and t.text or t.subtext})
+                local vo = {size = FS - 2, color = vcolor}
+                if scroll_value then
+                    self.marquee:draw(a, tostring(spec) .. "#" .. idx .. "v", vx - value_box, cy,
+                                      value, value_box, vo)
+                else
+                    vo.align = 6
+                    a:text(vx, cy, ui.fit_text(value, FS - 2, value_box), vo)
+                end
                 if item.adjust then
-                    local lx = vx - ui.text_width(value, FS - 2) - 14
-                    a:icon_triangle(lx, cy, 12, "left", {color = sel and t.text or t.subtext})
+                    local lx = vx - math.min(value_need, value_box) - 14
+                    a:icon_triangle(lx, cy, 12, "left", {color = vcolor})
                 end
             end
         end
@@ -236,6 +293,7 @@ function M:render()
     if cur and cur.adjust then table.insert(hints, 1, {"DPAD_LR", "Adjust"}) end
     a:hints(hints, px + pw - 28, py + ph - 36, {size = 26})
 
+    self.marquee:finish()
     self.layer:set(a:build())
 end
 

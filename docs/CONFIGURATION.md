@@ -33,19 +33,37 @@ in `dvp/config.lua`.
 | `volume_max` | ≥100 | `130` | Maximum volume (above 100 amplifies). |
 | `audio_passthrough` | csv | empty | mpv `audio-spdif`, e.g. `ac3,eac3,dts-hd,truehd` for AV receivers. |
 | `hwdec` | string | `auto` | `auto` = `vaapi,vulkan,auto-safe`; `no`; or any mpv `--hwdec` value. |
+| `headphone_surround` | bool | `no` | Start with headphone surround on: 5.1/7.1 audio rendered binaurally for headphones (D27). Stereo sources are unchanged. Also toggled in the audio menu (Y). Ignored when `audio_passthrough` is set. |
 
 ## `[display]`
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `device` | `auto` \| `deck-oled` \| `deck-lcd` \| `tv` | `auto` | Detected from DMI (`Galileo` = OLED, `Jupiter` = LCD, else `tv`). Affects quality and refresh rates. |
+| `device` | `auto` \| `deck-oled` \| `deck-lcd` \| `tv` | `auto` | Detected from DMI (`Galileo` = OLED, `Jupiter` = LCD, else `tv`). Affects the default quality. |
 | `quality` | `auto` \| `battery` \| `balanced` \| `high` | `auto` | Rendering profile; `auto` = `balanced` on Deck, `high` on tv. |
 | `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). |
-| `refresh_match` | `auto` \| `off` | `auto` | Refresh-rate matching in gamescope (Deck panels). |
-| `refresh_rates` | `auto` \| range \| list | `auto` | e.g. `40-60` or `48,50,60,72,90`. |
+| `refresh_match` | `auto` \| `off` | `auto` | Refresh-rate matching in gamescope (Deck panels), D31. Default for the session; *Match refresh rate* in the playback menu toggles it. |
+| `refresh_rates` | `auto` \| range \| list | `auto` | `auto` = the rates gamescope reports for the active display; or e.g. `40-60`, `48,50,60,72,90`. |
 | `refresh_prefer` | `low` \| `high` | `low` | Lowest matching multiple (battery) or highest. |
 | `display_resample` | bool | `no` | Experimental: mpv `video-sync=display-resample`. |
 | `gpu_context` | string | `auto` | Read by the launcher. `auto` = `x11vk` under gamescope; otherwise any mpv `--gpu-context`. |
+
+## `[opensubtitles]`
+
+"Download subtitles…" in the subtitle menu (X). The menu entry only
+appears once you set your own API key (D29). Searches use
+`[playback] subtitle_languages` (English if empty).
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `api_key` | string | empty | Your personal OpenSubtitles.com API key; required for the feature (the app has no built-in key). Create one at <https://www.opensubtitles.com/consumers>: step by step in [INSTALL.md](INSTALL.md#online-subtitles-opensubtitles). Keep it private. |
+| `username` | string | empty | Optional free account (the username, not the e-mail). Without it OpenSubtitles allows only a few downloads per day. |
+| `password` | string | empty | Password of that account. Stored in plain text in this file; only sent to OpenSubtitles when logging in before the first download of a session. |
+
+Downloaded files are kept in the app's data folder (Flatpak:
+`~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/subtitles/`),
+one folder per video, and load automatically the next time that video
+plays. Delete a folder to forget its downloads.
 
 ## `[interface]`
 

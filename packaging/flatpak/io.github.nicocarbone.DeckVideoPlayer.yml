@@ -6,6 +6,8 @@ command: deckvideoplayer
 
 finish-args:
   - --share=ipc
+  # Online subtitle search/download (OpenSubtitles), and later media servers.
+  - --share=network
   - --socket=x11
   - --socket=wayland
   - --socket=pulseaudio
@@ -93,6 +95,8 @@ modules:
 
   # FFmpeg trimmed to what a player needs: every decoder/demuxer, hardware
   # decoding through VA-API and Vulkan, no encoders besides screenshot ones.
+  # libmysofa (from the runtime) enables the sofalizer filter used for
+  # headphone surround.
   - name: ffmpeg
     config-opts:
       - --disable-debug
@@ -108,6 +112,7 @@ modules:
       - --enable-libdrm
       - --enable-vaapi
       - --enable-vulkan
+      - --enable-libmysofa
       - --disable-encoders
       - --enable-encoder=png,mjpeg
     cleanup:
@@ -197,8 +202,12 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm755 app/bin/deckvideoplayer ${FLATPAK_DEST}/bin/deckvideoplayer
+      # Refresh-rate helper (gamescope_control client, D31).
+      - helper/build.sh ${FLATPAK_DEST}/bin
       - mkdir -p ${FLATPAK_DEST}/share/deckvideoplayer
       - cp -r app/share/deckvideoplayer/. ${FLATPAK_DEST}/share/deckvideoplayer/
+      # Build date + git commit for the About panel (D34; needs .git below).
+      - scripts/build-info.sh ${FLATPAK_DEST}/share/deckvideoplayer/build-info
       - install -Dm644 packaging/flatpak/${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 packaging/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
       - install -Dm644 packaging/icons/${FLATPAK_ID}.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg

@@ -18,6 +18,84 @@ there is a single process and nothing between the video and the screen.
   delay, zoom modes, playback info panel.
 - **Resume playback** per file, watched markers, auto-play next video in the
   folder.
+- **Headphone surround**: 5.1/7.1 soundtracks as 3D sound on headphones
+  (toggle in the audio menu).
+- **About** panel (library and playback menus) with version, build,
+  licence and credits.
+- **Download subtitles** from OpenSubtitles.com from the subtitle menu
+  (needs your own free API key in `config.ini`: see
+  [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).
+
+## Why another video player?
+
+The Steam Deck can already play video, so this needs explaining. The gap
+is **Game Mode**: watching your own files from the couch with the
+controller, at the panel's full quality (HDR, the right refresh rate), with
+no Desktop Mode detour and no media server. When this project started
+(October 2026) we could not find a player that did all of that. Here is
+what exists and where it falls short. Corrections are welcome.
+
+- **[Kodi](https://kodi.tv)** is the closest alternative, and it does far
+  more than this app: library scraping, posters, add-ons, SMB/NFS,
+  Plex/Jellyfin add-ons. It runs in Game Mode and its interface is made for
+  controllers. A November 2025 report from Game Mode on a Deck found that
+  HDR is not detected, hardware decoding is not enabled out of the box, and
+  Kodi cannot stop the dimming/sleep timers during playback
+  ([xbmc#27490][kodi-issue]). Kodi 22 (in beta) adds HDR on Wayland
+  ([9to5Linux][kodi22]), but Game Mode apps run on gamescope's Xwayland, so
+  whether that reaches the Deck is untested. **If you don't need HDR, Kodi
+  is a mature choice with many more features.**
+- **[Plex HTPC](https://flathub.org/apps/tv.plex.PlexHTPC) and
+  [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop)** are
+  controller-friendly, mpv-based and run in Game Mode, but they need a
+  media server running somewhere. We could not confirm HDR output on Linux
+  in an official release of either. Jellyfin's HDR request is still open:
+  HDR worked in an experimental rewrite that was abandoned in August 2026
+  ([jellyfin-desktop#523][jmp-hdr]). If you already run one of those
+  servers, try its client first (Plex support here is only planned, see
+  the [roadmap](docs/ROADMAP.md)).
+- **[mpv](https://mpv.io)** itself (Flathub `io.mpv.Mpv`) is the engine
+  this app uses, and it can output real HDR in Game Mode with the right
+  settings (Vulkan, `gpu-next`, gamescope's WSI layer; see the
+  [LevelUpTalk guide][mpv-guide] or [DECISIONS D5](docs/DECISIONS.md)).
+  But it has no file browser, and the Flathub build has no gamepad support
+  (you would map the controller to keys with Steam Input), so it takes
+  manual setup. This app is, in effect, that setup done for you plus a
+  controller interface.
+- **VLC, Haruna, Celluloid, SMPlayer** are good Desktop Mode players.
+  Their interfaces need a mouse or the touchscreen, and we found no
+  reports of them outputting HDR in Game Mode.
+- **[240-MP](https://github.com/anthonycaccese/240-MP)** is an mpv-based
+  player for the Deck with gamepad controls, built around a retro VCR look
+  rather than a library browser.
+
+What Deck Video Player adds is deliberately narrow:
+- a controller-first library for local folders and the SD card;
+- real HDR10 output through gamescope and VA-API hardware decoding;
+- refresh-rate matching (48 Hz for 24 fps films and so on), which none of
+  the players above document doing in Game Mode;
+- resume, headphone surround, subtitle downloads;
+- a Steam shortcut with artwork.
+
+All of it needs no server and no setup beyond choosing a folder. It is
+**not** a media center: there is no metadata scraping or posters, and no
+network shares yet.
+
+Our own caveats:
+- Refresh-rate matching is confirmed on a Steam Deck OLED. HDR is verified
+  in gamescope on a desktop PC; testing on a Deck is ongoing.
+- Players in Game Mode have been reported to be interrupted by the Deck's
+  dim/sleep timers even when they ask the system to stay awake
+  ([SteamOS#2619][sleep-issue]). Whether this app is affected is still
+  being checked. Decky plugins such as
+  [ScreenSaverEnhancements][sse] work around it.
+
+[kodi-issue]: https://github.com/xbmc/xbmc/issues/27490
+[kodi22]: https://9to5linux.com/kodi-22-piers-promises-hdr-passthrough-on-opengl-and-hdr-on-wayland
+[jmp-hdr]: https://github.com/jellyfin/jellyfin-desktop/issues/523
+[mpv-guide]: https://leveluptalk.com/news/watch-hdr-content-steam-deck-oled-guide/
+[sleep-issue]: https://github.com/ValveSoftware/SteamOS/issues/2619
+[sse]: https://github.com/Grails125/ScreenSaverEnhancements
 
 ## Documentation
 
@@ -29,6 +107,7 @@ there is a single process and nothing between the video and the screen.
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Decision log with alternatives and reasons |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | Every source file and module API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, unit/headless/Flatpak/on-device testing, building, releasing, recipes |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Planned releases (v0.2 audio/subtitles, v0.3 Plex) and guiding rules |
 | [AGENTS.md](AGENTS.md) | Quick orientation for AI agents and new contributors |
 
 ## Install on SteamOS
@@ -113,11 +192,12 @@ Steam (game mode) ─ launches ─▶ flatpak run … deckvideoplayer (launcher 
   gamescope WSI layer (Flatpak extension
   `org.freedesktop.Platform.VulkanLayer.gamescope`) exposes HDR10 swapchain
   formats and mpv switches to them for HDR content.
-- **Refresh-rate matching:** sets the `GAMESCOPE_DYNAMIC_REFRESH` root window
-  property (what Steam's per-game refresh slider uses), choosing from the
-  panel's valid rates (Deck OLED: 45–90 Hz in gamescope's list, LCD:
-  40–60 Hz), and restores the previous value afterwards. VRR displays don't
-  need it: gamescope follows mpv's frame pacing.
+- **Refresh-rate matching:** asks gamescope for a multiple of the video's
+  frame rate through the same control protocol Steam's refresh slider uses
+  (small helper `dvp-gamescope-refresh`), choosing from the rates gamescope
+  reports for the panel, then checks that the switch really happened and
+  restores the previous rate afterwards. VRR displays don't need it:
+  gamescope follows mpv's frame pacing.
 - **Battery:** VA-API decoding with dmabuf import into Vulkan (no copies),
   `video-sync=audio` without interpolation, the "balanced" rendering profile
   on the Deck (cheap downscaling, no HDR peak detection). `quality = battery`
@@ -138,12 +218,16 @@ app/share/deckvideoplayer/mpv/scripts/deckplayer/
     dvp/browser.lua library screen          dvp/player.lua  playback overlay, menus, info
     dvp/menu.lua    modal list menus        dvp/ui.lua      ASS drawing toolkit, button glyphs
     dvp/display.lua device, HDR, refresh    dvp/library.lua sources + directory listing
+helper/                                  dvp-gamescope-refresh (gamescope_control client, C)
     dvp/resume.lua  resume/watched store    dvp/media.lua   track/codec/HDR descriptions
     dvp/config.lua  config.ini parser       dvp/input.lua   gamepad/keyboard → actions
+    dvp/surround.lua headphone surround     dvp/opensubtitles.lua  OpenSubtitles API client
+    dvp/subdownload.lua subtitle download menu + storage
+app/share/deckvideoplayer/hrtf/          HRTF data for headphone surround
 packaging/flatpak/    Flatpak manifest, .desktop, metainfo
 packaging/steam/      Steam library artwork (SVG sources + PNG)
 scripts/              build, SteamOS installer, Steam shortcut helper, dev runner
-tools/                test tooling: test media, headless gamescope runner, IPC driver
+tools/                test tooling: test media, headless gamescope runner, IPC driver, mock API
 tests/                Lua unit tests (run inside mpv)
 docs/                 full documentation
 ```
@@ -163,22 +247,25 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 ## Roadmap
 
-- Network shares (SMB/NFS browsing) and Plex/Jellyfin sources: `library.lua`
-  is structured around "sources" so these can be added as new kinds.
-- Thumbnails / posters in the browser.
-- Touchscreen support.
+See [docs/ROADMAP.md](docs/ROADMAP.md): v0.2 adds headphone surround and
+online subtitles, v0.3 Plex; later Jellyfin, network shares, thumbnails and
+touch input.
 
 ## Known limitations / to verify on hardware
 
 - Developed and tested in nested/headless gamescope on a desktop, including
   the HDR10 swapchain switch and the refresh-rate property; final validation
   on a Steam Deck OLED is still needed.
-- Steam may re-apply its own per-game refresh setting when you change it in
-  the Quick Access Menu; the app sets its rate again on the next video.
+- Steam's Quick Access Menu shows its own refresh setting (e.g. 90 Hz), not
+  the rate the app switched to; the performance overlay shows the real one.
+  Moving that slider takes the rate back until the next video or unpause.
+  Matching can be turned off in the playback menu.
 - Whether the Deck dims the screen during long videos in game mode
   (gamescope has no idle-inhibit protocol) still needs checking.
 
 ## License
 
 GPL-2.0-or-later (same as mpv). The bundled Inter font is under the SIL Open
-Font License.
+Font License. The HRTF data used for headphone surround (MIT KEMAR, Gardner
+and Martin 1995) has no usage restrictions; see
+`app/share/deckvideoplayer/hrtf/README.md`.

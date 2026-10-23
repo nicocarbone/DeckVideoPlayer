@@ -13,6 +13,8 @@
 #     Series/Season 1/Show S01E01..03.mp4         6 s each -> auto-play next,
 #         watched markers, breadcrumbs
 #     Documentaries/Nature_Documentary_Part_1..14.mp4 -> scrolling, natural sort
+#     This.Is.A.Very.Long.Movie.Title…-GROUPNAME.mkv  symlink to the long film
+#         (sorts last) -> truncation and scrolling of long names
 #
 # Note: the series/documentary clips are H.264 4:4:4 (from the RGB test
 # source), which GPUs cannot decode in hardware; mpv falls back to software
@@ -59,4 +61,6 @@ done
 for i in $(seq 1 14); do
     cp "$out/Series/Season 1/Show S01E01.mp4" "$out/Documentaries/Nature_Documentary_Part_$i.mp4"
 done
+ln -sf "A Long Film (2023).mkv" \
+    "$out/This.Is.A.Very.Long.Movie.Title.With.Many.Words.WWMM.2024.2160p.UHD.BluRay.REMUX.HDR10.HEVC.TrueHD.Atmos.7.1-GROUPNAME.mkv"
 echo "Test library ready in $out"

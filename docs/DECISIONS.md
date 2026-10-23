@@ -73,6 +73,10 @@ of deleting them.
 
 ## D6. Refresh-rate matching via `GAMESCOPE_DYNAMIC_REFRESH`
 
+> **Superseded by D31** (2026-10-23): the property has no lasting effect on
+> gamescope ≥ 3.13. Kept for the history; the rate selection rules below
+> still apply.
+
 - **Decision:** set gamescope's root-window property to an integer multiple
   of the video frame rate, choosing from the panel's valid rates; restore it
   afterwards.
@@ -144,6 +148,9 @@ the one tapped.
 
 ## D12. Text width estimation
 
+> **Superseded by D32** (2026-10-23): per-character-class widths measured
+> from Inter, plus scrolling for text that doesn't fit.
+
 - **Decision:** `width ≈ chars × 0.5 × font_size`, plus `\clip` on list rows.
 - **Why:** libass has no cheap per-string measuring call from Lua.
   (`compute_bounds` exists on overlays but measures a whole overlay.) The
@@ -157,6 +164,8 @@ the one tapped.
   without Inter, libass falls back to the default sans font.
 
 ## D14. Removable media from `/proc/self/mountinfo`
+
+> Extended by D33: the mount's source device names the volume ("SD Card").
 
 - **Why:** listing `/run/media/*` also showed other users' directories. Real
   mount points under `/run/media/` or `/media/` are exactly the SD card and
@@ -268,3 +277,252 @@ Recorded so they are not re-proposed without new evidence:
   `/.flatpak-info` exists (the bundled mpv always has `sdl2-gamepad`).
 - **Why:** saves one extra mpv start (≈25–90 ms) per launch. Source:
   ISSUES.md 2.4.
+
+## D27. Headphone surround with sofalizer and the MIT KEMAR HRTF (v0.2)
+
+- **Decision:** 5.1/7.1 audio can be rendered binaurally for headphones
+  with FFmpeg's `sofalizer` filter (`dvp/surround.lua`). The filter is in
+  the chain only while the decoder outputs more than two channels
+  (`audio-params/channel-count`, which is measured before filters, so
+  inserting it doesn't retrigger the observer). Stereo is never touched.
+  Off by default; toggled in the audio menu or with
+  `[playback] headphone_surround`.
+- **HRTF file:** `mit_kemar_normal_pinna.sofa` (1.2 MB, "without any
+  usage restrictions", citation requested) is committed in
+  `app/share/deckvideoplayer/hrtf/` so dev runs and the Flatpak use the
+  same file. SADIE II (Apache-2.0) was the alternative but is 36 MB per
+  head. Provenance and checksum: `hrtf/README.md`.
+- **Gain +6 dB:** measured with uncorrelated pink noise on 5.1, sofalizer
+  at 0 dB is about 6 dB quieter than mpv's own stereo downmix; +6 dB makes
+  toggling level-neutral (−29.7 vs −29.5 dB mean).
+- **Cost:** well under 1 % of one core (frequency-domain convolution).
+  Note that sofalizer resamples to the HRTF's 44.1 kHz; PipeWire takes
+  that rate as is.
+- **Build:** FFmpeg gets `--enable-libmysofa` (library and headers are in
+  the Freedesktop 25.08 runtime/SDK, no new module).
+- **Why not automatic:** mpv can't tell headphones from speakers (the
+  PipeWire sink is the same for the Deck's speakers and its jack).
+  Unavailable with `audio_passthrough` (compressed audio can't be
+  filtered, and a receiver means speakers).
+- **Filter string:** the graph is passed to `af add` with mpv's
+  `%length%` quoting, and the path is escaped for both FFmpeg levels
+  (`Surround.escape_lavfi`), so any install path works (tested with
+  `: , [ ] '` in the path). If the filter fails (an mpv/FFmpeg without
+  libmysofa), the toggle disappears instead of retrying.
+
+## D28. Online subtitles: OpenSubtitles, stored per video hash (v0.2)
+
+- **Provider:** OpenSubtitles.com REST API, the only large provider with a
+  documented API. Others (Addic7ed, Subscene successors) mean scraping.
+- **Search:** two requests in parallel: by the OpenSubtitles file hash
+  (exact release match) and by a title parsed from the file name
+  (`parse_release`: "Show.S01E02" → title + season/episode, "Film (2019)"
+  → title + year, release junk cut, show folder used for bare "S01E02"
+  names). Results are merged and ranked: preferred language, exact match,
+  human translation, downloads. Languages come from
+  `[playback] subtitle_languages` (ISO 639-2 mapped to OpenSubtitles
+  codes), English if empty.
+- **Storage:** video folders are read-only in the Flatpak, so downloads go
+  to `<data dir>/subtitles/<moviehash>/<release>.<lang>.srt`. Keying by
+  the hash means renaming or moving the video keeps its subtitles.
+- **Reloading:** an `on_preloaded` hook `sub-add`s stored files with the
+  `auto` flag before track selection, so the usual language rules and a
+  resumed subtitle choice include them. With no downloads at all, nothing
+  is hashed (one `readdir`).
+- **Re-download protection:** picking a release that is already stored
+  selects the existing file; no quota is spent.
+- **HTTP:** curl subprocess, asynchronous (`command_native_async`), with
+  its configuration (API key, password, JSON body) on stdin via `-K -`, so
+  secrets never appear in a process list. Parameters are sent sorted and
+  lowercase, as the API asks (it redirects otherwise).
+- **UI:** the results menu opens immediately with "Searching…" and is
+  filled in place (`menu:update`) when both requests finish; failures show
+  "Search failed" plus a toast with the reason.
+
+## D29. OpenSubtitles API key and account
+
+- **Facts:** every request needs a consumer API key and a User-Agent
+  naming the app. Downloads without an account are limited per IP (a few
+  per day); a free account raises the limit. Searching doesn't count.
+- **Decision:** no API key is built in. Each user creates a personal key
+  (free, at opensubtitles.com/consumers) and sets `[opensubtitles]
+  api_key`; without it the feature shows no UI. The step-by-step is in
+  INSTALL.md, the config template and CONFIGURATION.md.
+- **Why:** the source code is meant to be public. A key in the code (what
+  Kodi's add-on does) would be in the git history for anyone to reuse, and
+  abuse would get it blocked for every user. A personal key also keeps
+  each user's usage on their own quota.
+- **Rejected alternative:** a built-in key, written into the code during
+  development and removed before committing; never commit a real key.
+- Username and password are optional, stored in `config.ini` (a
+  user-owned file), and only used to log in once per session before the
+  first download.
+- **User-Agent:** `DeckVideoPlayer v<dvp/version.lua>`.
+
+## D30. Mock server for network features
+
+- **Decision:** `tools/mock-opensubtitles.py` implements the four
+  endpoints the app uses; `OSMOCK=1 tools/headless-run.sh` starts it and
+  points the app at it with the development-only script option
+  `deckplayer-opensubtitles_url`. It logs each request with its Api-Key,
+  Authorization and User-Agent headers.
+- **Why:** the download flow (search, login, download, quota and network
+  errors, reload on replay) can be tested headlessly and repeatably,
+  without a key, without spending quota and without depending on the
+  service being up. Future Plex work should follow the same pattern.
+
+## D31. Refresh-rate requests through the gamescope_control protocol
+
+- **Bug (found on a Deck, 2026-10-23):** the app said "48 Hz" for a 24 fps
+  film while Steam's performance overlay showed 90 Hz. Since gamescope 3.13
+  (late 2023), `steamcompmgr.cpp` recomputes the dynamic refresh target on
+  every painted frame (`_update_app_target_refresh_cycle` resets it, then
+  derives it from the *app refresh-cycle override*), so a
+  `GAMESCOPE_DYNAMIC_REFRESH` written by a client is overwritten at the next
+  frame. The override is set by Steam through the private
+  `gamescope_control.set_app_target_refresh_cycle` Wayland request. Our
+  headless test only checked that the property was written, never that the
+  display changed (headless/nested gamescope can't switch rates).
+- **Decision:** send the same request Steam sends, from a tiny C helper
+  (`helper/dvp-gamescope-refresh.c`, built into `/app/bin`):
+  `set HZ` with flags `internal_display` (when the active display is
+  internal), `allow_refresh_switching` and `only_change_refresh_rate` (no
+  frame limiter: mpv paces video itself). gamescope picks the highest valid
+  rate divisible by HZ, so we pass the exact rate we chose (48, not 24, which
+  would give 72). `set 0` gives the display back.
+- **Rates from gamescope:** `info` returns the `active_display_info` event's
+  valid refresh rates, which replace our hard-coded Deck tables. A display
+  reporting fewer than two rates (TVs, nested/headless gamescope) is not
+  switched. `refresh_rates` in config.ini still overrides the list.
+- **Trust but verify, where possible:** gamescope publishes the rate in
+  effect in the `GAMESCOPE_DISPLAY_REFRESH_RATE_FEEDBACK` root property,
+  but only on its *first* Xwayland server. SteamOS game mode runs Steam
+  there and games on the second one, and the Flatpak can only reach its own
+  X server, so on a Deck the property is not readable. Two seconds after a
+  request the app tries: confirmed → "48 Hz (matched)"; contradicted →
+  "90 Hz (asked for 48 Hz)" and no badge; unreadable (the Deck case) →
+  "48 Hz (requested)", badge shown, `display-fps-override` set to the
+  request. mpv's own `display-fps` is no help: gamescope gives Xwayland a
+  fixed output mode, so it keeps saying ~90 Hz (89.89 on the OLED).
+  `XWAYLAND2=1 tools/headless-run.sh` reproduces the two-server layout.
+- **Competing with Steam:** the override is global and last-writer-wins;
+  Steam re-sends its own (e.g. from the Quick Access Menu). The app asks
+  again on every file and when playback resumes from pause, if the live
+  rate drifted. On restore it asks for the rate the display had before
+  (or native when that was the maximum).
+- **Why a helper and not Lua:** mpv's Lua can't speak Wayland; LuaJIT FFI
+  to libwayland-client would need the protocol's interface tables by hand.
+  The helper is ~150 lines, uses the vendored protocol XML (MIT, from
+  gamescope) and needs no new sandbox permission (`xdg-run/gamescope-0` was
+  already granted for the HDR layer). A one-shot process per request is
+  fine: requests happen about twice per file.
+- **Verified on a Deck OLED (2026-10-23):** a 24 fps film switches the panel
+  to 48 Hz (Steam's performance overlay shows 48 Hz). The Quick Access
+  Menu's refresh slider keeps showing Steam's own value (90 Hz); that is
+  expected, Steam doesn't know about our request. Moving the slider makes
+  Steam's value win until the next file or unpause.
+- **Toggle:** "Match refresh rate" in the playback menu switches matching
+  on/off for the session (`set_matching`); `refresh_match` in config.ini is
+  the default. Off restores the previous rate immediately.
+
+## D32. Text measuring per character class, and scrolling long text
+
+- **Bug (found on a Deck, 2026-10-23):** in the playback menu, a long
+  subtitle name (downloaded subtitles are named after the release) ran out
+  of the side panel to the left and covered the "Subtitles" label. Menu
+  values were never shortened, only labels; and the flat estimate
+  `0.5 × size` per character under-measured capitals and wide letters.
+- **Measuring:** `ui.text_width` sums per-character widths by class
+  (narrow `iIl.,:;·` 0.28 em, semi-narrow `ftr()-/` 0.39, wide `mwMW@%`
+  0.92, capitals 0.68, digits 0.6, other lowercase and punctuation 0.58,
+  accented/Cyrillic 0.6, CJK 1.0, emoji 1.2), averaged per disjoint class
+  from Inter's real advance widths (fontTools on the bundled TTFs; a first
+  version averaged lowercase *including* the narrow letters, 0.53, and
+  under-measured URLs). libass sizes
+  text by ascender+descender (1.21 em for Inter), so 1 em = 0.826 `\fs`;
+  calibrated against a real render (a 96-character release name at size 23
+  measures ~955 units, the estimate gives 900–1010). Bold is +4 %.
+  `fit_text` cuts by that measure and appends "…". Exact measuring with
+  `compute_bounds` would need an overlay render per string; not worth it.
+- **Menu rows** (`Menu.split_row`): label and value get their full width
+  when both fit; otherwise the label keeps up to 45 % and the value the
+  rest, both shortened.
+- **Scrolling (marquee):** the selected menu row (its value if cut, else
+  its label) and the selected library entry scroll inside their box when
+  cut: 1.2 s rest showing the "…" version, scroll at 45 units/s, 1.2 s
+  rest at the end, three passes, then stop on the "…" version. Pixel-smooth
+  via `\clip` + moving `\pos`, redrawn at 24 Hz *only while scrolling*;
+  the timer stops by itself (battery rule). Not used for the playback
+  title (fits left of an open side panel instead) or the info panel.
+- **No wrapping:** every text event has `\q2`; libass would otherwise wrap a
+  long line (seen while the library entry scrolled).
+- `tools/make-test-media.sh` adds a long-named symlink to the test library
+  so this stays covered.
+
+## D33. Removable volumes named by device: "SD Card", "USB drive"
+
+- **Request (2026-10-23):** the microSD card appeared as its UUID.
+- **Decision:** `parse_mountinfo` also returns the mount's source device
+  (the field after ` - fstype`), which stays the real device inside the
+  Flatpak because it describes the filesystem, not the bind mount.
+  `removable_info(path, source)`: `/dev/mmcblk*` → kind `sdcard`, "SD Card"
+  (or "SD Card (Label)" when the volume has a real label), SD-card icon;
+  `/dev/sd*` / `/dev/nvme*` → kind `usb`, its label or "USB drive",
+  drive icon; anything else keeps the folder name. Folder names that are
+  IDs (UUIDs, FAT/exFAT serials like `1A2B-3C4D`, kernel names like
+  `mmcblk0p1`) count as "no label". Duplicate names get " 2", " 3".
+
+## D34. About panel
+
+- **Decision:** "About" at the end of the library menu and the playback
+  menu opens a side panel (`dvp/about.lua`): version (`dvp/version.lua`),
+  build date and git commit, developer, repository, licence, copyright,
+  no-warranty note; mpv / FFmpeg / Lua versions, detected device, settings
+  and data paths (what a bug report needs); credits (mpv, FFmpeg,
+  libplacebo, libass, LuaJIT, Inter, MIT KEMAR HRTF, OpenSubtitles) and the
+  trademark notice (not affiliated with Valve).
+- **Build info:** `scripts/build-info.sh` writes
+  `/app/share/deckvideoplayer/build-info` (`date=`, `commit=`) during the
+  Flatpak build; the commit gets `-modified` when built with uncommitted
+  changes, so test builds are recognisable. The manifest no longer skips
+  `.git` (1.5 MB) so the commit is available, also in CI. Running from
+  source shows "development build".
+- **Developer name:** the GitHub handle (`About.DEVELOPER`,
+  `About.COPYRIGHT`), already public in the repository URL and the
+  metainfo. A copyright line also names the holder of the GPL'd code.
+- Rows are plain menu items (selectable, no action), so long values scroll
+  when selected (D32).
+
+## D35. Second audit (ISSUES.md Part II, v0.2.0) resolved
+
+Reviewed on 2026-10-23; each item verified against the code (and, for 1.3,
+reproduced) before fixing:
+- **Per-file track choices and delays (1.3):** reproduced: after choosing
+  audio track 2, "Subtitles off" or an audio/subtitle delay, the *next*
+  file inherited them (mpv keeps runtime changes of `aid`, `sid`,
+  `sub-delay`, `audio-delay`). `on_load` now sets them file-locally
+  (`aid=auto`, `sid=auto`/`no` per `[playback] subtitles`, delays 0) before
+  the saved choice from resume.json, so changes are undone when a file
+  ends. Volume, subtitle size/position and speed stay session-wide on
+  purpose.
+- **Downloaded subtitle names (1.2):** stored as
+  `<release> #<file_id>.<lang>.srt`, so different uploads with the same
+  release name no longer collide; re-picking the same upload still reuses
+  the file. Track titles strip the id.
+- **API key not sent with the file download (2.1);** language codes from
+  the API lowercased before ranking (1.4); error toast only while the
+  results menu is still open, `menu:refresh()` after a download (1.6).
+- **Text:** half-unit slack in the menu's scroll decision so long labels
+  with short values scroll (1.1); the marquee restarts when the text
+  under the same key changes, and the library re-renders when a menu over
+  it closes (1.5).
+- **Mounts (1.7):** pseudo filesystems (`tmpfs`, `autofs`, …) under
+  `/run/media` are ignored. Not adopted: "only `/dev/…` sources", which
+  would hide network mounts under `/media`.
+- **Small resets (1.8):** `display-fps-override` cleared while a new
+  refresh request is pending; `state.resumed_at` cleared at each `on_load`.
+- **Helper (2.2):** `set` rejects non-numeric rates instead of treating
+  them as 0 (= native).
+- **Release metadata (3.1):** 0.2.0 `<release>` and features added to the
+  metainfo (plus homepage/bugtracker URLs). 3.2 (ROADMAP/AGENTS status)
+  is done in the release commit.

@@ -164,10 +164,11 @@ function Ass:polygon(points, o)
 end
 
 -- Text. o: size, color, opacity, align (ASS numpad, default 4 = left-middle),
--- bold, italic, clip {x1,y1,x2,y2}, outline (px), font
+-- bold, italic, clip {x1,y1,x2,y2}, outline (px), font. Never wraps (\\q2):
+-- long text is shortened or scrolled by the caller instead.
 function Ass:text(x, y, str, o)
     o = o or {}
-    local tags = string.format("{\\an%d\\pos(%s,%s)\\fn%s\\fs%s\\b%d\\i%d\\shad0\\1c%s\\1a%s",
+    local tags = string.format("{\\q2\\an%d\\pos(%s,%s)\\fn%s\\fs%s\\b%d\\i%d\\shad0\\1c%s\\1a%s",
         o.align or 4, num(x), num(y), o.font or M.theme.font, num(o.size or 26),
         o.bold and 1 or 0, o.italic and 1 or 0, color(o.color or M.theme.text), alpha(o.opacity))
     if o.outline then
@@ -183,17 +184,128 @@ function Ass:text(x, y, str, o)
 end
 
 ---------------------------------------------------------------------------
--- Text measuring (approximation; libass has no measuring API we can call
--- cheaply per string). Average glyph width ~0.5em for Inter/DejaVu Sans.
+-- Text measuring. libass has no cheap per-string measuring API, so widths
+-- are estimated per character class from Inter's real advance widths
+-- (measured with fontTools; D32). Units: fraction of the ASS font size
+-- (libass sizes text by ascender+descender = 1.21 em for Inter, so
+-- 1 em = 0.826 \fs).
 ---------------------------------------------------------------------------
 
-function M.text_width(str, size)
-    return util.utf8_len(str) * size * 0.5
+local EM = 0.826
+-- Average advance widths per class (em), Inter Regular; classes are
+-- disjoint (the "lowercase" average excludes the narrow/semi/wide letters).
+local NARROW = {}   -- 0.28 em
+for c in ("iIlj.,:;'|!`"):gmatch(".") do NARROW[c] = true end
+local SEMI = {}     -- 0.39 em
+for c in ("ftr()[]{}\"/-"):gmatch(".") do SEMI[c] = true end
+local WIDE = {}     -- 0.92 em
+for c in ("mwMW@%"):gmatch(".") do WIDE[c] = true end
+
+local function char_em(ch)
+    local b = ch:byte(1)
+    if ch == "·" then return 0.29 end
+    if b >= 0xF0 then return 1.2 end          -- emoji etc.
+    if b >= 0xE0 then return 1.0 end          -- CJK, "…" and other 3-byte chars
+    if b >= 0x80 then return 0.6 end          -- accented Latin, Greek, Cyrillic
+    if ch == " " then return 0.28 end
+    if NARROW[ch] then return 0.28 end
+    if SEMI[ch] then return 0.39 end
+    if WIDE[ch] then return 0.92 end
+    if ch:match("%u") then return 0.68 end
+    if ch:match("%d") then return 0.6 end
+    return 0.58                                -- other lowercase and punctuation
 end
 
-function M.fit_text(str, size, max_w)
-    local max_chars = math.floor(max_w / (size * 0.5))
-    return util.utf8_truncate(str, max_chars)
+local UTF8_CHAR = "[\1-\127\194-\244][\128-\191]*"
+
+function M.text_width(str, size, bold)
+    local em = 0
+    for ch in str:gmatch(UTF8_CHAR) do em = em + char_em(ch) end
+    return em * EM * size * (bold and 1.04 or 1)
+end
+
+-- Truncates with "…" so the result fits in max_w. (Half a unit of slack:
+-- widths computed as a + b - b can differ from a by a rounding error.)
+function M.fit_text(str, size, max_w, bold)
+    if M.text_width(str, size, bold) <= max_w + 0.5 then return str end
+    local unit = EM * size * (bold and 1.04 or 1)
+    local budget = max_w / unit - 1.0         -- room for the ellipsis
+    local out, em = {}, 0
+    for ch in str:gmatch(UTF8_CHAR) do
+        em = em + char_em(ch)
+        if em > budget then break end
+        out[#out + 1] = ch
+    end
+    return util.trim(table.concat(out)) .. "…"
+end
+
+---------------------------------------------------------------------------
+-- Marquee: text too long for its box scrolls inside it (selected menu row,
+-- selected library entry). One instance per screen; `redraw` is called
+-- while something scrolls. Scrolling stops after a few passes, so a screen
+-- left alone does no work (battery). Usage in a render function:
+--   m:begin(); ...; m:draw(ass, key, x, y, text, max_w, opts); ...; m:finish()
+---------------------------------------------------------------------------
+
+local Marquee = {}
+Marquee.__index = Marquee
+local MQ_SPEED, MQ_PAUSE, MQ_PASSES, MQ_FPS = 45, 1.2, 3, 24
+
+function M.marquee(redraw)
+    return setmetatable({redraw = redraw}, Marquee)
+end
+
+function Marquee:begin()
+    self.scrolling = false
+end
+
+-- Pure: horizontal offset at time t (seconds since the text was selected)
+-- for text `overflow` units wider than its box, or nil once finished.
+function M.marquee_offset(t, overflow)
+    local travel = overflow / MQ_SPEED
+    local cycle = MQ_PAUSE + travel + MQ_PAUSE
+    if t >= cycle * MQ_PASSES then return nil end
+    local phase = t % cycle
+    if phase < MQ_PAUSE then return 0 end
+    return math.min(overflow, (phase - MQ_PAUSE) * MQ_SPEED)
+end
+
+-- Draws `str` left-aligned in [x, x + max_w] at y; scrolls when it doesn't fit.
+function Marquee:draw(a, key, x, y, str, max_w, o)
+    local w = M.text_width(str, o.size, o.bold)
+    if w <= max_w + 0.5 then return a:text(x, y, str, o) end
+    if key ~= self.key or str ~= self.text then
+        self.key, self.text, self.t0 = key, str, mp.get_time()
+    end
+    local off = M.marquee_offset(mp.get_time() - self.t0, w - max_w + (o.size or 26) * 0.3)
+    if not off or off == 0 then
+        -- Resting (before scrolling, or after the last pass): "…" version.
+        if off then self.scrolling = true end
+        return a:text(x, y, M.fit_text(str, o.size, max_w, o.bold), o)
+    end
+    self.scrolling = true
+    local size = o.size or 26
+    local clipped = util.shallow_copy(o)
+    clipped.clip = {math.floor(x), math.floor(y - size), math.ceil(x + max_w), math.ceil(y + size)}
+    return a:text(x - off, y, str, clipped)
+end
+
+function Marquee:finish()
+    if self.scrolling then
+        if not self.timer then self.timer = mp.add_periodic_timer(1 / MQ_FPS, self.redraw) end
+    else
+        if self.timer then
+            self.timer:kill()
+            self.timer = nil
+        end
+    end
+end
+
+-- Forget the current text (e.g. the screen was hidden).
+function Marquee:reset()
+    self.key = nil
+    self.scrolling = false
+    self:finish()
 end
 
 ---------------------------------------------------------------------------
@@ -221,6 +333,19 @@ function Ass:icon_drive(x, cy, s, o)
     local y = cy - h / 2
     self:rect(x, y, s, h, {radius = s * 0.14, color = o.color, opacity = o.opacity})
     return self:circle(x + s * 0.78, cy, s * 0.07, {color = o.inner or M.theme.bg, opacity = o.opacity})
+end
+
+-- microSD card: portrait card with the top-right corner cut, three contacts.
+function Ass:icon_sdcard(x, cy, s, o)
+    local x1, x2 = x + s * 0.2, x + s * 0.8
+    local y1, y2 = cy - s * 0.42, cy + s * 0.42
+    local c = s * 0.2
+    self:polygon({x1, y1, x2 - c, y1, x2, y1 + c, x2, y2, x1, y2}, {color = o.color, opacity = o.opacity})
+    for i = 0, 2 do
+        self:rect(x1 + s * (0.09 + i * 0.13), y1 + s * 0.08, s * 0.07, s * 0.18,
+            {color = o.inner or M.theme.bg, opacity = o.opacity})
+    end
+    return self
 end
 
 function Ass:icon_check(cx, cy, s, o)
