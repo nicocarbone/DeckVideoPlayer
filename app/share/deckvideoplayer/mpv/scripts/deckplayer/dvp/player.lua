@@ -9,6 +9,7 @@ local util = require "dvp.util"
 local media = require "dvp.media"
 local library = require "dvp.library"
 local Menu = require "dvp.menu"
+local cropdetect = require "dvp.cropdetect"
 
 local M = {}
 M.__index = M
@@ -57,6 +58,7 @@ function M:start()
         mp.set_property_bool("keepaspect", self.zoom_defaults.keepaspect)
         self.zoom_touched = false
     end
+    self.crop_bars = false   -- video-crop itself is file-local
     self:show_overlay()
 end
 
@@ -169,7 +171,16 @@ function M:handle(action)
     if action == "confirm" or action == "playpause" then
         mp.commandv("cycle", "pause")
         self:show_overlay()
-    elseif action == "back" or action == "stop" then
+    elseif action == "back" then
+        -- B dismisses what is on screen first; with nothing shown, it stops.
+        if self.overlay_visible then
+            self:hide_overlay()
+        elseif self.info_visible then
+            self:toggle_info()
+        else
+            self.ctx.stop()
+        end
+    elseif action == "stop" then
         self.ctx.stop()
     elseif action == "left" then
         self:seek(-pb.seek_short, true)
@@ -287,12 +298,14 @@ function M:open_subtitle_menu()
     self:show_overlay()
 end
 
-local ZOOM_MODES = {"fit", "fill", "stretch"}
-local ZOOM_LABELS = {fit = "Fit", fill = "Fill (crop)", stretch = "Stretch", custom = "Custom"}
+local ZOOM_MODES = {"fit", "bars", "fill", "stretch"}
+local ZOOM_LABELS = {fit = "Fit", bars = "Crop black bars", fill = "Fill (crop)", stretch = "Stretch",
+                     custom = "Custom"}
 
 -- Current picture mode, read from mpv so it is always truthful (a user
 -- mpv.conf may set its own panscan).
 function M:zoom_mode()
+    if self.crop_bars then return "bars" end
     if not mp.get_property_bool("keepaspect", true) then return "stretch" end
     local panscan = mp.get_property_number("panscan", 0)
     if panscan >= 0.99 then return "fill" end
@@ -304,6 +317,30 @@ function M:set_zoom(mode)
     mp.set_property_number("panscan", mode == "fill" and 1.0 or 0.0)
     mp.set_property_bool("keepaspect", mode ~= "stretch")
     self.zoom_touched = true
+    if mode == "bars" then
+        self.crop_bars = true
+        self:crop_black_bars()
+    elseif self.crop_bars then
+        self.crop_bars = false
+        mp.set_property("file-local-options/video-crop", "")
+    end
+end
+
+-- Black bars encoded into the video (e.g. a 4:3 show stored as 16:9) are
+-- part of the picture for Fit/Fill: find them in the current frame and crop
+-- them away, then fit what is left. Runs once, when chosen (D42).
+function M:crop_black_bars()
+    mp.set_property("file-local-options/video-crop", "")
+    local shot = mp.command_native({"screenshot-raw", "video", "bgr0"})
+    local b = cropdetect.from_screenshot(shot)
+    shot = nil
+    collectgarbage()   -- a 4K frame is 33 MB
+    if b then
+        mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d", b.w, b.h, b.x, b.y))
+        self.ctx.toast(string.format("Cropped to %dx%d", b.w, b.h))
+    else
+        self.ctx.toast("No black bars found (try again in a brighter scene)")
+    end
 end
 
 local function cycle(list, current, dir)
@@ -531,7 +568,8 @@ function M:render()
         {"X", "Subtitles"},
         {"Y", "Audio"},
         {"MENU", "Menu"},
-        {"B", "Stop"},
+        -- The bar is only on screen when B would hide it (B again stops).
+        {"B", "Hide"},
     }, bx1, H - 34, {size = 24, outline = 1})
 
     self.layer:set(a:build())

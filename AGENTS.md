@@ -85,6 +85,9 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   OpenSubtitles keys are per user, in their `config.ini` (D29). Never
   commit details of the owner's Plex server either (addresses, names,
   library titles, ids, hashes from it): tests and docs use made-up data.
+- v0.3.1 (D42): *Crop black bars* picture mode (`dvp/cropdetect.lua`),
+  B dismisses the controls before stopping, *Recently played* on the
+  start screen.
 - Every release gets a user-facing `CHANGELOG.md` section; CI publishes
   it as the GitHub release text (D41, `docs/DEVELOPMENT.md` §7).
 - Adding or upgrading a Flatpak module: update `THIRD_PARTY_NOTICES.md`;

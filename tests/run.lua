@@ -149,6 +149,31 @@ r:update("/x.mkv", 3590, 3600, "2", "no")
 check("watched", r:is_watched("/x.mkv"))
 eq("watched has no position", r:position("/x.mkv"), nil)
 
+-- recently played: newest first, gone files skipped, marking isn't playing
+local rr = Resume.new(nil)
+rr.entries = {
+    ["/old.mkv"] = {t = 100, pos = 50},            -- entry from before v0.3.1
+    ["/a.mkv"] = {t = 300, played = 300},
+    ["/b.mkv"] = {t = 200, played = 200},
+    ["/gone.mkv"] = {t = 400, played = 400},
+    ["/hidden.mkv"] = {t = 500, played = false},
+}
+local exists = function(p) return p ~= "/gone.mkv" end
+eq("recent order", table.concat(rr:recent(5, exists), " "), "/a.mkv /b.mkv /old.mkv")
+eq("recent limit", table.concat(rr:recent(2, exists), " "), "/a.mkv /b.mkv")
+eq("recent off", #rr:recent(0, exists), 0)
+rr:mark_watched("/new.mkv")
+check("marked not recent", rr.entries["/new.mkv"].played == false)
+rr:hide_recent("/a.mkv")
+eq("hidden keeps position", rr.entries["/a.mkv"].t, 300)
+eq("hide recent", table.concat(rr:recent(5, exists), " "), "/b.mkv /old.mkv")
+rr:update("/a.mkv", 100, 3600)
+eq("played again is recent", rr:recent(1, exists)[1], "/a.mkv")
+rr:mark_unwatched("/a.mkv")
+check("unwatched stays recent", rr:recent(1, exists)[1] == "/a.mkv" and not rr:position("/a.mkv"))
+rr:mark_unwatched("/new.mkv")
+eq("unwatched never played dropped", rr.entries["/new.mkv"], nil)
+
 -- media --------------------------------------------------------------------
 eq("lang", media.language("spa"), "Spanish")
 eq("lang unknown", media.language("xyz"), "XYZ")
@@ -408,6 +433,32 @@ eq("plex auth url", Plex.auth_url("cid", "abc"),
 local qrencode = require "dvp.qrencode"
 local qok, qm = qrencode.qrcode(Plex.auth_url(string.rep("a", 32), string.rep("b", 25)))
 check("qr encodes sign-in url", qok and #qm == 45, tostring(qok and #qm))
+
+-- black bar detection ----------------------------------------------------------
+local cropdetect = require "dvp.cropdetect"
+-- A frame w x h with a picture at (px, py, pw, ph); `value` = its brightness.
+local function frame(px, py, pw, ph, value)
+    return function(x, y)
+        if x >= px and x < px + pw and y >= py and y < py + ph then return value end
+        return 8
+    end
+end
+local function box(b) return b and string.format("%dx%d+%d+%d", b.w, b.h, b.x, b.y) end
+eq("pillarbox 4:3 in 16:9", box(cropdetect.bounds(frame(240, 0, 1440, 1080, 200), 1920, 1080)), "1440x1080+240+0")
+eq("letterbox 2.39 in 16:9", box(cropdetect.bounds(frame(0, 138, 1920, 804, 200), 1920, 1080)), "1920x804+0+138")
+eq("odd bar rounded down", box(cropdetect.bounds(frame(0, 141, 1920, 798, 200), 1920, 1080)), "1920x800+0+140")
+eq("no bars", cropdetect.bounds(frame(0, 0, 1920, 1080, 200), 1920, 1080), nil)
+eq("thin edge ignored", cropdetect.bounds(frame(4, 0, 1912, 1080, 200), 1920, 1080), nil)
+eq("dark frame", cropdetect.bounds(frame(0, 0, 1920, 1080, 20), 1920, 1080), nil)
+eq("small bright spot", cropdetect.bounds(frame(900, 500, 100, 60, 200), 1920, 1080), nil)
+local raw = {}
+for y = 0, 9 do for x = 0, 15 do
+    raw[#raw + 1] = (x >= 2 and x < 14) and "\200\200\200\0" or "\0\0\0\0"
+end end
+cropdetect.SAMPLES = 16
+eq("from screenshot", box(cropdetect.from_screenshot({w = 16, h = 10, stride = 64, data = table.concat(raw)})),
+    "12x10+2+0")
+cropdetect.SAMPLES = 64
 
 -- menu ------------------------------------------------------------------------
 local Menu = require "dvp.menu"

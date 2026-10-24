@@ -82,6 +82,7 @@ plays. Delete a folder to forget its downloads.
 | `clean_names` | bool | `yes` | `The.Movie.2019.mkv` → `The Movie 2019`. |
 | `sort` | `name` \| `date` | `name` | Initial folder sort (Y toggles). |
 | `overlay_timeout` | seconds | `4` | Auto-hide delay of the playback controls. |
+| `recently_played` | number | `5` | Recently played local videos listed on the start screen, below the sources (`0` hides the list). Menu → *Remove from recently played* hides one. Plex keeps its own *Continue watching*. |
 | `accent_color` | `RRGGBB` | `1A9FFF` | Highlight color. |
 
 ## Raw mpv options

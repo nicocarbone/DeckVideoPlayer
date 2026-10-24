@@ -5,6 +5,33 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.1 (2026-10-24)
+
+Small additions and fixes from testing v0.3.0 on a Steam Deck.
+
+### New
+
+- **Recently played** on the start screen, below your folders and SD card:
+  the last 5 local videos with their progress. A plays one and continues
+  with the rest of its folder. *Menu → Remove from recently played* hides
+  an entry; `recently_played` in `config.ini` changes the number (0 turns
+  the list off).
+- **Crop black bars** in the playback menu's *Picture* setting: for videos
+  with the bars stored in the file (a 4:3 show saved as 16:9, a widescreen
+  film with bars above and below). The picture then fills as much of the
+  screen as it can. Use it in a bright scene; it applies to the current
+  video only.
+
+### Changed
+
+- **B during playback** first hides the controls (and the info panel); it
+  stops the video only when nothing is on screen.
+- With a single library folder, the app now opens at the start screen once
+  you have played something, so *Recently played* is reachable.
+- A partly watched video (Plex or local) offers both *Mark as watched* and
+  *Mark as unwatched* in the library menu; before, only *Mark as unwatched*.
+- *Sort by* is in the library menu only where the list can be sorted.
+
 ## v0.3.0 (2026-10-24)
 
 Plex streaming, and a security review of everything that touches accounts

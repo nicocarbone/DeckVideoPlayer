@@ -126,7 +126,7 @@ of deleting them.
 | Action | Library | Playback | Reason |
 |---|---|---|---|
 | A | open/play | pause | universal "confirm" |
-| B | back / quit | stop (saves position) | back = leave; resume makes it safe |
+| B | back / quit | hide controls/info; else stop (saves position) | back = dismiss what is on screen, then leave (v0.3.1: B used to stop even with the controls up); resume makes it safe |
 | X | play from start | subtitles | X/Y next to A: frequently used playback functions |
 | Y | sort | audio | |
 | D-pad ←→ | page | seek ±10 s | |
@@ -764,3 +764,48 @@ Every finding was checked against the code; all but one were valid.
 - **Alternatives:** GitHub's generated notes (a list of commit titles, not
   written for users); the metainfo `<release>` entries alone (kept, but
   short and XML-formatted for software centres).
+
+## D42. v0.3.1: black-bar crop, B dismisses first, recently played
+
+From the owner's tests on a Deck OLED.
+
+- **Crop black bars (Picture mode).** A 4:3 show stored in a 16:9 frame
+  (bars encoded into the file) got bars on all sides with Fit and still
+  side bars with Fill: mpv only knows the 16:9 frame, so Fit/Fill/Stretch
+  were right for the frame but not for the picture. The new mode finds the
+  picture in the current frame and sets the file-local `video-crop`, then
+  fits it (a 4:3 picture fills the Deck's height, bars only at the sides).
+  - Detection uses one `screenshot-raw` frame scanned in Lua
+    (`dvp/cropdetect.lua`), not mpv's `cropdetect` filter (its
+    `TOOLS/lua/autocrop.lua`): the filter needs software frames, so with
+    VA-API it would switch decoding off and on (a hitch, and 4K HEVC in
+    software stutters on the Deck). `video-crop` is applied by the VO and
+    keeps hardware decoding and HDR.
+  - On demand, not automatic: a single frame can be a dark scene (sides
+    that stay dark up to 40 % are treated as "can't tell"), and it costs a
+    frame copy (33 MB for 4K, collected right away). Per file, like the
+    other picture modes.
+- **B during playback dismisses first.** B used to stop playback even
+  when the user only wanted the controls gone. Now B hides the controls,
+  then the info panel, and stops only with nothing on screen. The hint bar
+  (visible exactly when B would hide it) says *Hide*; the playback menu
+  keeps *Stop and return to library*.
+- **Recently played** on the start screen, below the sources: the last
+  `recently_played` (default 5) local files, newest first, with their
+  progress; A plays and continues with the rest of the file's folder.
+  - From `resume.json`, which already has a timestamp per file. A separate
+    `played` time keeps *Mark as watched* from listing a file as played;
+    *Remove from recently played* sets it to false (position and marks
+    stay). Files that are gone or on a removed card are skipped (one stat
+    per listed file).
+  - Local files only: Plex already has *Continue watching* on its server
+    page, and a Plex entry would need the server to be reachable to show.
+  - With one source, the start screen used to be skipped; now it is only
+    skipped while nothing has been played, so the list is reachable for
+    everyone (B from the folder goes back to it).
+- **Mark as watched for partly watched videos.** The library menu offered a
+  single toggle, and anything with a position counted as "watched", so an
+  in-progress video (all of Plex's *Continue watching*) could only be
+  marked unwatched. A partly watched video now gets both entries; watched
+  clears the position (Plex's scrobble does the same on the server).
+  *Mark as unwatched* keeps a played local file in *Recently played*.

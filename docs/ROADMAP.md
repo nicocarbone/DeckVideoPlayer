@@ -55,6 +55,11 @@ Possible follow-ups: transcoded streams for slow remote connections
 (Plex's universal transcoder, HLS), next-episode for *Continue watching*,
 Plex Home users, server discovery without an account (GDM).
 
+## v0.3.1: polish from Deck testing
+
+Crop black bars encoded in the video, B hides the playback controls before
+stopping, recently played videos on the start screen (D42).
+
 ## Later (not scheduled)
 
 - **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`

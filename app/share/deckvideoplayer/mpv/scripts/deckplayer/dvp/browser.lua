@@ -43,14 +43,57 @@ end
 
 -- Re-reads the configured folders and mounted drives, so an SD card or USB
 -- drive inserted while the app runs shows up. Cheap (reads mountinfo).
+-- Also picks the "Recently played" files (skipping ones that are gone or
+-- on a drive that isn't inserted: one stat per listed file).
 function M:refresh_sources()
     self.sources = library.sources(self.cfg, self.ctx.plex and self.ctx.plex:sources())
+    self.recents = self.ctx.resume:recent(self.cfg.interface.recently_played, util.file_exists)
     local top = self.stack[1]
-    if top and top.is_root and #self.sources ~= 1 then
+    if top and top.is_root and not self:single_source() then
         -- No longer single-source: the folder becomes a normal level, so B
         -- goes back to the source list instead of offering to quit.
         top.is_root = nil
     end
+end
+
+-- One source and nothing recently played: the start screen is skipped.
+function M:single_source()
+    return #self.sources == 1 and #self.recents == 0
+end
+
+-- Entries of the start screen: the sources, then "Recently played".
+function M:root_entries()
+    local entries = {}
+    for _, s in ipairs(self.sources) do
+        entries[#entries + 1] = {
+            label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind, plex = s.plex,
+        }
+    end
+    if #self.recents > 0 then
+        entries[#entries + 1] = {header = true, label = "Recently played"}
+        for _, path in ipairs(self.recents) do
+            local name = util.basename(path)
+            entries[#entries + 1] = {
+                label = library.display_name(name, false, self.cfg.interface.clean_names),
+                name = name, path = path, is_dir = false, recent = true,
+            }
+        end
+    end
+    return entries
+end
+
+-- Nearest selectable entry from `i` in direction `dir` (section headers
+-- can't be selected), else the other way.
+function M:selectable(i, dir)
+    local n = #self.entries
+    for _, d in ipairs({dir, -dir}) do
+        local j = i
+        while j >= 1 and j <= n do
+            if not self.entries[j].header then return j end
+            j = j + d
+        end
+    end
+    return util.clamp(i, 1, math.max(1, n))
 end
 
 -- Rebuilds the entry list for the current location.
@@ -60,17 +103,12 @@ function M:load()
     if not loc then
         self:refresh_sources()
         -- With a single source there is no point in showing the root list.
-        if #self.sources == 1 then
+        if self:single_source() then
             local s = self.sources[1]
             self.stack = {{path = s.path, label = s.name, is_root = true, plex = s.plex}}
             return self:load()
         end
-        self.entries = {}
-        for _, s in ipairs(self.sources) do
-            self.entries[#self.entries + 1] = {
-                label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind, plex = s.plex,
-            }
-        end
+        self.entries = self:root_entries()
     elseif loc.plex then
         return self:load_plex(loc)
     else
@@ -83,7 +121,7 @@ function M:load()
     end
     self.loading = false
     local remembered = self.cursor[loc_key(loc)]
-    self.selected = util.clamp(remembered or 1, 1, math.max(1, #self.entries))
+    self.selected = self:selectable(util.clamp(remembered or 1, 1, math.max(1, #self.entries)), 1)
     self.scroll = 0
 end
 
@@ -221,6 +259,7 @@ end
 
 -- Files of the current folder from `index` onwards (for auto-play next).
 function M:playlist_from(index)
+    if self.entries[index].recent then return self:recent_playlist(self.entries[index].path) end
     local list = {}
     local first
     for i, e in ipairs(self.entries) do
@@ -237,6 +276,17 @@ function M:playlist_from(index)
     local out = {}
     for i = first, #list do out[#out + 1] = list[i] end
     return out
+end
+
+-- A recently played file continues with the rest of its own folder.
+function M:recent_playlist(path)
+    if not self.cfg.playback.autoplay_next then return {path} end
+    local out
+    for _, e in ipairs(library.list(util.dirname(path), self.cfg, self.sort) or {}) do
+        if e.path == path then out = {} end
+        if out and not e.is_dir then out[#out + 1] = e.path end
+    end
+    return out or {path}
 end
 
 function M:open_file(index, from_start)
@@ -279,12 +329,34 @@ function M:toggle_sort()
     self.ctx.toast("Sorted by " .. (self.sort == "name" and "name" or "date added"))
 end
 
+-- Marks a video watched (no position) or unwatched (no mark, no position):
+-- on the Plex server for Plex videos, in resume.json for local files.
+function M:mark(entry, watched)
+    if entry.plex then
+        local duration = (entry.state or {}).duration
+        self.ctx.plex:set_watched(entry.plex, watched, function(ok)
+            if not ok then self.ctx.toast("Plex didn't accept the change") return end
+            entry.state = {duration = duration, watched = watched or nil}
+            self:render()
+        end)
+        return
+    end
+    if watched then
+        self.ctx.resume:mark_watched(entry.path)
+    else
+        self.ctx.resume:mark_unwatched(entry.path)
+    end
+    self.ctx.resume:flush()
+    self:render()
+end
+
 function M:open_menu()
-    local items = {
-        {label = "Sort by", value = function() return self.sort == "name" and "Name" or "Date" end,
-         adjust = function() self:toggle_sort() end},
-        {label = "Reload library", action = function() self:reload() end},
-    }
+    local items = {}
+    if self:sortable() then
+        items[1] = {label = "Sort by", value = function() return self.sort == "name" and "Name" or "Date" end,
+                    adjust = function() self:toggle_sort() end}
+    end
+    table.insert(items, {label = "Reload library", action = function() self:reload() end})
     if not self:at_start() then
         table.insert(items, {label = "Go to library start", action = function()
             local top = self.stack[1]
@@ -294,28 +366,22 @@ function M:open_menu()
         end})
     end
     local cur = self.entries[self.selected]
-    if cur and not cur.is_dir and cur.plex then
-        local st = cur.state or {}
-        local watched = st.watched or st.pos
-        table.insert(items, {label = watched and "Mark as unwatched" or "Mark as watched", action = function()
-            self.ctx.plex:set_watched(cur.plex, not watched, function(ok)
-                if not ok then self.ctx.toast("Plex didn't accept the change") return end
-                cur.state = {duration = st.duration, watched = not watched or nil}
-                self:render()
-            end)
-        end})
-    elseif cur and not cur.is_dir then
-        if self.ctx.resume:position(cur.path) or self.ctx.resume:is_watched(cur.path) then
-            table.insert(items, {label = "Mark as unwatched", action = function()
-                self.ctx.resume:forget(cur.path)
+    if cur and not cur.is_dir then
+        -- A partly watched video offers both: finish it, or clear its progress.
+        local st = self:entry_state(cur) or {}
+        if not st.watched or st.pos then
+            table.insert(items, {label = "Mark as watched", action = function() self:mark(cur, true) end})
+        end
+        if st.watched or st.pos then
+            table.insert(items, {label = "Mark as unwatched", action = function() self:mark(cur, false) end})
+        end
+    end
+    if cur and not cur.is_dir and not cur.plex then
+        if cur.recent then
+            table.insert(items, {label = "Remove from recently played", action = function()
+                self.ctx.resume:hide_recent(cur.path)
                 self.ctx.resume:flush()
-                self:render()
-            end})
-        else
-            table.insert(items, {label = "Mark as watched", action = function()
-                self.ctx.resume:mark_watched(cur.path)
-                self.ctx.resume:flush()
-                self:render()
+                self:reload()
             end})
         end
     end
@@ -430,22 +496,26 @@ function M:handle(action)
     local entry = self.entries[self.selected]
     if action == "up" or action == "down" then
         if n == 0 then return end
-        local i = self.selected + (action == "up" and -1 or 1)
-        -- Wrap only on a fresh press feel: wrap at the ends.
-        if i < 1 then i = n elseif i > n then i = 1 end
+        local d = action == "up" and -1 or 1
+        local i = self.selected
+        -- Wrap at the ends; skip section headers.
+        repeat
+            i = i + d
+            if i < 1 then i = n elseif i > n then i = 1 end
+        until not self.entries[i].header or i == self.selected
         self.selected = i
         self:render()
     elseif action == "lb" or action == "rb" or action == "left" or action == "right" then
         if n == 0 then return end
         local page = self:visible_rows() - 1
         local dir = (action == "lb" or action == "left") and -1 or 1
-        self.selected = util.clamp(self.selected + dir * page, 1, n)
+        self.selected = self:selectable(util.clamp(self.selected + dir * page, 1, n), dir)
         self:render()
     elseif action == "lt" then
-        self.selected = 1
+        self.selected = self:selectable(1, 1)
         self:render()
     elseif action == "rt" then
-        self.selected = math.max(1, n)
+        self.selected = self:selectable(math.max(1, n), -1)
         self:render()
     elseif action == "confirm" then
         if not entry then return end
@@ -469,6 +539,71 @@ function M:breadcrumb()
     local parts = {"Library"}
     for _, loc in ipairs(self.stack) do parts[#parts + 1] = loc.label end
     return table.concat(parts, "  ›  ")
+end
+
+-- One list row: icon, name, and progress / watched mark / chevron.
+function M:draw_row(a, e, x0, x1, y, sel)
+    local t = ui.theme
+    local cy = y + ROW_H / 2
+    if sel then
+        a:rect(x0, y, x1 - x0, ROW_H, {radius = 14, color = t.accent})
+    end
+    local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
+    local inner = sel and t.accent or t.bg
+    local ix = x0 + 20
+    if e.source == "plex" then
+        a:icon_server(ix, cy, 30, {color = icon_color, inner = inner})
+    elseif e.source == "sdcard" then
+        a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
+    elseif e.source == "usb" or e.source == "removable" then
+        a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
+    elseif e.is_dir then
+        a:icon_folder(ix, cy, 30, {color = icon_color})
+    else
+        a:icon_video(ix, cy, 30, {color = icon_color, inner = inner})
+    end
+
+    -- Right-hand status (resume progress / watched / chevron)
+    local status_w = 0
+    local rx = x1 - 22
+    if e.is_dir then
+        a:icon_triangle(rx - 6, cy, 14, "right", {color = sel and t.text or t.dim})
+        status_w = 30
+        if e.state and e.state.watched then
+            a:icon_check(rx - 40, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
+            status_w = 62
+        end
+    else
+        local r = self:entry_state(e)
+        if r and r.watched and not r.pos then
+            a:icon_check(rx - 12, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
+            status_w = 34
+        elseif r and r.pos and r.pos >= 30 then
+            local label = util.format_time(r.pos)
+            if r.duration and r.duration > 0 then
+                local bw = 110
+                local frac = util.clamp(r.pos / r.duration, 0, 1)
+                a:rect(rx - bw, cy - 3, bw, 6, {radius = 3, color = sel and t.text or t.dim,
+                                                 opacity = sel and 0.35 or 0.6})
+                a:rect(rx - bw, cy - 3, math.max(6, bw * frac), 6,
+                    {radius = 3, color = sel and t.text or t.accent})
+                a:text(rx - bw - 14, cy, label, {size = 18, align = 6, color = sel and t.text or t.subtext})
+                status_w = bw + 14 + ui.text_width(label, 18)
+            else
+                a:text(rx, cy, "Resume " .. label, {size = 18, align = 6, color = sel and t.text or t.subtext})
+                status_w = ui.text_width("Resume " .. label, 18)
+            end
+        end
+    end
+
+    local tx = ix + 52
+    local max_w = (x1 - 22 - status_w - 24) - tx
+    local label_o = {size = FS, bold = sel, color = t.text}
+    if sel and not self.ctx.menu:is_open() then
+        self.marquee:draw(a, e.path or e.label, tx, cy, e.label, max_w, label_o)
+    else
+        a:text(tx, cy, ui.fit_text(e.label, FS, max_w, sel), label_o)
+    end
 end
 
 function M:render()
@@ -498,7 +633,7 @@ function M:render()
     end
     local counts = {}
     if not loc then
-        counts[1] = #self.entries .. (#self.entries == 1 and " source" or " sources")
+        counts[1] = #self.sources .. (#self.sources == 1 and " source" or " sources")
     elseif n_files > 0 then counts[#counts + 1] = n_files .. (n_files == 1 and " video" or " videos") end
     if loc and n_dirs > 0 then counts[#counts + 1] = n_dirs .. (n_dirs == 1 and " folder" or " folders") end
     a:text(W - margin, 50, table.concat(counts, " · "), {size = 20, align = 6, color = t.subtext})
@@ -520,66 +655,11 @@ function M:render()
         local idx = self.scroll + row
         local e = self.entries[idx]
         local y = list_top + (row - 1) * (ROW_H + ROW_GAP)
-        local cy = y + ROW_H / 2
-        local sel = idx == self.selected
-        if sel then
-            a:rect(x0, y, x1 - x0, ROW_H, {radius = 14, color = t.accent})
-        end
-        local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
-        local inner = sel and t.accent or t.bg
-        local ix = x0 + 20
-        if e.source == "plex" then
-            a:icon_server(ix, cy, 30, {color = icon_color, inner = inner})
-        elseif e.source == "sdcard" then
-            a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
-        elseif e.source == "usb" or e.source == "removable" then
-            a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
-        elseif e.is_dir then
-            a:icon_folder(ix, cy, 30, {color = icon_color})
+        if e.header then
+            a:text(x0 + 20, y + ROW_H - 18, e.label:upper(), {size = 16, bold = true, color = t.dim})
+            a:rect(x0 + 20, y + ROW_H - 4, x1 - x0 - 40, 1, {color = t.dim, opacity = 0.5})
         else
-            a:icon_video(ix, cy, 30, {color = icon_color, inner = inner})
-        end
-
-        -- Right-hand status (resume progress / watched / chevron)
-        local status_w = 0
-        local rx = x1 - 22
-        if e.is_dir then
-            a:icon_triangle(rx - 6, cy, 14, "right", {color = sel and t.text or t.dim})
-            status_w = 30
-            if e.state and e.state.watched then
-                a:icon_check(rx - 40, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
-                status_w = 62
-            end
-        else
-            local r = self:entry_state(e)
-            if r and r.watched and not r.pos then
-                a:icon_check(rx - 12, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
-                status_w = 34
-            elseif r and r.pos and r.pos >= 30 then
-                local label = util.format_time(r.pos)
-                if r.duration and r.duration > 0 then
-                    local bw = 110
-                    local frac = util.clamp(r.pos / r.duration, 0, 1)
-                    a:rect(rx - bw, cy - 3, bw, 6, {radius = 3, color = sel and t.text or t.dim,
-                                                     opacity = sel and 0.35 or 0.6})
-                    a:rect(rx - bw, cy - 3, math.max(6, bw * frac), 6,
-                        {radius = 3, color = sel and t.text or t.accent})
-                    a:text(rx - bw - 14, cy, label, {size = 18, align = 6, color = sel and t.text or t.subtext})
-                    status_w = bw + 14 + ui.text_width(label, 18)
-                else
-                    a:text(rx, cy, "Resume " .. label, {size = 18, align = 6, color = sel and t.text or t.subtext})
-                    status_w = ui.text_width("Resume " .. label, 18)
-                end
-            end
-        end
-
-        local tx = ix + 52
-        local max_w = (x1 - 22 - status_w - 24) - tx
-        local label_o = {size = FS, bold = sel, color = t.text}
-        if sel and not self.ctx.menu:is_open() then
-            self.marquee:draw(a, e.path or e.label, tx, cy, e.label, max_w, label_o)
-        else
-            a:text(tx, cy, ui.fit_text(e.label, FS, max_w, sel), label_o)
+            self:draw_row(a, e, x0, x1, y, idx == self.selected)
         end
     end
 

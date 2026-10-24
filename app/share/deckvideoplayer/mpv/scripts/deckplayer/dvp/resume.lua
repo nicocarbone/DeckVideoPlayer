@@ -63,22 +63,67 @@ function M:update(path, pos, duration, aid, sid)
     e.duration = duration and math.floor(duration) or e.duration
     e.aid, e.sid = aid, sid
     e.t = os.time()
+    e.played = e.t
     self.entries[path] = e
     self.dirty = true
 end
 
+-- Marking doesn't count as playing: a file never played stays out of
+-- "Recently played" (played = false; nil means an entry from before v0.3.1,
+-- dated by `t`).
 function M:mark_watched(path)
     local e = self.entries[path] or {}
     e.pos, e.watched, e.t = nil, true, os.time()
+    if e.played == nil and not e.duration then e.played = false end
     self.entries[path] = e
     self.dirty = true
 end
 
-function M:forget(path)
-    if self.entries[path] then
+-- Clears the position and watched mark. A played file stays in "Recently
+-- played" (its timestamps are kept); anything else is dropped.
+function M:mark_unwatched(path)
+    local e = self.entries[path]
+    if not e then return end
+    if e.played then
+        e.pos, e.watched = nil, nil
+    else
         self.entries[path] = nil
+    end
+    self.dirty = true
+end
+
+-- Hides `path` from "Recently played", keeping its position and marks.
+function M:hide_recent(path)
+    local e = self.entries[path]
+    if e and e.played ~= false then
+        e.played = false
         self.dirty = true
     end
+end
+
+-- Up to `n` most recently played paths, newest first. `exists(path)`
+-- filters out files that are gone or on a drive that isn't mounted; it is
+-- called on the newest entries only, until `n` are found.
+function M:recent(n, exists)
+    if not n or n <= 0 then return {} end
+    local list = {}
+    for path, e in pairs(self.entries) do
+        local t = e.played
+        if t == nil then t = e.t end
+        if t then list[#list + 1] = {path = path, t = t} end
+    end
+    table.sort(list, function(a, b)
+        if a.t ~= b.t then return a.t > b.t end
+        return a.path < b.path
+    end)
+    local out = {}
+    for _, item in ipairs(list) do
+        if not exists or exists(item.path) then
+            out[#out + 1] = item.path
+            if #out >= n then break end
+        end
+    end
+    return out
 end
 
 local function prune(entries)

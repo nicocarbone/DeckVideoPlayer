@@ -245,9 +245,23 @@ key.
 `new(data_dir)` (nil dir = in-memory, used by tests), `get(path)`,
 `position(path)` (≥ 30 s or nil), `is_watched`, `is_finished(pos, dur)`
 (static), `update(path, pos, dur, aid, sid)` (decides pos / watched),
-`mark_watched`, `forget`, `flush()` (writes only when dirty, prunes to 1000
+`mark_watched`, `mark_unwatched` (keeps a played file in the recent list), `flush()` (writes only when dirty, prunes to 1000
 entries). Thresholds are `M.MIN_POSITION`, `M.END_MARGIN_MIN` and
 `M.END_MARGIN_FRAC`.
+
+Recently played (D42): `update()` stamps `played` (time of the last
+playback); `mark_watched()` on a never-played file sets `played = false`;
+`hide_recent(path)` sets it to `false` too. `recent(n, exists)` returns the
+`n` newest played paths, calling `exists(path)` only until `n` are found
+(entries from before v0.3.1 have no `played` and use `t`).
+
+## `dvp/cropdetect.lua`: black bars encoded in the video
+
+`bounds(pixel, w, h)` scans lines inward from each edge (`SAMPLES` pixels
+per line; dark = brightest channel ≤ `THRESHOLD`) and returns the picture
+`{x, y, w, h}` or nil (no bars; bars thinner than `MIN_BAR`; or a side
+dark up to `MAX_BAR`, i.e. a dark scene). Bars are rounded down to even
+sizes. `from_screenshot(shot)` reads a `screenshot-raw` result (bgr0).
 
 ## `dvp/display.lua`: device, profile, refresh rate
 
@@ -462,26 +476,36 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `selected`, `scroll`, `cursor[path]` (remembered selection per folder),
 `sort`.
 
-- `refresh_sources()`: re-reads `library.sources()`; clears `is_root` on the
-  top folder when the setup is no longer single-source (D23). Called by
-  `show()`, `reload()` and when listing the root.
-- `load()`: root (sources list) or folder listing. With exactly one source
+- `refresh_sources()`: re-reads `library.sources()` and the recently
+  played files (`resume:recent`, `[interface] recently_played`, D42);
+  clears `is_root` on the top folder when the setup is no longer
+  single-source (D23). Called by `show()`, `reload()` and when listing the
+  root.
+- `load()`: root (`root_entries()`: sources, then a "Recently played"
+  header entry and the recent files, `recent = true`) or folder listing.
+  With exactly one source and nothing recently played (`single_source()`)
   the root is skipped and that folder becomes the top level (`is_root`).
+- Header entries (`header = true`) are never selected: up/down skip them,
+  `selectable(i, dir)` moves page/first/last jumps off them.
 - `reload()`: refresh sources + listing, keeping the cursor. `at_start()`:
   true at the top level.
 - Navigation: `enter`, `go_back` (top level → quit dialog), `select_path`.
 - Playback: `open_file(index, from_start)` shows the resume dialog when
   there is a position; `playlist_from(index)` returns the folder's files
-  from the chosen one (if `autoplay_next`).
-- `open_menu()`: sort, reload, go to library start (whenever not
-  `at_start()`), mark (un)watched, controls, quit.
+  from the chosen one (if `autoplay_next`); for a recent file,
+  `recent_playlist(path)` lists its own folder.
+- `open_menu()`: sort (only where `sortable()`), reload, go to library
+  start (whenever not `at_start()`), mark watched / unwatched (both for a
+  partly watched video; `mark(entry, watched)` goes to Plex or
+  resume.json), remove from recently played, controls, quit.
 - Plex (D37): `load_plex(loc)` (async listing, `loading` state, drops late
   answers, `after_load` callback, e.g. to restore the cursor),
   `entry_state(e)` / `resume_position(e)` (Plex state or resume.json),
   `sortable()`, `plex_sign_in()` (code dialog, polls only while open),
   `plex_account_menu()`; `show(select)` puts the cursor on a path once
   the listing is there.
-- `render()`: background, header (title, breadcrumb, counts), rows (icon:
+- `render()`: background, header (title, breadcrumb, counts), rows
+  (`draw_row()`; header entries as a small caption with a rule) (icon:
   folder / server / SD card / drive / video, label, status: chevron / ✓ / progress
   bar + time), scrollbar, empty states, footer hints that depend on the
   selected entry. The selected label scrolls when cut (`self.marquee`,
@@ -496,12 +520,17 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   observer).
 - Picture mode (D20): `zoom_mode()` derives Fit/Fill/Stretch/Custom from
   `panscan`/`keepaspect`; `set_zoom()` marks `zoom_touched`; `start()`
-  restores `zoom_defaults` captured at script start.
+  restores `zoom_defaults` captured at script start. *Crop black bars*
+  (`crop_bars`, D42): `crop_black_bars()` takes one `screenshot-raw`
+  frame, runs `cropdetect.from_screenshot` and sets the file-local
+  `video-crop` (Fit for the rest); other modes clear it.
 - Lifecycle: `start()` (on start-file), `on_file_loaded()`, `stop_screen()`, `show_overlay()`
   (auto-hides after `overlay_timeout`; stays while paused or while a menu is
   open), `hide_overlay()`, `update_timer()` (the 0.5 s timer runs only while
   something is visible).
-- `handle(action)`: see the controls table in DECISIONS D10.
+- `handle(action)`: see the controls table in DECISIONS D10. B (`back`)
+  hides the controls, then the info panel, and only stops with nothing on
+  screen (D42); the `stop` key always stops.
   Short seeks are `relative+exact`, long seeks `relative+keyframes`.
   `chapter(dir)`: going back first jumps to the start of the current chapter
   when more than 3 s into it; with no chapters it seeks ±300 s.

@@ -51,6 +51,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.3.1" date="2026-10-24">
+      <description>
+        <p>Fixes and a small addition from testing on a Steam Deck.</p>
+        <ul>
+          <li>Recently played videos on the start screen</li>
+          <li>Crop black bars stored in the video (e.g. 4:3 shows saved as 16:9)</li>
+          <li>B hides the playback controls first, and stops only when nothing is shown</li>
+          <li>Mark as watched for partly watched videos, including Plex</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-10-24">
       <description>
         <p>Plex streaming, and a security review of the account and network code.</p>

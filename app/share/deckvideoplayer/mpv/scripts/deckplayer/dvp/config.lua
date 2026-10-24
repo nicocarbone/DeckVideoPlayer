@@ -57,6 +57,7 @@ local SCHEMA = {
         clean_names      = {default = true, type = "bool"},
         sort             = {default = "name", type = "enum", values = {"name", "date"}},
         overlay_timeout  = {default = 4, type = "number"},
+        recently_played  = {default = 5, type = "number"},
         accent_color     = {default = "1A9FFF", type = "string"},
     },
 }

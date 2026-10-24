@@ -23,9 +23,10 @@ there is a single process and nothing between the video and the screen.
 - Full **controller** control, with a UI designed for 1280×800 that scales
   to 4K TVs.
 - Audio / subtitle track selection, subtitle size/position/delay, audio
-  delay, zoom modes, playback info panel.
-- **Resume playback** per file, watched markers, auto-play next video in the
-  folder.
+  delay, picture modes (including cropping black bars stored in the video),
+  playback info panel.
+- **Resume playback** per file, watched markers, recently played list,
+  auto-play next video in the folder.
 - **Headphone surround**: 5.1/7.1 soundtracks as 3D sound on headphones
   (toggle in the audio menu).
 - **About** panel (library and playback menus) with version, build,
@@ -180,7 +181,7 @@ Uninstall with `./scripts/install-steamos.sh --uninstall`.
 | Button | Library | Playback |
 | --- | --- | --- |
 | **A** | Open folder / play | Play / pause |
-| **B** | Back (quit at top level) | Stop, back to library |
+| **B** | Back (quit at top level) | Hide the controls; with nothing on screen, stop and go back to the library |
 | **X** | Play from the beginning | Subtitles menu |
 | **Y** | Sort by name / date | Audio menu |
 | **D-pad ↑ ↓** | Move | Volume |

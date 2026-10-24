@@ -95,8 +95,11 @@ rm -rf ~/.config/deckvideoplayer ~/.var/app/io.github.nicocarbone.DeckVideoPlaye
 
 See the controls table in the [README](../README.md#controls). Notes:
 
-- The library opens directly into your folder when only one source exists.
-  With several (folders and/or SD card) you start at a list of sources. The
+- The library opens directly into your folder when only one source exists
+  and you haven't played anything yet. Otherwise you start at a list of
+  sources, followed by **Recently played** (the last 5 local videos;
+  `recently_played` in `config.ini`, *Menu → Remove from recently played*
+  hides one). The
   microSD card shows as **SD Card** (or "SD Card (Label)" if you gave it a
   name) and USB drives by their label or as **USB drive**.
 - Names too long for the screen scroll when you select them.
@@ -104,12 +107,18 @@ See the controls table in the [README](../README.md#controls). Notes:
   beginning*. **X** starts from the beginning directly.
 - Videos after the chosen one in the same folder play automatically
   (`autoplay_next`).
-- **Picture** (Fit / Fill / Stretch) in the playback menu applies to the
-  current video only; the next one starts with your normal setting.
+- **Picture** (Fit / Crop black bars / Fill / Stretch) in the playback menu
+  applies to the current video only; the next one starts with your normal
+  setting. **Crop black bars** is for bars that are part of the video file
+  (a 4:3 show stored as 16:9, a widescreen film with bars above and below):
+  Fit and Fill treat them as picture. It looks at the current frame, so
+  use it in a bright scene. Fill crops the edges of the picture instead.
+- **B** during playback first hides the controls (and then the info panel);
+  with nothing on screen it stops and returns to the library.
 - **Opening a file from a file manager or the command line** (Desktop Mode
   "Open with", `flatpak run … file.mkv`) plays it like a normal player: it
   resumes where you left off ("Resumed at …"), and the app closes when
-  playback ends or you press B.
+  playback ends or you stop it (B with the controls hidden).
 - Inserted an SD card or USB drive while the app was open? It appears when
   you return to the library, or use *Menu → Reload library*.
 - **Headphone surround** (audio menu, Y): with headphones, 5.1 and 7.1

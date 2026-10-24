@@ -216,7 +216,7 @@ local function help()
             row("X / Y", "Subtitles / audio"),
             row("View", "Playback info"),
             row("Menu", "Playback menu"),
-            row("B", "Stop"),
+            row("B", "Hide controls, then stop"),
             {label = "Close", action = function() end},
         },
     })
