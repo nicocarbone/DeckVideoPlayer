@@ -106,8 +106,9 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   default in `headless-run.sh` (never change the owner's watch history
   without `PLEX_WRITE=1`). Never let the account token reach mpv (logs):
   playback uses a transient token.
-- Planned: see `docs/ROADMAP.md` (later Jellyfin, SMB/NFS, thumbnails,
-  touch input).
+- Planned: see `docs/ROADMAP.md`. Next, in order: night mode, Plex
+  niceties (skip intro, next episode), Jellyfin, SMB/NFS; Flathub
+  publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

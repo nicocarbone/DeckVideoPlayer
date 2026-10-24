@@ -288,8 +288,9 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md): later Jellyfin, network shares,
-thumbnails and touch input. Past releases: [CHANGELOG.md](CHANGELOG.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md): next a night mode for audio,
+Plex *Skip intro* and next episode, Jellyfin and network shares; Flathub
+publication at some point. Past releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations / to verify on hardware
 

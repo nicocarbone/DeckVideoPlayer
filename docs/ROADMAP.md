@@ -60,13 +60,36 @@ Plex Home users, server discovery without an account (GDM).
 Crop black bars encoded in the video, B hides the playback controls before
 stopping, recently played videos on the start screen (D42).
 
+## Next, in this order
+
+1. **Night mode (volume leveling)**: compress the dynamic range so
+   dialogue is audible on the Deck's speakers and loud scenes don't blast.
+   An audio filter (FFmpeg `dynaudnorm`/`acompressor`, already in the
+   build) behind a toggle in the audio menu (Y) and a `config.ini` default.
+   Small.
+2. **Plex niceties**: a *Skip intro* button from the intro (and credits)
+   markers Plex already detects; the next episode in *Continue watching*
+   after finishing one. Uses data the Plex API already returns.
+3. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
+   and the asynchronous listing in the browser). A whole new source to
+   maintain.
+4. **SMB/NFS network shares**: many people keep video on a NAS. Needs
+   mounting or a userspace client: FFmpeg reads `smb://` only when built
+   with libsmbclient (GPLv3, which would move the bundle to GPLv3), or the
+   share has to be mounted outside the sandbox.
+
+## Floating (any time)
+
+- **Publish on Flathub**: install from Discover in Desktop Mode, automatic
+  updates, much wider reach. Reuses the existing Flatpak; the cost is
+  Flathub's review (justify the filesystem and network permissions, build
+  the refresh helper in their CI) and maintaining the listing. The Steam
+  shortcut and artwork still need `install-steamos.sh` or manual steps.
+  Publishing on Steam itself is possible later but needs a second build
+  for the Steam Linux Runtime.
+
 ## Later (not scheduled)
 
-- **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
-  and the asynchronous listing in the browser).
-- **SMB/NFS network shares**: needs mounting or a userspace client
-  (FFmpeg reads `smb://` only when built with libsmbclient, which our
-  build isn't).
 - **Automatic headphone detection** for surround (PipeWire port type), if
   it proves reliable through the sandbox.
 - **Thumbnails / posters** in the browser.
