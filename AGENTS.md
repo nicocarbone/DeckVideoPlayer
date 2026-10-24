@@ -88,6 +88,10 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - v0.3.1 (D42): *Crop black bars* picture mode (`dvp/cropdetect.lua`),
   B dismisses the controls before stopping, *Recently played* on the
   start screen.
+- Hardware tested informally by the owner (2026-10-24): Steam Deck OLED,
+  Steam Deck LCD, DIY Steam Machine with official SteamOS (4K HDR VRR
+  120 Hz TV; no refresh switching there, as designed). Docs describe this
+  as light testing with no warranty; keep it that way.
 - Every release gets a user-facing `CHANGELOG.md` section; CI publishes
   it as the GitHub release text (D41, `docs/DEVELOPMENT.md` §7).
 - Adding or upgrading a Flatpak module: update `THIRD_PARTY_NOTICES.md`;

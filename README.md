@@ -7,10 +7,12 @@ controls, menus) is drawn by Lua scripts on mpv's own on-screen display, so
 there is a single process and nothing between the video and the screen.
 
 > [!WARNING]
-> **Beta software.** Deck Video Player is, at best, beta quality. It has
-> only been tested on a **Steam Deck OLED** in SteamOS game mode; the Deck
-> LCD, other handhelds, DIY Steam Machines and desktop Linux are untested.
-> Expect bugs, and please [report them](https://github.com/nicocarbone/DeckVideoPlayer/issues).
+> **Beta software.** Deck Video Player is, at best, beta quality. The
+> developer has lightly tested it in SteamOS game mode on a **Steam Deck
+> OLED**, a **Steam Deck LCD** and a **DIY Steam Machine** (a PC running
+> official SteamOS, with a 4K HDR VRR TV). That is informal testing on a
+> few devices, not a guarantee that it works on yours; other handhelds and
+> desktop Linux are untested. Expect bugs, and please [report them](https://github.com/nicocarbone/DeckVideoPlayer/issues).
 > The installer edits Steam's `shortcuts.vdf` (it keeps a `.bak` copy).
 > Provided **without any warranty**, as described in the GPL (`LICENSE`).
 
@@ -116,8 +118,9 @@ All of it needs no server and no setup beyond choosing a folder. It is
 network shares yet.
 
 Our own caveats:
-- Refresh-rate matching is confirmed on a Steam Deck OLED. HDR is verified
-  in gamescope on a desktop PC; testing on a Deck is ongoing.
+- Refresh-rate matching is confirmed on a Steam Deck OLED. On TVs the app
+  doesn't switch modes (gamescope only retunes the Deck's own screen); a
+  120 Hz mode already suits 24/30/60 fps, and VRR covers the rest.
 - Players in Game Mode have been reported to be interrupted by the Deck's
   dim/sleep timers even when they ask the system to stay awake
   ([SteamOS#2619][sleep-issue]). Whether this app is affected is still
@@ -290,9 +293,10 @@ thumbnails and touch input. Past releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations / to verify on hardware
 
-- Developed and tested in nested/headless gamescope on a desktop, including
-  the HDR10 swapchain switch and the refresh-rate property; final validation
-  on a Steam Deck OLED is still needed.
+- Developed in nested/headless gamescope on a desktop, then lightly tested
+  by the developer on a Steam Deck OLED, a Steam Deck LCD and a DIY Steam
+  Machine with official SteamOS. The full on-device checklist
+  (docs/DEVELOPMENT.md §8) has not been formally completed.
 - Steam's Quick Access Menu shows its own refresh setting (e.g. 90 Hz), not
   the rate the app switched to; the performance overlay shows the real one.
   Moving that slider takes the rate back until the next video or unpause.

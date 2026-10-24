@@ -1,6 +1,7 @@
 # Installation, usage and troubleshooting
 
-> **Beta software**, tested only on a Steam Deck OLED so far. See the
+> **Beta software**, lightly tested so far on a Steam Deck OLED, a Steam
+> Deck LCD and a DIY Steam Machine with official SteamOS. See the
 > warning in the [README](../README.md); please report problems on the
 > [issue tracker](https://github.com/nicocarbone/DeckVideoPlayer/issues).
 

@@ -11,7 +11,7 @@ M.REPO = "github.com/nicocarbone/DeckVideoPlayer"
 M.LICENSE = "GPL-2.0-or-later"
 M.DEVELOPER = "nicocarbone"
 M.COPYRIGHT = "© 2026 nicocarbone"
-M.STATUS = "Beta · tested on Steam Deck OLED"
+M.STATUS = "Beta · lightly tested"
 M.TIP = "ko-fi.com/nicocarbone"
 
 -- Pure: parses the build-info file written by scripts/build-info.sh.
