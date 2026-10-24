@@ -15,6 +15,7 @@
 local utils = require "mp.utils"
 local msg = require "mp.msg"
 local util = require "dvp.util"
+local http = require "dvp.http"
 local version = require "dvp.version"
 
 local M = {}
@@ -177,27 +178,27 @@ function M.languages(slang)
     return out
 end
 
-local function urlencode(s)
-    return (s:gsub("[^%w%-%._~ ]", function(c) return string.format("%%%02X", c:byte()) end):gsub(" ", "+"))
-end
-
 -- The API redirects requests whose parameters aren't sorted and lowercase,
 -- so build them that way.
 function M.query_string(params)
-    local keys = {}
-    for k in pairs(params) do keys[#keys + 1] = k end
-    table.sort(keys)
-    local parts = {}
-    for _, k in ipairs(keys) do
-        parts[#parts + 1] = k .. "=" .. urlencode(tostring(params[k]):lower())
-    end
-    return table.concat(parts, "&")
+    return http.query_string(params, true)
 end
 
--- A double-quoted string for a curl config file.
-function M.curl_quote(s)
-    s = s:gsub('[\\"]', "\\%0"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
-    return '"' .. s .. '"'
+M.curl_quote = http.curl_quote
+
+-- Pure: `base_url` from the login response is acceptable as API host.
+function M.valid_base_url(host)
+    return type(host) == "string" and (host == "opensubtitles.com"
+        or host:match("^[%w%-]+%.opensubtitles%.com$") ~= nil)
+end
+
+-- Pure: a download link is fetched only over https, or from the API's own
+-- origin (only differs when tests point `api_url` at a local mock).
+function M.valid_link(link, api_url)
+    if type(link) ~= "string" then return false end
+    if link:match("^https://[^/]") then return true end
+    local origin = tostring(api_url or ""):match("^https?://[^/]+")
+    return origin ~= nil and link:sub(1, #origin + 1) == origin .. "/"
 end
 
 -- Flattens a /subtitles response into result records.
@@ -281,12 +282,6 @@ function M.error_message(code, body, during)
     return "OpenSubtitles error " .. code
 end
 
--- curl exit codes worth explaining (everything else: "Network error").
-local CURL_ERRORS = {
-    [6] = "No internet connection", [7] = "No internet connection",
-    [28] = "OpenSubtitles did not answer (timeout)", [35] = "Secure connection failed",
-}
-
 ---------------------------------------------------------------------------
 -- Client
 ---------------------------------------------------------------------------
@@ -306,51 +301,19 @@ function M:enabled()
     return self.api_key ~= ""
 end
 
--- Runs one HTTP request. req: {method, url, body (table), auth (bool),
--- output (file path)}. cb(code, body): code is the HTTP status, or nil with
--- body = error text when no response arrived; body is decoded JSON when
--- possible, else the raw text.
+-- Runs one request (dvp/http.lua). req: url, body (table), auth (bool),
+-- output (file path). cb(code, body) as in http.request.
 function M:http(req, cb)
-    local q = M.curl_quote
-    local lines = {
-        "silent", "show-error", "max-time = 25",
-        "write-out = " .. q("\n%{http_code}"),
-        "user-agent = " .. q(M.USER_AGENT),
-    }
+    local headers = {["User-Agent"] = M.USER_AGENT}
     -- API calls only: the subtitle file itself comes from a download link
     -- (possibly another host), which must not receive the key.
     if not req.output then
-        lines[#lines + 1] = "header = " .. q("Api-Key: " .. self.api_key)
-        lines[#lines + 1] = "header = " .. q("Accept: application/json")
+        headers["Api-Key"] = self.api_key
+        headers["Accept"] = "application/json"
     end
-    if req.auth and self.token then
-        lines[#lines + 1] = "header = " .. q("Authorization: Bearer " .. self.token)
-    end
-    if req.body then
-        lines[#lines + 1] = "header = " .. q("Content-Type: application/json")
-        lines[#lines + 1] = "data-binary = " .. q(utils.format_json(req.body))
-    else
-        lines[#lines + 1] = "location"
-    end
-    if req.output then lines[#lines + 1] = "output = " .. q(req.output) end
-    lines[#lines + 1] = "url = " .. q(req.url)
-    mp.command_native_async({
-        name = "subprocess", args = {"curl", "-K", "-"},
-        stdin_data = table.concat(lines, "\n") .. "\n",
-        capture_stdout = true, capture_stderr = true, playback_only = false,
-    }, function(ok, res)
-        if not ok or not res or res.status ~= 0 then
-            local status = res and res.status
-            msg.warn("opensubtitles: curl failed (" .. tostring(status) .. "): " .. util.trim(tostring(res and res.stderr)))
-            cb(nil, CURL_ERRORS[status] or "Network error")
-            return
-        end
-        local out = res.stdout or ""
-        local code = tonumber(out:match("(%d%d%d)%s*$"))
-        local text = out:gsub("\n?%d%d%d%s*$", "")
-        local body = utils.parse_json(text)
-        cb(code, body ~= nil and body or text)
-    end)
+    if req.auth and self.token then headers["Authorization"] = "Bearer " .. self.token end
+    http.request({url = req.url, headers = headers, body = req.body, output = req.output,
+                  follow = req.follow, max_size = req.max_size, tag = "opensubtitles"}, cb)
 end
 
 -- Searches with one parameter set. cb(results or nil, err).
@@ -377,8 +340,9 @@ function M:ensure_login(cb)
                 return
             end
             self.token = body.token
-            -- Accounts may be served by another host (e.g. VIP).
-            if body.base_url and body.base_url ~= "" and self.api_url == M.API_URL then
+            -- Accounts may be served by another host (e.g. VIP), but only
+            -- an OpenSubtitles one gets the key and the token (D39).
+            if M.valid_base_url(body.base_url) and self.api_url == M.API_URL then
                 self.api_url = "https://" .. body.base_url .. "/api/v1"
             end
             cb(nil)
@@ -395,13 +359,16 @@ function M:download(file_id, dest, cb)
         end
         self:http({url = self.api_url .. "/download", body = {file_id = file_id, sub_format = "srt"}, auth = true},
             function(code, body)
-                if code ~= 200 or type(body) ~= "table" or type(body.link) ~= "string" then
+                if code ~= 200 or type(body) ~= "table" or not M.valid_link(body.link, self.api_url) then
                     cb(false, M.error_message(code, body, "download"))
                     return
                 end
                 local info = {remaining = tonumber(body.remaining), reset_time = body.reset_time}
                 local tmp = dest .. ".part"
-                self:http({url = body.link, output = tmp}, function(fcode, fbody)
+                -- The link may redirect to a CDN: follow (no secrets go
+                -- with it); cap the size (a subtitle is never 10 MB).
+                self:http({url = body.link, output = tmp, follow = true, max_size = 10 * 1024 * 1024},
+                          function(fcode, fbody)
                     if fcode ~= 200 then
                         os.remove(tmp)
                         cb(false, fcode and ("Download failed (" .. fcode .. ")") or fbody)

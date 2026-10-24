@@ -25,6 +25,7 @@ local Player = require "dvp.player"
 local Surround = require "dvp.surround"
 local SubDownload = require "dvp.subdownload"
 local About = require "dvp.about"
+local Plex = require "dvp.plex"
 
 local opts = {
     config_file = "",
@@ -32,6 +33,9 @@ local opts = {
     -- Development only: point the subtitle client at a mock server
     -- (tools/mock-opensubtitles.py).
     opensubtitles_url = "",
+    -- Development only: never write progress/watched state to Plex servers
+    -- (tools/headless-run.sh sets it unless PLEX_WRITE=1).
+    plex_readonly = false,
 }
 options.read_options(opts, "deckplayer")
 
@@ -124,32 +128,56 @@ local function track_id(kind)
     return id and tostring(id) or "no"
 end
 
-local function save_progress()
+local plex = Plex.new(opts.data_dir, {allow_insecure = cfg.plex.allow_insecure_lan})
+plex.readonly = opts.plex_readonly
+
+-- Saves the position of the current file: in resume.json for local files,
+-- on the server for Plex videos (D37). `ending`: the file is being closed
+-- (blocking report so it arrives even when the app quits; a finished video
+-- is marked watched).
+local function save_progress(ending)
     local path = state.current_path
     if not path then return end
     local pos = mp.get_property_number("time-pos")
     if not pos then return end
-    resume:update(path, pos, mp.get_property_number("duration"), track_id("audio"), track_id("sub"))
+    local duration = mp.get_property_number("duration")
+    local item = plex:item_for(path)
+    if item then
+        if ending then
+            plex:report(item, "stopped", pos, duration, true)
+            -- Plex marks a video watched itself past its "video played
+            -- threshold" (90 % by default); scrobble only below that, or
+            -- the play would count twice (D39).
+            if duration and duration > 0 and Resume.is_finished(pos, duration) and pos / duration < 0.9 then
+                plex:set_watched(item, true, nil, true)
+            end
+        else
+            plex:report(item, mp.get_property_native("pause") and "paused" or "playing", pos, duration)
+        end
+        return
+    end
+    resume:update(path, pos, duration, track_id("audio"), track_id("sub"))
 end
 
+-- `start`: seconds, or nil for "the saved position, if any" (on_load).
 local function play(list, start)
     if #list == 0 then return end
     state.from_ui = true
-    state.pending_start = {[list[1]] = start or 0}
+    state.pending_start = {}
+    if start then state.pending_start[list[1]] = start end
     mp.commandv("loadfile", list[1], "replace")
     for i = 2, #list do mp.commandv("loadfile", list[i], "append") end
 end
 
+-- Progress is saved by the on_unload hook, which mpv runs for stop and
+-- quit too. Saving here as well would race: an async "playing" report could
+-- reach Plex after the final "stopped" one.
 local function stop_playback()
-    save_progress()
-    resume:flush()
     mp.commandv("stop")
 end
 
 local function quit()
     state.quitting = true
-    save_progress()
-    resume:flush()
     display:restore()
     mp.commandv("quit")
 end
@@ -181,8 +209,8 @@ local function help()
             row("L1 / R1", "Page up / down"),
             header("Playback"),
             row("A", "Play / pause"),
-            row("D-pad ← →", string.format("Seek %ds", cfg.playback.seek_short)),
-            row("L1 / R1", string.format("Seek %ds", cfg.playback.seek_long)),
+            row("D-pad ← →", string.format("Seek −%ds / +%ds", cfg.playback.seek_short, cfg.playback.seek_short)),
+            row("L1 / R1", string.format("Seek −%ds / +%ds", cfg.playback.seek_long, cfg.playback.seek_long)),
             row("L2 / R2", "Previous / next chapter"),
             row("D-pad ↑ ↓", "Volume"),
             row("X / Y", "Subtitles / audio"),
@@ -198,7 +226,7 @@ local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
     help = help, toast = toast, surround = surround,
-    app_dir = app_dir, data_dir = opts.data_dir,
+    app_dir = app_dir, data_dir = opts.data_dir, plex = plex,
 }
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
@@ -239,6 +267,7 @@ end)
 mp.add_hook("on_load", 50, function()
     state.resumed_at = nil   -- may be left over from a file that failed to open
     local path = mp.get_property("path")
+    state.loading_path = path  -- known even if the file then fails to open
     if not path then return end
     -- Track choices and sync offsets are per file: set them file-locally so
     -- whatever the user changes during this file is undone when it ends
@@ -250,6 +279,27 @@ mp.add_hook("on_load", 50, function()
     mp.set_property_number("file-local-options/audio-delay", 0)
     local start = state.pending_start[path]
     state.pending_start[path] = nil
+    local item = plex:item_for(path)
+    state.plex_subs = nil
+    if item then
+        -- Plex: the token goes in a header (never in the URL), and the
+        -- server's resume point and subtitle files are fetched now.
+        local prep = plex:prepare(item)
+        -- Streaming token only if the server answered (don't wait twice for
+        -- an unreachable server).
+        if prep.ok then
+            mp.set_property("file-local-options/http-header-fields", plex:header_fields(item))
+        end
+        mp.set_property("file-local-options/force-media-title", item.title or "")
+        state.plex_subs = prep.subs
+        if start == nil and cfg.playback.resume and prep.pos
+            and not Resume.is_finished(prep.pos, (item.duration or 0) / 1000) then
+            start = prep.pos
+            state.resumed_at = start
+        end
+        if start and start > 0 then mp.set_property("file-local-options/start", tostring(start)) end
+        return
+    end
     local entry = resume:get(path)
     if start == nil and cfg.playback.resume then
         -- Auto-advanced playlist entries and files opened from outside the
@@ -270,12 +320,16 @@ end)
 -- opened but before tracks are selected, so they take part in selection.
 mp.add_hook("on_preloaded", 50, function()
     ctx.subtitles:load_stored(mp.get_property("path"))
+    -- Subtitle files stored next to a Plex video on the server.
+    for _, s in ipairs(state.plex_subs or {}) do
+        mp.commandv("sub-add", s.url, "auto", s.title, s.lang)
+    end
 end)
 
 -- Properties are still readable here, for every reason a file ends
 -- (stop, end of file, next in playlist, quit).
 mp.add_hook("on_unload", 50, function()
-    save_progress()
+    save_progress(true)
     resume:flush()
 end)
 
@@ -303,6 +357,10 @@ end)
 
 mp.register_event("end-file", function(ev)
     if ev.reason == "error" then
+        -- A Plex server may have restarted (stale streaming token) or the
+        -- network changed: reconnect and ask for a new token next time.
+        local item = plex:item_for(state.loading_path)
+        if item then plex:forget_session(item.machine) end
         toast("Could not play this file")
         msg.error("playback failed: " .. tostring(ev.file_error))
     end
@@ -327,11 +385,7 @@ mp.observe_property("idle-active", "bool", function(_, idle)
     menu:close_all()
     player:stop_screen()
     display:restore()
-    browser:show()
-    if state.last_played then
-        browser:select_path(state.last_played)
-        browser:render()
-    end
+    browser:show(state.last_played)
 end)
 
 mp.observe_property("pause", "bool", function(_, paused)

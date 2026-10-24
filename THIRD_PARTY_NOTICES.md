@@ -31,6 +31,7 @@ Included in this repository:
 |---|---|
 | `app/share/deckvideoplayer/hrtf/mit_kemar_normal_pinna.sofa` (MIT KEMAR HRTF, W. G. Gardner and K. D. Martin, 1995) | "Provided without any usage restrictions"; citation requested (see `hrtf/README.md`) |
 | `helper/gamescope-control.xml` (gamescope protocol definition) | MIT, © 2023 Valve Corporation (notice kept in the file) |
+| `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/qrencode.lua` ([luaqrcode](https://github.com/speedata/luaqrcode), QR codes for the Plex sign-in) | BSD-3-Clause, © 2012-2020 Patrick Gundlach and contributors (licence text kept in the file) |
 
 Screenshots in `docs/screenshots/` show frames of the *Sintel* trailer,
 © Blender Foundation (durian.blender.org), licensed CC BY 3.0.
@@ -46,5 +47,7 @@ Flathub under their own licences.
 
 **Trademarks.** Steam, Steam Deck and SteamOS are trademarks of Valve
 Corporation. This project is not affiliated with or endorsed by Valve.
+Plex is a trademark of Plex, Inc.; this app talks to Plex Media Server
+and plex.tv through their HTTP APIs and is not affiliated with Plex.
 OpenSubtitles is a trademark of its owners; the subtitle feature uses their
 public API with each user's own key.

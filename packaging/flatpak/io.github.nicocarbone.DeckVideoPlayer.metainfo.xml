@@ -51,6 +51,19 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.3.0" date="2026-10-24">
+      <description>
+        <p>Plex streaming, and a security review of the account and network code.</p>
+        <ul>
+          <li>Sign in to Plex with a QR code or a link code; servers appear as library sources</li>
+          <li>Direct play from Plex with HDR, hardware decoding and refresh-rate matching</li>
+          <li>Progress and watched state synced with the Plex server</li>
+          <li>Subtitle downloads for Plex videos</li>
+          <li>Narrower sandbox: Videos, Downloads and removable drives only</li>
+          <li>R1 +60 s shown in the hint bar</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-23">
       <description>
         <p>Better audio and subtitles, and fixes from the first tests on a Steam Deck.</p>

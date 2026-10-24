@@ -94,8 +94,9 @@ local function removable_roots()
     return roots
 end
 
--- Returns the list of top-level sources that currently exist.
-function M.sources(cfg)
+-- Returns the list of top-level sources that currently exist. `extra`:
+-- more sources appended at the end (Plex servers, see dvp/plex.lua).
+function M.sources(cfg, extra)
     local out, seen = {}, {}
     for _, folder in ipairs(cfg.library.folder) do
         local path = util.expand_path(folder)
@@ -112,7 +113,33 @@ function M.sources(cfg)
             end
         end
     end
+    for _, s in ipairs(extra or {}) do out[#out + 1] = s end
     return out
+end
+
+-- Sorts entries in place: folders first, then files; by natural name
+-- order, or by date (newest first) when mode == "date". The name used is
+-- `sort_name`, else `name`, else `label`; dates come from `mtime`.
+function M.sort_entries(entries, mode)
+    local dirs, files = {}, {}
+    for _, e in ipairs(entries) do
+        e.key = util.natural_key(e.sort_name or e.name or e.label)
+        if e.is_dir then dirs[#dirs + 1] = e else files[#files + 1] = e end
+    end
+    for _, list in ipairs({dirs, files}) do
+        if mode == "date" then
+            table.sort(list, function(a, b)
+                if a.mtime ~= b.mtime then return (a.mtime or 0) > (b.mtime or 0) end
+                return a.key < b.key
+            end)
+        else
+            table.sort(list, function(a, b) return a.key < b.key end)
+        end
+    end
+    for i = #entries, 1, -1 do entries[i] = nil end
+    for _, e in ipairs(dirs) do entries[#entries + 1] = e end
+    for _, e in ipairs(files) do entries[#entries + 1] = e end
+    return entries
 end
 
 -- Lists a directory: folders first, then video files.
@@ -141,23 +168,16 @@ function M.list(path, cfg, sort_mode)
         end
     end
     local clean = cfg.interface.clean_names
+    local out = {}
     for _, list in ipairs({dirs, files}) do
         for _, e in ipairs(list) do
             e.label = M.display_name(e.name, e.is_dir, clean)
-            e.key = util.natural_key(e.label)
-        end
-        if sort_mode == "date" then
-            table.sort(list, function(a, b)
-                if a.mtime ~= b.mtime then return (a.mtime or 0) > (b.mtime or 0) end
-                return a.key < b.key
-            end)
-        else
-            table.sort(list, function(a, b) return a.key < b.key end)
+            -- Sort by the cleaned label (name keeps the real file name).
+            e.sort_name = e.label
+            out[#out + 1] = e
         end
     end
-    local out = dirs
-    for _, f in ipairs(files) do out[#out + 1] = f end
-    return out
+    return M.sort_entries(out, sort_mode)
 end
 
 return M

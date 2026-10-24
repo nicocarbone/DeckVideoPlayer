@@ -50,7 +50,8 @@ function M:start()
     self.active = true
     self.video_track = nil
     local name = util.basename(mp.get_property("path") or "")
-    self.title_text = library.display_name(name, false, self.cfg.interface.clean_names)
+    local item = self.ctx.plex and self.ctx.plex:item_for(mp.get_property("path"))
+    self.title_text = item and item.title or library.display_name(name, false, self.cfg.interface.clean_names)
     if self.zoom_touched then
         mp.set_property_number("panscan", self.zoom_defaults.panscan)
         mp.set_property_bool("keepaspect", self.zoom_defaults.keepaspect)
@@ -522,8 +523,11 @@ function M:render()
     end
     a:hints({
         {"A", paused and "Play" or "Pause"},
-        {"DPAD_LR", string.format("%ds", self.cfg.playback.seek_short)},
-        {"L1", string.format("%ds", self.cfg.playback.seek_long)},
+        -- Both shoulders, with a direction: "L1 60s" alone read as a single
+        -- 60 s jump and hid that R1 goes forward.
+        {"DPAD_LR", string.format("±%ds", self.cfg.playback.seek_short)},
+        {"L1", string.format("−%ds", self.cfg.playback.seek_long)},
+        {"R1", string.format("+%ds", self.cfg.playback.seek_long)},
         {"X", "Subtitles"},
         {"Y", "Audio"},
         {"MENU", "Menu"},
@@ -565,6 +569,7 @@ function M:info_lines()
     add("Display", self:refresh_text())
     local at = media.selected_track("audio")
     if at then add("Audio", media.track_label(at) .. " · " .. media.track_detail(at)) end
+    add("Stream", self.ctx.plex and self.ctx.plex:describe(mp.get_property("path")))
     local ao = mp.get_property("current-ao")
     if ao then add("Audio out", ao .. (self.ctx.surround.active and " · headphone surround" or "")) end
     local drop = mp.get_property_number("frame-drop-count", 0)

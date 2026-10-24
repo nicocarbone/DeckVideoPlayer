@@ -10,6 +10,10 @@
 --       {label = "Info", disabled = true},
 --     },
 --     selected = 1,
+--     message = "…",    -- center dialogs: one line under the title
+--     code = "2VKW",    -- center dialogs: a big code to type elsewhere (Plex sign-in)
+--     qr = matrix,      -- center dialogs: QR code (dvp/qrencode.lua) left of the
+--                       -- message lines and the code (message may hold "\n")
 --     on_cancel = fn,   -- called when dismissed with B (not when an item is chosen)
 --   }
 -- Menus stack: opening a menu while another is open pushes it; B pops.
@@ -179,16 +183,49 @@ function M:render()
     local items = spec.items
 
     local pw, px, py, ph, list_top, max_rows
-    if spec.style == "center" then
+    local message_drawn = false
+    if spec.style == "center" and spec.qr then
+        -- QR on the left; message lines and the big code on the right.
+        pw = math.min(760, W - 64)
+        local qr_size = 232
+        local rows = math.min(#items, 8)
+        ph = 88 + qr_size + 24 + rows * ROW_H + 64
+        px, py = (W - pw) / 2, (H - ph) / 2
+        a:rect(0, 0, W, H, {color = t.black, opacity = 0.55})
+        a:rect(px, py, pw, ph, {radius = 18, color = t.panel, opacity = 0.98})
+        a:qr(px + 32, py + 84, qr_size, spec.qr)
+        local tx, tw = px + 32 + qr_size + 32, pw - qr_size - 96
+        local ty = py + 104
+        for line in tostring(spec.message or ""):gmatch("[^\n]+") do
+            a:text(tx, ty, ui.fit_text(line, 22, tw), {size = 22, color = t.subtext})
+            ty = ty + 32
+        end
+        if spec.code then
+            local spaced = tostring(spec.code):gsub("(.)", "%1 "):gsub(" $", "")
+            a:rect(tx, ty + 6, tw, 92, {radius = 14, color = t.panel2})
+            a:text(tx + tw / 2, ty + 52, spaced, {size = 58, bold = true, align = 5, color = t.accent})
+        end
+        list_top = py + 84 + qr_size + 24
+        max_rows = rows
+        message_drawn = true
+    elseif spec.style == "center" then
         pw = math.min(620, W - 64)
         local rows = math.min(#items, 8)
-        ph = 96 + (spec.message and 44 or 0) + rows * ROW_H + 64
+        local code_h = spec.code and 96 or 0
+        ph = 96 + (spec.message and 44 or 0) + code_h + rows * ROW_H + 64
         px, py = (W - pw) / 2, (H - ph) / 2
         -- Dim everything behind a dialog.
         a:rect(0, 0, W, H, {color = t.black, opacity = 0.55})
         a:rect(px, py, pw, ph, {radius = 18, color = t.panel, opacity = 0.98})
-        list_top = py + 88 + (spec.message and 44 or 0)
+        list_top = py + 88 + (spec.message and 44 or 0) + code_h
         max_rows = rows
+        if spec.code then
+            -- Spaced-out letters read better from across the room.
+            local spaced = tostring(spec.code):gsub("(.)", "%1 "):gsub(" $", "")
+            a:rect(px + 32, list_top - code_h + 8, pw - 64, code_h - 20,
+                   {radius = 14, color = t.panel2})
+            a:text(W / 2, list_top - code_h / 2 - 2, spaced, {size = 58, bold = true, align = 5, color = t.accent})
+        end
     else
         pw = M.side_width(W)
         px, py, ph = W - pw, 0, H
@@ -202,7 +239,7 @@ function M:render()
     if spec.subtitle then
         a:text(px + 32, py + 84, ui.fit_text(spec.subtitle, 18, pw - 64), {size = 18, color = t.subtext})
     end
-    if spec.message then
+    if spec.message and not message_drawn then
         a:text(px + 32, py + 104, ui.fit_text(spec.message, 22, pw - 64), {size = 22, color = t.subtext})
     end
 

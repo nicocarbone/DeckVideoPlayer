@@ -22,6 +22,11 @@
 #   OSMOCK=1           run tools/mock-opensubtitles.py and point the app at it
 #                      (port 8765; its request log is appended to LOG)
 #   OSMOCK_LOGIN=1     also set a mock account (username/password)
+#   MPV_EXTRA="…"      extra mpv arguments (e.g. --msg-level=all=v)
+#   PLEX_WRITE=1       let the app report progress/watched state to Plex
+#                      servers (default: read-only, so tests never change the
+#                      owner's watch history). Plex sign-in for tests:
+#                      tools/plex-dev-account.py .dev/headless/data (KEEP=1)
 #
 # Examples:
 #   tools/headless-run.sh -- gshot:/tmp/library.png
@@ -71,6 +76,9 @@ gs_args="--backend headless -W $W -H $H"
 [ "${HDR:-0}" = 1 ] && gs_args="$gs_args --hdr-enabled --hdr-debug-force-output"
 
 mpv_args="--input-ipc-server=$SOCK --msg-level=all=warn,deckplayer=v"
+[ "${PLEX_WRITE:-0}" = 1 ] || mpv_args="$mpv_args --script-opts-append=deckplayer-plex_readonly=yes"
+# MPV_EXTRA: more mpv arguments (e.g. MPV_EXTRA=--msg-level=all=v).
+[ -n "${MPV_EXTRA:-}" ] && mpv_args="$mpv_args $MPV_EXTRA"
 mock_pid=
 if [ "${OSMOCK:-0}" = 1 ]; then
     sed -i "s|^api_key *=.*|api_key = mockkey|" "$CFG/config/config.ini"

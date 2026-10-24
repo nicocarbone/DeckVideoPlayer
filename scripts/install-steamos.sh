@@ -101,7 +101,8 @@ flatpak install --user -y --noninteractive flathub "org.freedesktop.Platform.Vul
 
 if [ ! -f "$config_dir/config.ini" ]; then
     mkdir -p "$config_dir"
-    flatpak run --command=cat "$APP_ID" /app/share/deckvideoplayer/config.ini > "$config_dir/config.ini"
+    # Owner-only: it may later hold an OpenSubtitles password.
+    (umask 077 && flatpak run --command=cat "$APP_ID" /app/share/deckvideoplayer/config.ini > "$config_dir/config.ini")
     say "Created $config_dir/config.ini (set your video folders there)."
 fi
 

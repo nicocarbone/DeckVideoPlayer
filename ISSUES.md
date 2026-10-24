@@ -2,6 +2,300 @@
 
 ---
 
+# Part IV — v0.3.0 Full Audit: Security, Bugs & Optimizations (2026-10-24)
+
+All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the security vulnerabilities, functional bugs, optimization opportunities, and release-readiness items identified across the v0.3.0 Plex integration (`dvp/plex.lua`, `dvp/http.lua`, `dvp/qrencode.lua`, `dvp/subdownload.lua`, `dvp/browser.lua`, `dvp/util.lua`, and `main.lua`).
+
+---
+
+## 1. Security & Privacy Vulnerabilities (v0.3.0)
+
+### 1.1. Unbounded download into `/tmp` (RAM exhaustion) in `Plex:fetch_range` if a server ignores `Range`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:fetch_range` lines 436–445) and `dvp/subdownload.lua` (`SubDownload:hash_for` lines 112–138)
+* **Problem:**
+  ```lua
+  function M:fetch_range(path, from, to, file, cb)
+      local item = self.items[path]
+      local server = item and self:server(item.machine)
+      if not server then return cb(false) end
+      local headers = self:headers(server.token)
+      headers["Range"] = string.format("bytes=%d-%d", from, to)
+      headers["Accept"] = nil
+      http.request({url = path, headers = headers, output = file, tag = "plex", timeout = 20},
+          function(code) cb(code == 206 or code == 200) end)
+  end
+  ```
+  When `SubDownload:hash_for` computes the OpenSubtitles hash for a Plex video, it calls `fetch_range` twice in parallel (`0..65535` and `size-65536..size-1`) into `/tmp/lua_*` files created by `os.tmpname()`:
+  1. `fetch_range` sets **no `max_size`** on `http.request`.
+  2. It accepts `code == 200` in addition to `206`.
+  * If a server or reverse proxy ignores the `Range` header and responds with `200 OK` and the full file stream (e.g., a 50 GB 4K remux), two parallel `curl` processes will stream gigabytes of video into `/tmp` (which is `tmpfs` in RAM on SteamOS/Linux) for 20 seconds until timeout.
+* **Suggested Fix:** Pass `max_size = to - from + 1` (65536) to `http.request` and require `code == 206` (since `hash_for` only runs on files `>= 128 KiB`).
+
+### 1.2. TOCTOU permission window in `util.write_file_atomic` when writing `plex.json`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/util.lua` (`write_file_atomic` lines 127–149) and `app/bin/deckvideoplayer` (lines 17–21)
+* **Problem:**
+  ```lua
+  function M.write_file_atomic(path, data, private)
+      local tmp = path .. ".tmp"
+      local f, err = io.open(tmp, "wb")
+      if not f then return false, err end
+      if private then
+          f:close()
+          local r = mp.command_native({name = "subprocess", args = {"chmod", "600", tmp}, ...})
+          ...
+          f, err = io.open(tmp, "wb")
+  ```
+  * The first `io.open(tmp, "wb")` creates `plex.json.tmp` with default umask (`0644`, world-readable).
+  * While `mp.command_native` forks and executes `/usr/bin/chmod`, any local process can `open("plex.json.tmp", O_RDONLY)`.
+  * On Linux/POSIX, permissions are checked at `open()` time, not `read()` time. Because the second `io.open(tmp, "wb")` truncates and writes the token into the **same inode**, a file descriptor opened before `chmod 600` completed can still read the Plex account token after it is written.
+* **Suggested Fix:** Create `$CONFIG_DIR` and `$DATA_DIR` with mode `0700` (`mkdir -m 700 -p ...`) or set `umask 077` in `app/bin/deckvideoplayer` before `exec "$MPV"` (every file the app creates in `$DATA_DIR` or `/tmp` is private to the user). That makes every file `0600` atomically at creation time and eliminates the blocking `chmod` subprocess spawn.
+
+### 1.3. Unvalidated `c.uri`, `c.address`, and `c.port` in `Plex.server_candidates`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex.server_candidates` lines 92–119)
+* **Problems:**
+  ```lua
+  local function https(uri) return type(uri) == "string" and uri:match("^https://") ~= nil end
+  for _, l in ipairs(locals) do
+      if https(l.c.uri) then add(l.c.uri, "local") end
+      if allow_insecure and l.c.address and l.c.port then
+          add(string.format("http://%s:%d", l.c.address, l.c.port), "local")
+      end
+  end
+  ```
+  1. `https(uri)` only checks `^https://` without verifying that `uri` is a clean origin (`^https://[%w%-%._]+:%d+$`, with no `@`, `?`, `#`, whitespace, or path). A shared server publishing a custom connection URI like `https://srv@evil.example:32400` or `https://srv:32400/path?x=` would pass `https(uri)` and alter all subsequent `base.url .. key` requests.
+  2. When `allow_insecure_lan = yes`, `string.format("http://%s:%d", l.c.address, l.c.port)` does not check that `l.c.address` is a pure IPv4 address (`^%d+%.%d+%.%d+%.%d+$`) or that `tonumber(l.c.port)` is a number—a non-numeric `port` crashes `M:connect` with a Lua error (`bad argument #3 to 'format'`).
+* **Suggested Fix:** Validate `https(uri)` with `uri:match("^https://[%w%-%._]+:%d+$") ~= nil` and validate `l.c.address:match("^%d+%.%d+%.%d+%.%d+$")` and `tonumber(l.c.port)` before formatting the `http://` fallback.
+
+### 1.4. `Plex:sign_out()` leaves `self.transient` tokens in memory and can be overwritten by an in-flight `refresh_account`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:refresh_account` lines 371–389, `Plex:sign_out` lines 391–395)
+* **Problems:**
+  1. `Plex:sign_out()` resets `self.bases` and `self.items`, but forgets to clear `self.transient = {}` and `self.pin = nil`.
+  2. `Plex:refresh_account(cb)` captures `local token = self.account.token` before two async requests (up to 30 s). If the user triggers **"Refresh server list"** and then clicks **"Sign out"** before those requests finish, `refresh_account`'s callback writes `self.account.username` and `self.account.servers` (with the old `token`!) back into `self.account` and calls `self:save()`, re-saving the signed-out credentials to `plex.json`.
+* **Suggested Fix:** Clear `self.transient = {}` and `self.pin = nil` in `sign_out()`, and guard `refresh_account`'s callbacks with `if self.account.token ~= token then return end`.
+
+---
+
+## 2. Bugs & Functional Edge Cases (v0.3.0)
+
+### 2.1. Race condition on Stop / Quit: `stop_playback()` and `quit()` send an async `"playing"` report right before `on_unload` sends a sync `"stopped"` report
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`stop_playback` lines 170–174, `quit` lines 176–182, `on_unload` lines 330–333, `shutdown` lines 408–413)
+* **Problem:**
+  ```lua
+  local function stop_playback()
+      save_progress()
+      resume:flush()
+      mp.commandv("stop")
+  end
+  ```
+  When the user presses **B** (`stop_playback()`) or quits (`quit()`) while watching a Plex video:
+  1. `stop_playback()` / `quit()` calls `save_progress()` with `ending = nil`, which spawns an **asynchronous** `curl` subprocess reporting `state=playing` (or `paused`) to `/:/timeline`.
+  2. Immediately on the next line, `mp.commandv("stop")` / `mp.commandv("quit")` triggers the `on_unload` hook, which calls `save_progress(true)` and runs a **synchronous** `curl` subprocess reporting `state=stopped` (and `/:/scrobble` if finished).
+  3. Because the async `state=playing` subprocess from step 1 runs concurrently with step 2, if `state=playing` arrives at the Plex server after `state=stopped`, **the server's state reverts to `playing` (and un-scrobbles/keeps `viewOffset`)**.
+  4. For local files, `resume.json` is also written twice on every stop/quit.
+* **Suggested Fix:** Remove `save_progress()` and `resume:flush()` from `stop_playback()` and `quit()` (and in `shutdown`, only call them if `state.current_path` is still set), because `on_unload` is guaranteed to run for every unloaded file.
+
+### 2.2. Canceling the Plex sign-in dialog does not cancel in-flight `poll_pin` / `start_pin`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:plex_sign_in` lines 335–379) and `dvp/plex.lua` (`Plex:poll_pin` lines 345–368)
+* **Problems:**
+  1. `stop()` only kills `timer`, without clearing `plex.pin` or setting a `cancelled` flag. If a `poll_pin` (or its nested `refresh_account`) request is in flight when the user presses **B** or **Cancel**, and completes a moment later:
+     * `poll_pin` still saves `self.account.token` even though the user canceled.
+     * `if done then` calls `menu:close_all()` (closing whatever unrelated menu the user opened afterwards) and `self:reload()` (even if the user already started playing a video).
+  2. In `Plex:poll_pin` (line 361), if the PIN is claimed (`self.account.token` saved) but `self:refresh_account` fails with a transient error, `cb(false, err)` is called—leaving the sign-in dialog on screen with the error message and a `"Cancel"` button even though the account is now signed in (and `self:reload()` is never called to update the library menu).
+* **Suggested Fix:** Set `cancelled = true` and `plex.pin = nil` in `stop()`, check `if cancelled then return end` in `start_pin` and `poll_pin` callbacks, and if `plex:signed_in()` is true when `poll_pin` finishes (even with a server-list error), close the sign-in dialog, toast the error/sign-in, and reload.
+
+### 2.3. Discrepancy between `Plex.item_state`, `Browser:render`, and `Browser:resume_position`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex.item_state` lines 155–161) and `dvp/browser.lua` (`Browser:resume_position` lines 130–140, `Browser:render` lines 535–555)
+* **Problem:**
+  ```lua
+  function M.item_state(md)
+      local state = {}
+      if md.duration then state.duration = md.duration / 1000 end
+      if md.viewOffset and md.viewOffset > 0 then state.pos = md.viewOffset / 1000 end
+      if (md.viewCount or 0) > 0 and not state.pos then state.watched = true end
+      return state
+  end
+  ```
+  1. **`pos < 30 s` on a watched item:** If a watched movie (`viewCount > 0`) is opened briefly and stopped at `15 s` (`viewOffset = 15000`), `state.pos` is `15` and `state.watched` is `nil`. `Browser:render()` (line 539) only draws a progress bar when `r.pos >= 30`, so the row shows **neither** a watched checkmark nor a progress bar.
+  2. **`pos` near the end (`Resume.is_finished` is true):** If a video has `viewOffset` within the finished margin (e.g. 96% when stopped on another client), `Browser:render()` draws a progress bar and resume timestamp (`r.pos >= 30`), but `Browser:resume_position()` returns `nil` (`not Resume.is_finished`), so the `X Play from start` hint is missing and pressing **A** silently starts from `0:00` without a resume dialog.
+* **Suggested Fix:** Apply `Resume.MIN_POSITION` and `Resume.is_finished` directly inside `Plex.item_state(md)` (matching `Resume:update` in `dvp/resume.lua`): only set `state.pos` when `pos >= Resume.MIN_POSITION and not Resume.is_finished(pos, duration)`, and set `state.watched = true` when `(md.viewCount or 0) > 0 or Resume.is_finished(pos, duration)`.
+
+### 2.4. Global `"date"` sort order scrambles TV Seasons and Episodes in Plex
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:load_plex` lines 103–105, `Browser:sortable` lines 117–121) and `dvp/plex.lua` (`Plex.entries_from` lines 178–206)
+* **Problems:**
+  1. `self.sort` (`"name"` or `"date"`) is shared across all folders. If a user presses **Y** in a Movie library to sort by **Date added**, and then opens a Plex TV Show → Season 1, `Browser:load_plex` sorts Seasons and Episodes by `mtime` (`addedAt`, newest first), listing episodes backwards (`E10, E09, …, E01`) and seasons backwards (`Season 4, Season 3, …`).
+  2. For Seasons (`md.type == "season"`), `Plex.entries_from` sets `e.name = md.titleSort or label` instead of ordering by `md.index` (season number), so seasons with custom titles (e.g., `"Book Two: Earth"`, `"Book Three: Fire"`) sort alphabetically (`Book Three` before `Book Two`) instead of by season number.
+* **Suggested Fix:** Keep season and episode listings in season/episode order (or set `e.name = string.format("%04d %s", md.index or 0, label)` for seasons and episodes and don't sort seasons/episodes by `addedAt`).
+
+### 2.5. Fresh resume position (`prep.pos`) from `plex:prepare` is ignored for the selected video
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`play` lines 162–168, `on_load` lines 279–300)
+* **Problem:**
+  * When starting playback from the browser, `play(list, start)` sets `state.pending_start[list[1]] = start or 0`.
+  * In `on_load` (line 294), `prep.pos` (fetched synchronously from the Plex server via `plex:prepare(item)`) is only used `if start == nil`, which is only true for auto-advanced playlist items (`list[2..N]`) and never for `list[1]`.
+* **Suggested Fix:** Either pass `nil` to `play(list, nil)` when the user did not explicitly choose `"Start from the beginning"` (and had no cached `pos` prompt), or skip the redundant `plex:prepare` resume check when `start` was already chosen.
+
+### 2.6. Transient network error in `SubDownload:hash_for` permanently disables hash search for that Plex video
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload:hash_for` lines 118–133)
+* **Problem:** Line 133 sets `self.hashes[path] = hash or false`, and line 118 returns immediately if `self.hashes[path] ~= nil`. If either HTTP range request times out or fails once, `self.hashes[path]` is cached as `false` for the rest of the session and never retries when the user searches again.
+* **Suggested Fix:** Only cache non-nil hashes (`if hash then self.hashes[path] = hash end`).
+
+---
+
+## 3. Optimization Opportunities (v0.3.0)
+
+### 3.1. Prefetch the Plex transient delegation token asynchronously on `connect` to cut `on_load` blocking in half
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:connect` lines 418–421, `Plex:media_token` lines 508–525) and `main.lua` (`on_load` lines 286–291)
+* **Problem:** On the first video played from a Plex server, `on_load` blocks mpv's main thread for **two sequential synchronous `curl` subprocesses** (two separate TCP + TLS handshakes):
+  1. `plex:prepare(item)` (`GET /library/metadata/<id>`)
+  2. `plex:media_token(item)` (`GET /security/token?type=delegation&scope=all`)
+* **Optimization:** Request the transient token **asynchronously** as soon as `plex:connect` settles (since the user always connects while browsing the server before playing a video). That warms `self.transient[machine]` ahead of time, making `plex:media_token(item)` in `on_load` a **0 ms** in-memory lookup.
+
+### 3.2. Avoid blocking the UI for up to 6 seconds in `on_unload` when stopping a Plex video without quitting
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress` lines 146–154, `on_unload` lines 330–333)
+* **Problem:** `on_unload` calls `save_progress(true)`, which executes `plex:report(..., true)` and `plex:set_watched(..., true)` **synchronously** (`http.request_sync`, up to 3 s timeout each) every time a video stops or advances to the next playlist entry. When the user presses **B** (`Stop`) to return to the library browser (`not state.quitting and not state.external`), the mpv process is not exiting—yet synchronous HTTP calls freeze the screen on the last video frame while waiting for the Plex server.
+* **Optimization:** Only use `sync = true` when `state.quitting or state.external`. When staying in the app, update the item's state locally and run the `stopped` / `scrobble` requests asynchronously (or refresh the browser listing in the async callback).
+
+### 3.3. Skip `utils.parse_json("")` on empty HTTP bodies and map curl exit code 63
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`CURL_ERRORS` line 77, `parse_result` lines 93–96)
+* **Optimization:** `utils.parse_json(text)` is called even when `text == ""` (every file download with `req.output`, and every `/:/timeline` or `/:/scrobble` call). Guarding `local body = text ~= "" and utils.parse_json(text) or nil` avoids unnecessary JSON parse attempts, and adding `[63] = "The file is too large"` to `CURL_ERRORS` gives a clear error when `max-filesize` triggers.
+
+---
+
+## 4. Release Readiness & Polish (v0.3.0)
+
+1. **Version & AppStream metainfo (`dvp/version.lua`, `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`):**
+   * `dvp/version.lua` is still `"0.2.0"` (sent in `X-Plex-Version`, OpenSubtitles `User-Agent`, and shown in the About panel), and `metainfo.xml` needs the `0.3.0` `<release>` entry and Plex feature bullet when tagging.
+2. **About panel credits (`dvp/about.lua` lines 74–79):**
+   * `THIRD_PARTY_NOTICES.md` lists `luaqrcode` (BSD-3-Clause), which can also be credited in `About.items(ctx)`.
+
+---
+
+## 5. v0.3.0 (Part IV) Summary Checklist
+
+Reviewed by Claude on 2026-10-24 (DECISIONS D40): all items valid except the asynchronous `on_unload` reports.
+
+- [x] **Security (`dvp/plex.lua`):** Fixed: `max_size` = range size, HTTP 206 required.
+- [x] **Security (`dvp/util.lua`, `app/bin/deckvideoplayer`):** Fixed: `umask 077` in the launcher (the `chmod` remains as a fallback).
+- [x] **Security (`dvp/plex.lua`):** Fixed: bare https origins only; insecure http only for IPv4 literals with a numeric port.
+- [x] **Security (`dvp/plex.lua`):** Fixed: `sign_out` clears transient tokens and PINs; late `refresh_account` answers are dropped.
+- [x] **Bug (`main.lua`):** Fixed (verified first that mpv runs `on_unload` on quit).
+- [x] **Bug (`dvp/browser.lua`, `dvp/plex.lua`):** Fixed: `cancel_pin`, late answers ignored; a claimed PIN with a failed server list closes the dialog as signed in.
+- [x] **Bug (`dvp/plex.lua`, `dvp/browser.lua`):** Fixed in `item_state`.
+- [x] **Bug (`dvp/plex.lua`, `dvp/browser.lua`):** Fixed: `seasons`/`episodes` listings keep server order and are not sortable.
+- [x] **Bug (`main.lua`):** Fixed: no start position unless the user chose one.
+- [x] **Bug (`dvp/subdownload.lua`):** Fixed.
+- [x] **Optimization (`dvp/plex.lua`):** Done: `prefetch_token` after `connect`.
+- [ ] ~~**Optimization (`main.lua`):**~~ Not adopted: the blocking report keeps the reloaded listing and the next playlist entry in sync (D40).
+- [x] **Optimization (`dvp/http.lua`):** Done.
+- [x] **Release polish (`dvp/about.lua`, `dvp/version.lua`, `metainfo.xml`):** luaqrcode credited; version and metainfo are bumped when tagging v0.3.0.
+
+---
+---
+
+# Part III — v0.3.0 Security & Bug Audit (Claude, 2026-10-24)
+
+Scope: all of the project's own code (Lua modules, launcher, helper, scripts,
+manifest, CI), with emphasis on the new Plex sign-in/streaming and the
+network code. Claims marked *verified* were reproduced on this machine
+(curl 8.18) or against the owner's Plex server; nothing was written to the
+server's watch history.
+
+## 1. Security
+
+### 1.1. HIGH — Plex account token sent in cleartext to LAN addresses on any network
+* **Where:** `dvp/plex.lua` `server_candidates` (adds `http://<address>:<port>` for every "local" connection) and `connect` (probes every candidate with `X-Plex-Token`).
+* **Problem:** for a server the user owns, the per-server token *is the account token* (*verified*). The app sends it unencrypted to whatever answers at the server's LAN address — on any network the Deck joins. On a hotel/café/friend's Wi-Fi that uses the same private range (e.g. 192.168.1.x), any device at that address, or anyone sniffing the network, gets full access to the user's Plex account. The `/identity` probe doesn't even need a token.
+* **Fix:** never send a token in probes (`/identity` is unauthenticated) and check the returned `machineIdentifier`; drop plain-http candidates by default (https `*.plex.direct` is certificate-checked, so it is safe on foreign networks); offer plain http only behind an explicit opt-in (`[plex] allow_insecure_lan`) for routers that block plex.direct DNS.
+
+### 1.2. HIGH — Redirects forward the token to other hosts
+* **Where:** `dvp/http.lua` `curl_config` (follows redirects for every GET unless `follow = false`), used by all Plex requests and the subtitle download.
+* **Problem:** curl forwards custom headers such as `X-Plex-Token` to the redirect target, even on another host (*verified*: a 302 to `localhost:18082` delivered `X-Plex-Token: SECRET` there). A malicious or impersonated server (see 1.1) can redirect any request to collect the account token.
+* **Fix:** don't follow redirects by default; enable it only for the subtitle file download, which carries no secrets.
+
+### 1.3. MEDIUM — Server-supplied keys pasted into URLs unchecked
+* **Where:** `dvp/plex.lua` `entries_from`, `external_subtitles`, `list` (`base .. key` for section/metadata/part/stream keys).
+* **Problem:** a key such as `@evil.example/x` turns `https://srv:32400` + key into `https://srv:32400@evil.example/x`, which curl and mpv send to `evil.example` with the token header. Needs a malicious server (e.g. a server shared by another user) or a man in the middle (1.1).
+* **Fix:** accept only keys that start with a single `/` and contain URL-path characters (no `@`, no `//` prefix, no spaces/control characters); skip anything else.
+
+### 1.4. MEDIUM — Any URL scheme accepted (`file://` reads local files)
+* **Where:** `dvp/http.lua`; `dvp/opensubtitles.lua` `download` (`body.link` from the API is fetched as is).
+* **Problem:** curl fetches `file://` URLs (*verified*). A malicious API response could make the app copy a local file (for example `plex.json` with the account token) into the subtitle folder, from where it is loaded as a subtitle.
+* **Fix:** restrict curl to `https`/`http` (`proto`, `proto-redir = =https`); require the download link to start with `https://`.
+
+### 1.5. LOW — `plex.json` briefly world-readable
+* **Where:** `dvp/plex.lua` `save` → `util.write_file_atomic` then `chmod 600`.
+* **Problem:** the temp file is created with the default mode (0644) and renamed before `chmod`; for a moment the account token is readable by other local users.
+* **Fix:** create the temp file, `chmod 600` it, then write and rename (`util.write_private`).
+
+### 1.6. LOW — `config.ini` (OpenSubtitles password) created world-readable
+* **Where:** `app/bin/deckvideoplayer` (`cp` of the template).
+* **Fix:** create it with mode 600 (existing files untouched; mention in the docs).
+
+### 1.7. LOW — OpenSubtitles `base_url` used unchecked
+* **Where:** `dvp/opensubtitles.lua` `ensure_login` (`api_url = "https://" .. body.base_url ..`), then used for authenticated calls.
+* **Fix:** accept only hosts ending in `.opensubtitles.com`.
+
+### 1.8. LOW — Subtitle language code and size unchecked
+* **Where:** `dvp/subdownload.lua` `download` (`r.language` goes into the file name); `opensubtitles.lua` (no size limit).
+* **Problem:** a code containing `/` builds a path outside the video's folder (not exploitable as written: the first component would have to exist), and an endless response could fill the disk.
+* **Fix:** accept only letters and `-` (else `und`); `max-filesize` 10 MB for subtitle downloads.
+
+### 1.9. LOW — CI supply chain
+* **Where:** `.github/workflows/build.yml`.
+* **Problem:** third-party actions referenced by moving tags (`flatpak-github-actions@master`, `action-gh-release@v2`, `actions/*@v4`); no top-level `permissions`. A compromised action could alter the published bundle.
+* **Fix:** pin actions to commit SHAs; `permissions: contents: read` at the top, `contents: write` only for the release job.
+
+### 1.10. INFO — Sandbox: whole home readable, plus network
+* **Where:** Flatpak `finish-args` (`--filesystem=home:ro`, `--share=network` since v0.2).
+* **Risk:** a decoder exploit in a malicious video could read anything in the home folder (SSH keys, other apps' tokens) and send it out.
+* **Option:** narrow to `xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt`, and document `flatpak override --filesystem=…` for other folders. Trade-off: folders elsewhere in home stop working until overridden.
+
+### 1.11. INFO — Accepted / documented
+* mpv receives a transient token, which appears in `-v` logs (D37); the account token is stored in a plain file (no keyring in game mode; mode 600); signing out doesn't revoke the token at plex.tv (INSTALL tells users how); device-code sign-in can be phished by someone who sees the code (inherent to the flow).
+
+## 2. Bugs
+
+### 2.1. MEDIUM — Truncated files replace good ones on a full disk
+* **Where:** `dvp/util.lua` `write_file_atomic` ignores `write`/`close` errors, then renames the temp file over `resume.json` / `plex.json`.
+* **Fix:** check both, remove the temp file and keep the old one on failure.
+
+### 2.2. MEDIUM — A finished Plex video may count as watched twice
+* **Where:** `main.lua` `save_progress(true)`: reports `stopped`, then calls `/:/scrobble` when finished.
+* **Problem:** Plex marks a video watched by itself when a timeline report passes its *Video played threshold* (90 % by default), so the explicit scrobble adds a second play. (Inferred from Plex's documented behaviour; not reproduced, to keep the owner's history untouched.)
+* **Fix:** scrobble only when the app considers the video finished but it is below 90 %.
+
+### 2.3. LOW — Stale transient token after a server restart
+* **Where:** `dvp/plex.lua` `media_token` (cached 12 h).
+* **Problem:** a server restart invalidates the token; every Plex video then fails ("Could not play this file") until the app restarts.
+* **Fix:** forget the cached token (and connection) when a Plex file fails to load.
+
+### 2.4. LOW — Sign-in lost if the server list fails right after linking
+* **Where:** `dvp/plex.lua` `poll_pin` → `refresh_account` (saves only on success).
+* **Fix:** save the token as soon as it arrives.
+
+### 2.5. LOW — Robustness
+* `parse_resources` assumes `provides` is a string; on_load can block up to ~10 s when a server has just become unreachable (metadata + transient token, 5 s each) — acceptable, could share one timeout.
+
+## 3. v0.3.0 Summary Checklist
+
+All resolved on 2026-10-24, see DECISIONS D39.
+
+- [x] 1.1 No token on probes, check machineIdentifier, https-only by default (`allow_insecure_lan` opt-in)
+- [x] 1.2 No redirects by default (subtitle file download only)
+- [x] 1.3 Validate server-supplied keys
+- [x] 1.4 curl restricted to http(s), https-only redirects; download link must be https
+- [x] 1.5 `plex.json` private before writing
+- [x] 1.6 `config.ini` created with mode 600
+- [x] 1.7 Validate OpenSubtitles `base_url`
+- [x] 1.8 Validate subtitle language; 10 MB download limit
+- [x] 1.9 Pin CI actions, read-only default permissions
+- [x] 1.10 Sandbox narrowed to Videos, Downloads and removable media
+- [x] 2.1 Check writes in `write_file_atomic`
+- [x] 2.2 Avoid double scrobble
+- [x] 2.3 Forget transient token on Plex load failure
+- [x] 2.4 Save token immediately after sign-in
+- [x] 2.5 `provides` type check
+
+---
 # Part II — v0.2.0 Pre-Release Audit (2026-10-23)
 
 All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs, edge cases, security/robustness improvements, and release-readiness items identified across the new v0.2.0 features (headphone surround, OpenSubtitles integration, Wayland gamescope refresh helper, text measurement & marquee scrolling, friendly volume naming, and About panel) and core lifecycle.

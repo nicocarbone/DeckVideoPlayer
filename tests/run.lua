@@ -264,6 +264,121 @@ check("marquee scrolls", ui.marquee_offset(2.0, 100) > 0)
 eq("marquee stops at end", ui.marquee_offset(1.2 + 100 / 45 + 0.5, 100), 100)
 eq("marquee finishes", ui.marquee_offset(1000, 100), nil)
 
+-- http ------------------------------------------------------------------------
+local http = require "dvp.http"
+local cfgtext = http.curl_config({url = "https://x/y?a=1", headers = {["X-Token"] = 'se"cret'},
+                                  method = "POST", timeout = 7})
+check("curl url", cfgtext:find('url = "https://x/y?a=1"', 1, true) ~= nil, cfgtext)
+check("curl header quoted", cfgtext:find('header = "X-Token: se\\"cret"', 1, true) ~= nil, cfgtext)
+check("curl method", cfgtext:find('request = "POST"', 1, true) ~= nil)
+check("curl timeout", cfgtext:find("max-time = 7", 1, true) ~= nil)
+check("curl no redirects by default", http.curl_config({url = "u"}):find("location", 1, true) == nil)
+check("curl follow on request", http.curl_config({url = "u", follow = true}):find("location", 1, true) ~= nil)
+check("curl http(s) only", cfgtext:find('proto = "=http,https"', 1, true) ~= nil)
+check("curl https-only redirects", cfgtext:find('proto-redir = "=https"', 1, true) ~= nil)
+check("curl max size", http.curl_config({url = "u", max_size = 99}):find("max-filesize = 99", 1, true) ~= nil)
+local code, body = http.parse_result({status = 0, stdout = '{"a":1}\n200'})
+check("http parse json", code == 200 and type(body) == "table" and body.a == 1)
+code, body = http.parse_result({status = 7, stderr = "x"})
+check("http parse failure", code == nil and body == "Cannot connect to the server", tostring(body))
+eq("http query", http.query_string({b = "x y", a = "Z"}), "a=Z&b=x+y")
+
+-- library sort ------------------------------------------------------------------
+local ents = library.sort_entries({
+    {label = "E10 · Ten", is_dir = false, mtime = 1}, {label = "E2 · Two", is_dir = false, mtime = 3},
+    {label = "Season 1", is_dir = true}, {label = "Abyss", name = "Abyss", sort_name = nil, is_dir = false, mtime = 2},
+}, "name")
+eq("sort dirs first", ents[1].label, "Season 1")
+eq("sort natural", ents[2].label .. "|" .. ents[3].label .. "|" .. ents[4].label, "Abyss|E2 · Two|E10 · Ten")
+library.sort_entries(ents, "date")
+eq("sort by date", ents[2].label, "E2 · Two")
+
+-- plex ------------------------------------------------------------------------
+local Plex = require "dvp.plex"
+local servers = Plex.parse_resources({
+    {name = "Home", clientIdentifier = "m1", provides = "server", owned = true, accessToken = "st",
+     connections = {
+        {uri = "https://172-17-0-1.x.plex.direct:32400", address = "172.17.0.1", port = 32400, ["local"] = true},
+        {uri = "https://10-0-0-20.x.plex.direct:32400", address = "10.0.0.20", port = 32400, ["local"] = true},
+        {uri = "https://1-2-3-4.x.plex.direct:21723", address = "1.2.3.4", port = 21723, ["local"] = false},
+        {uri = "https://9-9-9-9.x.plex.direct:8443", address = "9.9.9.9", port = 8443, ["local"] = false, relay = true},
+     }},
+    {name = "Phone", clientIdentifier = "p", provides = "player"},
+}, "acct")
+eq("plex servers", #servers, 1)
+eq("plex server token", servers[1].token, "st")
+local cands = Plex.server_candidates(servers[1])
+eq("plex candidates: https only, no relay", #cands, 3)
+eq("plex LAN https first", cands[1].url, "https://10-0-0-20.x.plex.direct:32400")
+eq("plex docker after LAN", cands[2].url, "https://172-17-0-1.x.plex.direct:32400")
+eq("plex remote last", cands[3].kind, "remote")
+local icands = Plex.server_candidates(servers[1], true)
+eq("plex insecure opt-in adds http", #icands, 5)
+eq("plex insecure http after its https", icands[2].url, "http://10.0.0.20:32400")
+local odd = Plex.server_candidates({connections = {
+    {uri = "https://srv@evil.example:32400", ["local"] = true},
+    {uri = "https://srv.example:32400/path?x=", ["local"] = false},
+    {uri = "https://ok.example:32400/", ["local"] = false},
+    {uri = "https://10-0-0-9.x.plex.direct:32400", address = "10.0.0.9/x", port = "abc", ["local"] = true},
+}}, true)
+eq("plex odd connections: only bare https origins", #odd, 2)
+eq("plex bad address/port skipped", odd[1].url, "https://10-0-0-9.x.plex.direct:32400")
+eq("plex trailing slash trimmed", odd[2].url, "https://ok.example:32400")
+check("plex safe key", Plex.safe_key("/library/parts/1/22/file.mkv") and Plex.safe_key("/library/metadata/7/children"))
+check("plex key with @ rejected", not Plex.safe_key("@evil.example/x") and not Plex.safe_key("/x@evil.example"))
+check("plex key // rejected", not Plex.safe_key("//evil.example/x"))
+check("plex key scheme rejected", not Plex.safe_key("https://evil/x") and not Plex.safe_key("/a b") and not Plex.safe_key(nil))
+eq("plex rank docker", Plex.local_rank("172.20.0.1"), 3)
+eq("plex rank lan", Plex.local_rank("10.0.0.5"), 1)
+eq("plex pick undecided", Plex.pick_candidate({[2] = true}, 3), nil)
+eq("plex pick first ok", Plex.pick_candidate({false, true}, 3), 2)
+eq("plex pick none", Plex.pick_candidate({false, false}, 2), false)
+eq("plex label movie", Plex.item_label({type = "movie", title = "Alien", year = 1979}), "Alien (1979)")
+eq("plex label episode", Plex.item_label({type = "episode", index = 2, title = "Two"}, "items"), "E02 · Two")
+eq("plex label ondeck", Plex.item_label({type = "episode", index = 2, parentIndex = 1, title = "Two",
+    grandparentTitle = "Show"}, "ondeck"), "Show · S01E02 · Two")
+local st = Plex.item_state({duration = 600000, viewOffset = 120000, viewCount = 1})
+check("plex state progress", st.pos == 120 and st.duration == 600 and not st.watched)
+check("plex state watched", Plex.item_state({viewCount = 2}).watched == true)
+st = Plex.item_state({duration = 600000, viewOffset = 15000, viewCount = 1})
+check("plex state: short offset on a watched item", st.watched and not st.pos)
+st = Plex.item_state({duration = 600000, viewOffset = 15000})
+check("plex state: short offset ignored", not st.watched and not st.pos)
+st = Plex.item_state({duration = 6000000, viewOffset = 5900000})
+check("plex state: near the end is watched", st.watched and not st.pos)
+local pents = Plex.entries_from({
+    Directory = {{key = "3", type = "movie", title = "Movies"}, {key = "9", type = "artist", title = "Music"}},
+    Metadata = {
+        {type = "movie", title = "Alien", year = 1979, ratingKey = "7", key = "/library/metadata/7",
+         titleSort = "Alien", addedAt = 5, duration = 1000, Media = {{Part = {{key = "/library/parts/1/file.mkv"}}}}},
+        {type = "show", title = "One", key = "/library/metadata/8/children", childCount = 1},
+        {type = "show", title = "Many", key = "/library/metadata/9/children", childCount = 3,
+         leafCount = 4, viewedLeafCount = 4},
+    },
+}, "https://srv", "m1", "items")
+eq("plex entries (music skipped)", #pents, 4)
+local evil = Plex.entries_from({Metadata = {
+    {type = "movie", title = "X", key = "/library/metadata/1", Media = {{Part = {{key = "@evil.example/f.mkv"}}}}},
+    {type = "show", title = "Y", key = "//evil.example/children"},
+}}, "https://srv", "m1", "items")
+eq("plex entries with unsafe keys dropped", #evil, 0)
+eq("plex section path", pents[1].path, "plex://m1/library/sections/3/all")
+eq("plex movie url", pents[2].path, "https://srv/library/parts/1/file.mkv")
+eq("plex movie title", pents[2].plex.title, "Alien (1979)")
+eq("plex one-season show", pents[3].plex.key, "/library/metadata/8/allLeaves")
+eq("plex one-season show lists episodes", pents[3].plex.kind, "episodes")
+eq("plex show lists seasons", pents[4].plex.kind, "seasons")
+eq("plex season lists episodes", Plex.entries_from({Metadata = {
+    {type = "season", title = "Book Two", index = 2, key = "/library/metadata/10/children"}}},
+    "https://srv", "m1", "seasons")[1].plex.kind, "episodes")
+check("plex watched show", pents[4].state and pents[4].state.watched)
+local subs = Plex.external_subtitles({Media = {{Part = {{Stream = {
+    {streamType = 3, codec = "srt", key = "/library/streams/5", languageTag = "en", displayTitle = "English"},
+    {streamType = 3, codec = "vobsub"}, {streamType = 2, key = "/x"},
+}}}}}}, "https://srv")
+eq("plex external subs", #subs, 1)
+eq("plex sub url", subs[1].url, "https://srv/library/streams/5")
+
 -- about -----------------------------------------------------------------------
 local About = require "dvp.about"
 local bi = About.parse_build_info("date=2026-10-23\ncommit=1a2b3c4-modified\n")
@@ -271,6 +386,28 @@ eq("build info date", bi.date, "2026-10-23")
 eq("build text", About.build_text(bi), "2026-10-23 · 1a2b3c4-modified")
 eq("build text no commit", About.build_text(About.parse_build_info("date=2026-10-23\ncommit=\n")), "2026-10-23")
 eq("build text dev", About.build_text(About.parse_build_info(nil)), "development build")
+
+eq("plex sub key", SubDL.plex_key({machine = "ab12", rating_key = "77"}), "plex-ab12-77")
+local pinfo = SubDL.plex_info({kind = "episode", show = "Sherlock", name = "The Blind Banker", season = 1, episode = 2})
+check("plex sub info episode", pinfo.title == "Sherlock" and pinfo.season == 1 and pinfo.episode == 2)
+pinfo = SubDL.plex_info({kind = "movie", name = "Some Film", year = 1995})
+check("plex sub info movie", pinfo.title == "Some Film" and pinfo.year == 1995 and not pinfo.season)
+eq("safe lang", SubDL.safe_lang("pt-br"), "pt-br")
+eq("unsafe lang", SubDL.safe_lang("../../x"), "und")
+eq("empty lang", SubDL.safe_lang(""), "und")
+check("os base url ok", OS.valid_base_url("vip-api.opensubtitles.com") and OS.valid_base_url("api.opensubtitles.com"))
+check("os base url rejected", not OS.valid_base_url("evil.example") and not OS.valid_base_url("opensubtitles.com.evil.example")
+    and not OS.valid_base_url("x/@evil"))
+check("os link https", OS.valid_link("https://cdn.example/f.srt", OS.API_URL))
+check("os link rejected", not OS.valid_link("file:///etc/passwd", OS.API_URL)
+    and not OS.valid_link("http://cdn.example/f.srt", OS.API_URL) and not OS.valid_link(nil, OS.API_URL))
+check("os link mock origin", OS.valid_link("http://127.0.0.1:8080/files/x.srt", "http://127.0.0.1:8080/api/v1")
+    and not OS.valid_link("http://127.0.0.1:80800/x", "http://127.0.0.1:8080/api/v1"))
+eq("plex auth url", Plex.auth_url("cid", "abc"),
+    "https://app.plex.tv/auth#?clientID=cid&code=abc&context%5Bdevice%5D%5Bproduct%5D=Deck%20Video%20Player")
+local qrencode = require "dvp.qrencode"
+local qok, qm = qrencode.qrcode(Plex.auth_url(string.rep("a", 32), string.rep("b", 25)))
+check("qr encodes sign-in url", qok and #qm == 45, tostring(qok and #qm))
 
 -- menu ------------------------------------------------------------------------
 local Menu = require "dvp.menu"

@@ -335,6 +335,48 @@ function Ass:icon_drive(x, cy, s, o)
     return self:circle(x + s * 0.78, cy, s * 0.07, {color = o.inner or M.theme.bg, opacity = o.opacity})
 end
 
+-- QR code from a module matrix (matrix[x][y] > 0 = dark, as made by
+-- dvp/qrencode.lua) in a `size`-wide square at (x, y), on a white square
+-- with the 4-module quiet zone scanners need. Dark modules are merged into
+-- horizontal runs: one drawing, a few hundred rectangles at most.
+function Ass:qr(x, y, size, matrix, o)
+    o = o or {}
+    local n = #matrix
+    local cell = size / (n + 8)
+    self:rect(x, y, size, size, {radius = cell * 2, color = "FFFFFF"})
+    local parts = {}
+    local ox, oy = x + 4 * cell, y + 4 * cell
+    for row = 1, n do
+        local col = 1
+        while col <= n do
+            if matrix[col][row] > 0 then
+                local start = col
+                while col <= n and matrix[col][row] > 0 do col = col + 1 end
+                local x0, x1 = ox + (start - 1) * cell, ox + (col - 1) * cell
+                local y0, y1 = oy + (row - 1) * cell, oy + row * cell
+                parts[#parts + 1] = string.format("m %.2f %.2f l %.2f %.2f %.2f %.2f %.2f %.2f",
+                    x0, y0, x1, y0, x1, y1, x0, y1)
+            else
+                col = col + 1
+            end
+        end
+    end
+    return self:path(table.concat(parts, " "), {color = o.color or "000000"})
+end
+
+-- Media server (Plex): two stacked rack units with status lights.
+function Ass:icon_server(x, cy, s, o)
+    local w, h = s, s * 0.34
+    for i = 0, 1 do
+        local y = cy - s * 0.38 + i * (h + s * 0.08)
+        self:rect(x, y, w, h, {radius = s * 0.08, color = o.color, opacity = o.opacity})
+        self:circle(x + w - s * 0.18, y + h / 2, s * 0.06, {color = o.inner or M.theme.bg, opacity = o.opacity})
+        self:rect(x + s * 0.14, y + h / 2 - s * 0.03, s * 0.36, s * 0.06,
+                  {color = o.inner or M.theme.bg, opacity = o.opacity})
+    end
+    return self
+end
+
 -- microSD card: portrait card with the top-right corner cut, three contacts.
 function Ass:icon_sdcard(x, cy, s, o)
     local x1, x2 = x + s * 0.2, x + s * 0.8

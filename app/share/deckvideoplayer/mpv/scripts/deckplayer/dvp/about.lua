@@ -76,6 +76,7 @@ function M.items(ctx)
         row("Font", "Inter (SIL Open Font License 1.1)"),
         row("Surround", "MIT KEMAR HRTF (Gardner & Martin, 1995)"),
         row("Subtitles", "OpenSubtitles.com"),
+        row("QR codes", "luaqrcode (BSD-3-Clause)"),
         {separator = true},
         {label = "Not affiliated with Valve Corporation."},
         {label = "Steam and Steam Deck are trademarks of Valve Corporation."},

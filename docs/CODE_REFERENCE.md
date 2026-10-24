@@ -28,7 +28,9 @@ Runs inside the Flatpak (`/app/bin`) and from the source tree.
    and the mpv binary (`$DVP_MPV` or `mpv` on PATH).
 2. Config dir `$DVP_CONFIG_DIR` (default `~/.config/deckvideoplayer`) and data
    dir `$DVP_DATA_DIR` (default `$XDG_DATA_HOME/deckvideoplayer`). Copies the
-   default `config.ini` on first run.
+   default `config.ini` on first run. The launcher sets umask 077, so
+   everything the app creates (config, `plex.json`, `resume.json`,
+   subtitles) is owner-only from creation (D39, D40).
 3. `ini_get section key` is a tiny awk INI reader, used only for
    `[display] gpu_context`.
 4. Builds the mpv command line:
@@ -96,9 +98,9 @@ Responsibilities:
   | `resume`, `menu`, `display` | service instances |
   | `surround` | headphone surround (`dvp/surround.lua`) |
   | `subtitles` | online subtitle search/download (`dvp/subdownload.lua`) |
-  | `play(list, start)` | load `list[1]` (replace) with start position `start`, append the rest |
-  | `stop()` | save progress, `stop` → idle → browser |
-  | `quit()` | save, restore refresh rate, `quit` |
+  | `play(list, start)` | load `list[1]` (replace) with start position `start` (nil: the saved position, if any), append the rest |
+  | `stop()` | `stop` → idle → browser (progress is saved by on_unload) |
+  | `quit()` | restore refresh rate, `quit` (progress is saved by on_unload) |
   | `quit_dialog()` | "Quit?" dialog |
   | `help()` | controls list |
   | `toast(text)` | 1.8 s notification |
@@ -112,6 +114,11 @@ Responsibilities:
     external launches; remembered in `state.resumed_at` and announced with a
     toast on `file-loaded`); restores `aid`/`sid` from the resume entry (as
     `file-local-options`).
+  - Plex videos (D37): on_load fetches the resume point and subtitle
+    files (`plex:prepare`), sets the transient-token header and the media
+    title file-locally; `save_progress(ending)` reports to the server
+    instead of resume.json (blocking `stopped` + scrobble when the file
+    closes).
   - `on_preloaded` hook: `subtitles:load_stored(path)` adds subtitles
     downloaded earlier for this video before track selection (D28).
   - `on_unload` hook: `save_progress()` + flush. Properties are still
@@ -140,7 +147,10 @@ Responsibilities:
 `format_time(sec, force_hours)`, `ass_escape` (makes text literal for
 libass, same technique as mpv's osc), `utf8_len`, `utf8_truncate(s, n)`
 (adds `…`), `natural_key` (zero-pads digit runs to 12 → "Ep 2" < "Ep 10"),
-`read_file`, `write_file_atomic` (tmp + rename), `is_dir`, `file_exists`,
+`read_file`, `write_file_atomic(path, data, private)` (tmp + rename;
+returns `false, err` and keeps the old file if the write fails; `private`
+makes the tmp file mode 600 before writing), `write_private(path, data)`,
+`is_dir`, `file_exists`,
 `mkdir_p` (mpv subprocess), `shallow_copy`.
 
 ## `dvp/version.lua`
@@ -179,7 +189,8 @@ User-Agent. Bump it with the metainfo `<release>` when releasing.
   - `text(x, y, str, o)`: o = `size, color, opacity, align` (ASS numpad;
     default 4 = left-middle), `bold, italic, outline, clip, font`
   - `text` never wraps (`\q2`).
-  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_sdcard`,
+  - `qr(x, y, size, matrix)`: QR code on a white square with quiet zone.
+  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_sdcard`, `icon_server`,
     `icon_check`, `icon_play`, `icon_pause`, `icon_triangle(dir)`
   - `button(btn, x, cy, s, o)`: controller glyphs `A B X Y`, `L1 R1 L2 R2`,
     `MENU`, `VIEW`, `DPAD`, `DPAD_LR`, `DPAD_UD`. Returns the width.
@@ -209,9 +220,13 @@ key.
 
 ## `dvp/library.lua`: sources and listings
 
-- `sources(cfg)` → `{name, path, kind}`: configured folders that exist
+- `sources(cfg, extra)` → `{name, path, kind}`: configured folders that exist
   (`kind = "folder"`), plus removable media mount points when enabled
-  (`kind = "sdcard" | "usb" | "removable"`, D33).
+  (`kind = "sdcard" | "usb" | "removable"`, D33), then `extra` (Plex
+  servers, `kind = "plex"`).
+- `sort_entries(entries, mode)`: folders first, natural name order or
+  newest first (`mode = "date"`); uses `sort_name`, else `name`, else
+  `label`, and `mtime`. Shared by folder listings and Plex.
 - `parse_mountinfo(text)` → `{path, source}` for mount points under
   `/run/media/…` or `/media/…` (handles `\040` escapes; pseudo
   filesystems such as `tmpfs` are skipped); `source` is the device, e.g.
@@ -312,10 +327,65 @@ text scrolls through a `ui.marquee`; title and subtitle are shortened.
 `Menu.side_width(W)` is the side panel width (also used by the player to
 keep its title clear of the panel).
 
+Center dialogs also take `code` (a big, letter-spaced code to type
+elsewhere) and `qr` (a QR matrix from `dvp/qrencode.lua`, drawn left of the
+message lines and the code; Plex sign-in, D38).
+
 `menu:update(spec, fields)` changes fields (usually `items`) of a menu that
 may still be open, resets the cursor and redraws it if it is on top;
 returns false when the menu was closed meanwhile. Used by asynchronous
 work (subtitle search) to fill a menu in place.
+
+## `dvp/http.lua`: HTTP through curl
+
+Shared by OpenSubtitles and Plex. `request(req, cb)` (async) and
+`request_sync(req)` (blocking; only inside mpv hooks). `req`: `url`,
+`method`, `headers` (`{Name = value}`), `body` (table → JSON), `output`
+(file), `timeout` (s), `follow` (redirects; off by default because curl
+forwards custom headers to the redirect target), `max_size` (bytes), `tag`
+(log prefix). Every request is limited to http(s), redirects to https
+(D39). `cb(code,
+body)`: HTTP status, or nil + error text; body is decoded JSON when
+possible. Pure: `curl_config(req)` (the `-K -` text: secrets never in
+argv), `curl_quote`, `query_string(params, lower)`, `parse_result(res)`,
+`CURL_ERRORS`.
+
+## `dvp/plex.lua`: Plex Media Server
+
+D37. Pure (unit-tested): `parse_resources(list, account_token)` → servers
+`{name, machine, token, owned, connections}`; `local_rank(address)`;
+`server_candidates(server, allow_insecure)` (ordered base URLs: https
+`*.plex.direct` only, plain http on local addresses only with
+`allow_insecure`; no relays); `safe_key(key)` (server-supplied paths: one
+leading `/`, URL-path characters only; entries failing it are dropped);
+`pick_candidate(results, n)`; `auth_url(client_id, code)` (QR sign-in, D38);
+`item_label(md, kind)`; `item_state(md)` →
+`{pos, duration, watched}` (same rules as resume.json: no position under
+30 s, near the end = watched); `entries_from(container, base, machine, kind)`
+→ browser entries (sections, shows → `/allLeaves` for one season, kind
+`seasons`/`episodes` for their listings, which keep the server's order;
+movies/episodes with `path` = direct-play URL and `plex = {machine,
+rating_key, key, duration, kind, title}`); `external_subtitles(md, base)`.
+
+Instance `Plex.new(data_dir, {allow_insecure})` (account in `plex.json`,
+written with `util.write_private`):
+`signed_in()`, `username()`, `sources()`, `start_pin(cb)` (short + strong
+PIN, `cb(code, auth_url)`) / `poll_pin(cb)` (both PINs; `cb(true, err)`
+once claimed, even if the server list then failed) / `cancel_pin()`
+(dialog closed: answers in flight are ignored) / `refresh_account(cb)`
+(answers after a sign-out are dropped) / `sign_out()`, `connect(machine, cb)` (parallel
+`/identity` probes without token, answer must carry the server's
+`machineIdentifier`; cached per session; then `prefetch_token(machine)`
+fetches the transient token in the background), `forget_session(machine)` (drops
+the cached connection and transient token after a failed load), `list(loc, cb)` (loc = `{machine, key,
+kind}`; kinds `root`, `ondeck`, `items`, `shows`, `seasons`, `episodes`),
+`item_for(path)`, `describe(path)` (info panel), `fetch_range(path, from,
+to, file, cb)` (capped at the range size, needs HTTP 206), `prepare(item)` (blocking: resume point +
+external subtitles; `ok` false when the server didn't answer),
+`media_token(item)` / `header_fields(item)` (transient token for mpv;
+never falls back to the account token), `report(item, state, time, duration, sync)`,
+`set_watched(item, watched, cb, sync)`. `readonly` (development) turns
+reports into log lines.
 
 ## `dvp/about.lua`: About panel
 
@@ -324,6 +394,11 @@ D34. `About.open(ctx)` (ctx: `cfg`, `menu`, `display`, `app_dir`,
 builds the rows. Pure: `parse_build_info(text)` → `{date, commit}`,
 `build_text(info)` → "2026-10-23 · 1a2b3c4" / "development build".
 Constants: `REPO`, `LICENSE`, `DEVELOPER`, `COPYRIGHT`.
+
+## `dvp/qrencode.lua`: QR encoder (vendored)
+
+[luaqrcode](https://github.com/speedata/luaqrcode), BSD-3-Clause, unchanged
+(D38). `qrcode(text)` → `ok, matrix` (`matrix[x][y] > 0` = dark).
 
 ## `dvp/surround.lua`: headphone surround
 
@@ -356,9 +431,10 @@ D28/D29. Pure helpers (all unit-tested):
 
 Client: `OpenSubtitles.new{api_key, username, password, api_url}`,
 `:enabled()`, `:http(req, cb)` (async curl, config on stdin), `:search(params,
-cb)`, `:ensure_login(cb)` (once per session, follows `base_url`),
-`:download(file_id, dest, cb)` (download request, then fetch the link to
-`dest.part`, rename). Constants: `API_URL`, `USER_AGENT`. There is no built-in key (D29):
+cb)`, `:ensure_login(cb)` (once per session, follows `base_url` only if
+`valid_base_url(host)`: `opensubtitles.com` or a subdomain),
+`:download(file_id, dest, cb)` (download request, then fetch the link,
+which must pass `valid_link(link, api_url)`: https, or the mock's origin, to `dest.part` with redirects and a 10 MB cap, rename). Constants: `API_URL`, `USER_AGENT`. There is no built-in key (D29):
 `SubDownload` passes `cfg.opensubtitles.api_key`.
 
 ## `dvp/subdownload.lua`: online subtitles UI and storage
@@ -373,7 +449,10 @@ D28. `SubDownload.new(ctx, data_dir, api_url)`.
   it (or selects the stored file if that upload was downloaded before).
 - `stored(path)` / `load_stored(path)`: downloaded files of a video, added
   with `sub-add … auto <title> <lang>` from the `on_preloaded` hook.
-- Pure: `file_name(release, lang, file_id)`, `parse_file_name(name)` (→
+- Plex videos (D38): `key` is `plex_key(item)` (no network), search terms
+  `plex_info(item)` (both pure), `hash_for(path, cb)` fetches the first
+  and last 64 KiB from the server for the exact-match hash.
+- Pure: `safe_lang(lang)` (letters and `-`, else `und`), `file_name(release, lang, file_id)`, `parse_file_name(name)` (→
   `{title, lang, file_id}`),
   `video_key(path)` (moviehash, or `small-<size>` for tiny files).
 
@@ -396,8 +475,14 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
   from the chosen one (if `autoplay_next`).
 - `open_menu()`: sort, reload, go to library start (whenever not
   `at_start()`), mark (un)watched, controls, quit.
+- Plex (D37): `load_plex(loc)` (async listing, `loading` state, drops late
+  answers, `after_load` callback, e.g. to restore the cursor),
+  `entry_state(e)` / `resume_position(e)` (Plex state or resume.json),
+  `sortable()`, `plex_sign_in()` (code dialog, polls only while open),
+  `plex_account_menu()`; `show(select)` puts the cursor on a path once
+  the listing is there.
 - `render()`: background, header (title, breadcrumb, counts), rows (icon:
-  folder / SD card / drive / video, label, status: chevron / ✓ / progress
+  folder / server / SD card / drive / video, label, status: chevron / ✓ / progress
   bar + time), scrollbar, empty states, footer hints that depend on the
   selected entry. The selected label scrolls when cut (`self.marquee`,
   D32; not while a menu is open over the library).
@@ -460,11 +545,13 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `scripts/steam_shortcut.py add\|artwork\|remove\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `PLEX_WRITE=1` allows progress reports to Plex (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
 | `helper/build.sh [OUTDIR]` | Builds the refresh-rate helper (D31). |
 | `scripts/make-source-archive.py OUT [--manifest M]` | GPL corresponding-source archive of a release from the manifest's pinned sources (D36). |
 | `scripts/build-info.sh OUTFILE` | Writes `date=` and `commit=` for the About panel; run by the Flatpak manifest (D34). |
+| `scripts/release-notes.sh [vX.Y.Z]` | Prints the `CHANGELOG.md` section of a release (default: `dvp/version.lua`) for the GitHub release text; exits 1 if missing (D41). |
+| `tools/plex-dev-account.py DATA_DIR` | Writes a signed-in `plex.json` for tests from `.dev/plex/` (D37). |
 | `tools/mock-opensubtitles.py [PORT]` | Fake OpenSubtitles API for tests (D30); used by `OSMOCK=1 tools/headless-run.sh`. |
 | `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
 | `.github/workflows/build.yml` | CI: unit tests, Flatpak bundle; on `v*` tags a GitHub release with the bundle and an installer tarball. |

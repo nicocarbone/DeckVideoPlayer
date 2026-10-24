@@ -44,6 +44,10 @@
    folder = /run/media/deck/SDCARD/Movies
    ```
 
+   The app can read `~/Videos`, `~/Downloads`, the microSD card, USB
+   drives and `/mnt`. For a folder elsewhere, see
+   [Troubleshooting](#troubleshooting) (*Folder missing*).
+
 5. Return to **Gaming Mode** and launch *Deck Video Player* (Library →
    Non-Steam).
 
@@ -163,6 +167,37 @@ Searches are free. Downloads count against a daily limit (a few per day
 without logging in, more with your username and password); the toast after
 a download shows how many are left.
 
+## Plex
+
+Deck Video Player can browse and play the movies and shows of your Plex
+Media Server.
+
+1. Library → **Menu** → **Sign in to Plex…**. A QR code and a 4-character
+   code appear.
+2. Scan the QR code with your phone and approve the sign-in, or open
+   **plex.tv/link** on a phone or PC and enter the code. The dialog closes
+   by itself and your servers appear in the library, next to your folders.
+3. Open a server: **Continue watching**, then your movie and TV libraries.
+   Progress bars and checkmarks come from Plex, and what you watch here
+   updates Plex for your other devices.
+
+Notes:
+- Videos play in their original quality (direct play), so HDR and the
+  48 Hz refresh match work just like for local files. There is no
+  transcoding: away from home, your server's upload speed must exceed the
+  video's bitrate (4K remuxes can need 20–80 Mbit/s).
+- *Download subtitles…* (subtitle menu, X) also works for Plex videos; the
+  search uses Plex's title, year, season and episode, and downloads are
+  kept on the Deck.
+- Remote play needs Remote Access enabled on the server. The info panel
+  (View) shows `Stream: Plex · <server> · local` or `remote`.
+- Connections to the server are always encrypted (https), at home and
+  away; see Troubleshooting if Plex can't reach your server at home.
+- Your Plex sign-in is stored in the app's data folder (`plex.json`,
+  readable only by you). **Menu → Plex account → Sign out** removes it;
+  you can also revoke "Deck Video Player" under Plex → Settings →
+  Authorized Devices.
+
 ## Troubleshooting
 
 | Symptom | Check / fix |
@@ -172,10 +207,12 @@ a download shows how many are left.
 | HDR works in other games but not here | Check that `gpu_context = auto` (it must resolve to `x11vk` in game mode). Run from Konsole inside a nested gamescope and look for `[Gamescope WSI] … hdr formats exposed to client: true`. |
 | Refresh rate doesn't change | Only in game mode, only on Deck panels, not while VRR is on. Check Steam's **performance overlay** (it shows the real panel rate); the Quick Access Menu's refresh slider always shows Steam's own setting, not ours. The info panel (View) shows `48 Hz (requested)` on a Deck (gamescope's confirmation isn't visible to games there), `48 Hz (matched)` where it can confirm, `90 Hz (asked for 48 Hz)` if gamescope refused. Moving Steam's slider takes the rate back; the app asks again on the next file or when you unpause. Logs: `refresh rate: …` lines. To turn matching off: playback menu → *Match refresh rate*. |
 | Software decoding (`Decoder: Software`) | Some formats have no hardware decoder (e.g. H.264 4:4:4, 10-bit H.264, MPEG-4 ASP). That's expected; it costs more battery. |
-| Folder missing from the library | The path in `config.ini` must exist. Paths outside home, `/run/media`, `/media` and `/mnt` aren't visible to the Flatpak; add access with `flatpak override --user --filesystem=/path io.github.nicocarbone.DeckVideoPlayer`. |
+| Folder missing from the library | The path in `config.ini` must exist. The Flatpak can only read `~/Videos`, `~/Downloads`, the microSD card / USB drives (`/run/media`, `/media`) and `/mnt` (since v0.3, so a malicious video can't read the rest of your files). For another folder, run once in Konsole: `flatpak override --user --filesystem=/home/deck/Movies:ro io.github.nicocarbone.DeckVideoPlayer` (your path). |
 | Need logs | Desktop Mode: `flatpak run io.github.nicocarbone.DeckVideoPlayer --msg-level=all=v --log-file=$HOME/dvp.log`. In game mode, add `--log-file=/home/deck/dvp.log` to the shortcut's launch options (after the app id). |
 | No *Download subtitles…* entry | No API key yet (see [above](#online-subtitles-opensubtitles)), or the video isn't a local file. |
 | "No internet connection" when searching subtitles | The Deck is offline, or the Flatpak lacks network access: `flatpak info --show-permissions io.github.nicocarbone.DeckVideoPlayer` must list `network`. |
 | "OpenSubtitles rejected the API key" / "login failed" | Check `api_key`, and use your username (not e-mail) with the right password. |
 | No *Headphone surround* entry in the audio menu | `audio_passthrough` is set (surround can't filter compressed audio), or the build lacks the `sofalizer` filter (log: `headphone surround: the sofalizer filter is not available`). |
+| Plex server missing or "Can't reach …" | Menu → Plex account → Refresh server list. At home the Deck must reach the server on the LAN; away from home the server needs Remote Access. The app only uses encrypted `*.plex.direct` connections; some routers block those names (DNS rebinding protection). Allow `plex.direct` in the router, or set `allow_insecure_lan = yes` under `[plex]` in `config.ini` (plain http, home networks only). |
+| Plex video stutters away from home | No transcoding yet: the server's upload speed must exceed the file's bitrate. Try a lower-bitrate version of the video. |
 | Settings ignored | Typo in a key or value: the log shows `config.ini: unknown option …` / `invalid value …`. |

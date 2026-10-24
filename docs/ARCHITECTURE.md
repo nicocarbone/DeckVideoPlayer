@@ -18,7 +18,7 @@ it first; then [CODE_REFERENCE.md](CODE_REFERENCE.md) for per-module detail,
 | vii | Subtitle and audio track selection | `dvp/player.lua` menus (X / Y buttons) |
 | viii | Steam Machines, 4K HDR VRR | `tv` device profile, `high` quality, UI scales by aspect, VRR handled by gamescope |
 
-User-chosen scope for v1: local folders (network shares / Plex later),
+User-chosen scope for v1: local folders (Plex added in v0.3, network shares later),
 resume playback, refresh-rate matching, English UI.
 
 ## 2. Big picture
@@ -226,6 +226,7 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `~/.config/deckvideoplayer/config.ini` | User settings (copied from the default on first run) | user / launcher |
 | `~/.config/deckvideoplayer/mpv.conf` | Optional raw mpv overrides (`--include`d last) | user |
 | `$XDG_DATA_HOME/deckvideoplayer/resume.json` (Flatpak: `~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/`) | Resume positions, watched flags, chosen audio/sub track per file | `dvp/resume.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/plex.json` | Plex sign-in: client id, account token, servers and their addresses (mode 600) | `dvp/plex.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
 | `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
 
@@ -254,8 +255,9 @@ rename).
   SDL2 gamepad support.
 - Sandbox permissions: X11 + Wayland, PulseAudio + PipeWire, `--device=all`
   (GPU, VA-API, `/dev/input` for SDL), `xdg-run/gamescope-0` (HDR layer),
-  read-only `home`, `/run/media`, `/media`, `/mnt`, read-write
-  `xdg-config/deckvideoplayer`, and network (online subtitles, D28).
+  read-only `xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt`
+  (not the whole home, D39), read-write `xdg-config/deckvideoplayer`, and
+  network (online subtitles D28, Plex D37).
 - **Steam integration**: `scripts/install-steamos.sh` installs the bundle
   per-user, installs the gamescope layer extension and adds a non-Steam
   shortcut (via `steamos-add-to-steam` while Steam runs, or by editing
@@ -274,13 +276,24 @@ rename).
   keeps responding; results fill the open menu in place. Downloads are
   re-added from the `on_preloaded` hook on later plays.
 
-## 11. Extension points
+## 11. Plex (v0.3)
 
-- **New library source kinds** (SMB, NFS, Plex, Jellyfin): `library.sources()`
-  returns `{name, path, kind}` roots and `library.list()` returns entries
-  `{name, label, path, is_dir, mtime, size}`. A new kind needs its own
-  `list` implementation, and `path` must be something `loadfile` accepts
-  (a URL is fine). See DEVELOPMENT.md "Recipes".
+Plex servers are library sources (D37). Network work happens only when
+the user opens a Plex location or plays a Plex video: listings are
+asynchronous curl requests (`dvp/http.lua`), the first visit to a server
+probes its addresses in parallel and keeps the best reachable one for the
+session. Playback is direct play of the original file; the on_load hook
+fetches the resume point and subtitle files (blocking, 5 s max) and gives
+mpv a transient token in an HTTP header. Progress goes back to the server
+every 30 s, on pause and when the file closes.
+
+## 12. Extension points
+
+- **New library source kinds** (Jellyfin, SMB, …): Plex shows the shape
+  (D37): roots via `library.sources(cfg, extra)`, an asynchronous lister
+  dispatched from `browser:load()`, entries with a playable URL `path` and
+  a `state` for progress, and an item registry the playback hooks use. See
+  DEVELOPMENT.md "Recipes".
 - **New actions/buttons**: add keys in `input.lua`, then handle the action in
   `browser:handle` / `player:handle`.
 - **New menu entries**: add items to `player:main_menu_items()` or

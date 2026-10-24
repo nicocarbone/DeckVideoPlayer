@@ -558,3 +558,209 @@ reproduced) before fixing:
   and gamescope's MIT protocol XML (notice kept). Commit metadata carries
   the owner's name and e-mail; left as is (rewriting published history
   would be destructive).
+
+## D37. Plex Media Server as a library source (v0.3)
+
+- **Sign-in:** plex.tv's PIN flow. The library menu's *Sign in to Plex…*
+  shows a 4-character code (big, spaced) to enter at plex.tv/link on a
+  phone; the app polls every 2 s only while that dialog is open. Then it
+  reads the user name and the server list (`/api/v2/resources`) and saves
+  `<data_dir>/plex.json` (client id, account token, servers with their
+  addresses and per-server tokens; mode 600). No password ever touches the
+  Deck. Chosen over a token/URL in `config.ini`: nothing to type, and the
+  server list gives remote addresses for free. *Plex account* in the menu
+  refreshes the list or signs out.
+- **Sources:** each server is a library source (`library.sources(cfg,
+  plex:sources())`), so it appears next to folders and drives with a
+  server icon. Server page: *Continue watching* (`/library/onDeck`) and
+  the movie/show libraries (music/photos skipped). Shows → seasons →
+  episodes; a one-season show opens straight into its episodes
+  (`/allLeaves`). Listings load asynchronously (`browser:load_plex`,
+  "Loading…", late answers for a location the user left are dropped).
+  Name/date sort works client-side; the server page and *Continue
+  watching* keep the server's order.
+- **Connecting:** a server reports many "local" addresses; a server in
+  Docker reports bridge addresses (172.17–31.x) nobody can reach.
+  Candidates are probed in parallel (`/identity`, 3 s) and ranked: home
+  networks (192.168/10) before 172.16/12, local before remote; relays are
+  skipped (capped at a few Mbit/s). Only https `*.plex.direct` addresses
+  (valid certificate) are used; plain http is an opt-in since D39. The
+  best candidate wins as soon as everything ranked above it has failed,
+  so the usual case is instant. Verified on a test server running in
+  Docker (several unreachable bridge addresses): the LAN address is
+  chosen immediately, and forcing the remote address also browses and
+  streams.
+- **Playback:** direct play only. mpv opens `/library/parts/…` as is, so
+  every format, HDR10, VA-API and refresh matching work as for local
+  files (4K HDR10 HEVC verified: opens in 0.4 s, seeks across the film in
+  0.5 s on the LAN). The on_load hook fetches fresh metadata (resume
+  point, external subtitle files, which are `sub-add`ed in on_preloaded),
+  sets `http-header-fields` and `force-media-title` file-locally.
+- **Token in logs:** mpv logs every property a script sets at `-v`, which
+  the troubleshooting guide asks users to share. So mpv never gets the
+  account token: it gets a *transient* token from the server
+  (`/security/token?type=delegation&scope=all`, cached 12 h). Verified: it
+  streams media and subtitles (HTTP 206/200), plex.tv rejects it (401),
+  and a 600-line `-v` log of a Plex playback contains the account token 0
+  times. Everything else goes through `dvp/http.lua` (secrets on curl's
+  stdin).
+- **Progress:** Plex is the source of truth for Plex videos (no
+  resume.json entries). `/:/timeline` reports playing/paused every 30 s
+  and on pause, `stopped` (blocking, 3 s) when the file closes, plus
+  `/:/scrobble` when it finished; the library shows Plex's progress bars
+  and checkmarks, and *Mark as (un)watched* calls (un)scrobble.
+- **Read-only development:** `deckplayer-plex_readonly` makes reports and
+  watched changes log-only; `tools/headless-run.sh` sets it unless
+  `PLEX_WRITE=1`, so tests against a real server never change its owner's
+  watch history. `tools/plex-dev-account.py` writes a signed-in plex.json
+  for tests from a token in `.dev/plex/`.
+- **Not in v0.3:** transcoding (remote play needs upload bandwidth above
+  the file's bitrate), relays, Plex Home user switching, GDM discovery of
+  servers without an account. (OpenSubtitles search for Plex items was
+  added afterwards, D38.) Remote access was tested through the
+  router's public address from inside the LAN only.
+- **Shared HTTP helper:** `dvp/http.lua` (curl config on stdin, async and
+  blocking variants, error texts) now serves OpenSubtitles too.
+
+## D38. Plex sign-in by QR code; subtitle downloads for Plex videos
+
+Both requested after the first Deck test of the Plex build (2026-10-24).
+
+- **QR sign-in:** the sign-in dialog now shows a QR code next to the short
+  code. Plex's auth page (`https://app.plex.tv/auth#?clientID=…&code=…&
+  context[device][product]=…`) takes the PIN code from the URL, but its
+  documented use is with *strong* PINs (25 characters) and it is unclear
+  whether 4-character codes work there. So the app creates two PINs: the
+  short one to type at plex.tv/link and a strong one inside the QR code,
+  and polls both (every 2 s, only while the dialog is open); whichever is
+  claimed first signs in. Typing remains the fallback if a phone can't
+  scan.
+- **QR encoder:** `luaqrcode` (speedata, BSD-3-Clause, upstream commit
+  5a9c34bc04d5), vendored unchanged as `dvp/qrencode.lua`: pure Lua that
+  runs on Lua 5.1/5.2/LuaJIT, no dependencies. The sign-in URL (~153
+  characters) becomes a 45×45 code. `Ass:qr` draws dark modules as
+  horizontal runs in one ASS drawing on a white square with the 4-module
+  quiet zone. Verified by decoding screenshots (1280×800, 4K, Flatpak)
+  with zxing-cpp.
+- **Subtitles for Plex videos:** *Download subtitles…* was only offered
+  for local files, because the exact-match search hashes the file and
+  downloads are stored under that hash. For Plex videos:
+  - search terms come from Plex's metadata (show or film title, year,
+    season, episode), better than parsing a file name;
+  - the OpenSubtitles hash is computed from the first and last 64 KiB,
+    fetched with two HTTP range requests and the file size from the
+    listing, only when the user searches (verified: same hash as an
+    independent Python implementation);
+  - downloads are stored under `subtitles/plex-<server>-<item>/`, so they
+    reload on later plays (on_preloaded) without any network access.
+
+## D39. Third audit (ISSUES.md Part III, v0.3.0) resolved
+
+An audit of the whole codebase before v0.3.0, focused on the Plex account
+and the network code. All findings fixed:
+
+- **Plex connections are https only** (`*.plex.direct`, certificate
+  checked). For a server the user owns, the server token *is* the account
+  token, and plain http to a LAN address would hand it to whatever answers
+  at that address on any network the Deck joins (hotel, café). Plain http
+  is available behind `[plex] allow_insecure_lan = yes` (for routers that
+  block plex.direct DNS), documented as for trusted home networks only.
+- **Probes carry no token:** `/identity` is unauthenticated; the answer
+  must have the expected `machineIdentifier`, so a different device at
+  the same address is never picked.
+- **curl hardening** (`dvp/http.lua`): no redirects by default (curl
+  forwards custom headers such as `X-Plex-Token` to the redirect target,
+  even on another host); only the subtitle file download (no secrets)
+  follows, and only to https. `proto = =http,https` so a server can't make
+  curl read `file://` URLs; downloads are capped (`max_size`, 10 MB for
+  subtitles).
+- **Server-supplied keys validated** (`plex.safe_key`): a single leading
+  `/`, URL-path characters only. Rejects `@host` tricks that would send
+  the token elsewhere; such entries are skipped.
+- **OpenSubtitles responses validated:** login `base_url` must be
+  `opensubtitles.com` or a subdomain, the download link must be https,
+  the language code is letters/`-` only (else `und`) because it becomes
+  part of a file name.
+- **Private files:** `plex.json` is made mode 600 *before* the token is
+  written (`util.write_private`); `config.ini` (may hold an OpenSubtitles
+  password) is created with umask 077 by the launcher and the SteamOS
+  installer. `write_file_atomic` now checks write/close errors and keeps
+  the old file on failure (full disk no longer truncates `resume.json`).
+- **Plex robustness:** the token is saved as soon as the PIN is claimed
+  (a failing server list no longer loses the sign-in); no fallback to the
+  account token when the transient token can't be fetched (the file fails
+  instead of leaking the token into mpv logs); a failed Plex load forgets
+  the cached transient token and connection (server restart); the app
+  scrobbles only when it considers a video finished below 90 % (above,
+  Plex's own threshold already counted the play).
+- **Sandbox narrowed:** `--filesystem=home:ro` replaced by `xdg-videos:ro`
+  and `xdg-download:ro` (plus `/run/media`, `/media`, `/mnt`). With
+  network access since v0.2, a decoder exploit could otherwise read the
+  whole home folder (SSH keys, other apps' tokens) and send it out. Cost:
+  folders elsewhere in home need `flatpak override --user
+  --filesystem=/path:ro io.github.nicocarbone.DeckVideoPlayer` (INSTALL).
+- **CI:** top-level `permissions: contents: read` (write only in the
+  release job); third-party actions pinned to commit SHAs.
+- **Test data:** the owner's server details (addresses, names, library
+  contents) never go into the repository; unit tests use made-up servers.
+
+## D40. Fourth audit (ISSUES.md Part IV, Gemini, v0.3.0) reviewed
+
+Every finding was checked against the code; all but one were valid.
+
+- **Range requests capped:** `fetch_range` (OpenSubtitles hash of a Plex
+  video) sets `max_size` to the range and accepts only HTTP 206, so a
+  server that ignores `Range` can't stream a whole film into `/tmp` (RAM).
+- **umask 077 in the launcher:** `write_private` created the temp file
+  with the default mode and only then ran `chmod`; a process that opened
+  it in that window kept read access to the token written next. With the
+  umask, every file the app creates is owner-only from creation. The
+  `chmod` stays as a fallback for runs without the launcher.
+- **Server connections validated:** only bare https origins
+  (`https://host:port`) are used; plain http (opt-in) only for IPv4
+  literals with a numeric port (a non-numeric port used to raise a Lua
+  error).
+- **Sign-out and sign-in races:** `sign_out` also drops transient tokens
+  and pending PINs; `refresh_account` ignores answers that arrive after a
+  sign-out (they used to write the servers and their tokens back to
+  `plex.json`). Closing the sign-in dialog cancels the PINs, so a late
+  answer neither signs in nor closes whatever menu is open by then. A PIN
+  claimed while the server list fails now closes the dialog as signed in.
+- **One final report:** Stop and Quit no longer save progress themselves:
+  mpv runs the on_unload hook for both (verified), and the extra async
+  "playing" report could reach Plex after the final "stopped".
+- **Plex progress follows resume.json rules** (`item_state`): no position
+  under 30 s, near the end counts as watched, so the row, the X hint and
+  the resume dialog agree.
+- **Seasons and episodes keep the server's order** (listing kinds
+  `seasons`/`episodes`, not sortable), whatever the sort chosen elsewhere.
+- **Fresh resume point:** the browser passes no start position unless the
+  user chose one (resume dialog, X), so a Plex video uses the position the
+  server returns at load time, which may be newer than the listing.
+- **Hash failures not cached**, so a later search retries.
+- **Transient token prefetched** asynchronously once a server is
+  connected: the first playback's on_load makes one blocking request
+  instead of two.
+- **Small items:** no JSON parse of empty bodies; curl exit 63 → "The file
+  is too large"; luaqrcode credited in About.
+- **Not adopted: asynchronous reports in on_unload when staying in the
+  app.** The blocking `stopped` report (3 s timeout, usually milliseconds
+  on a LAN) guarantees that the listing reloaded right after Stop, and the
+  next playlist entry's metadata, already reflect the new position.
+  Making it async would need the browser to wait or patch its state; the
+  delay only shows when the server is unreachable.
+
+## D41. Changelog as the GitHub release text
+
+- **What:** `CHANGELOG.md` has one user-facing section per release
+  (`## v0.x.y (date)`: new, changed, fixed). The release job publishes the
+  tag's section as the GitHub release text (`scripts/release-notes.sh`,
+  `body_path`), and fails without one; `tests/run.sh` checks that the
+  current version has a section and a metainfo `<release>`.
+- **Why:** the owner asked for a changelog on every GitHub release.
+  Keeping it in the repository (instead of typing it on GitHub) reviews it
+  with the code, ships it in the installer tarball, and makes forgetting it
+  a test failure rather than an empty release page.
+- **Alternatives:** GitHub's generated notes (a list of commit titles, not
+  written for users); the metainfo `<release>` entries alone (kept, but
+  short and XML-formatted for software centres).

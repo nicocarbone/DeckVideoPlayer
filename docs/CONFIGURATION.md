@@ -13,7 +13,7 @@ in `dvp/config.lua`.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `folder` | path, repeatable | `~/Videos` | A library folder. Repeat the line for more; a single line may also hold several separated by `;`. `~` and `$VARS` are expanded. Missing folders are skipped. Alias: `folders`. |
+| `folder` | path, repeatable | `~/Videos` | A library folder. Repeat the line for more; a single line may also hold several separated by `;`. `~` and `$VARS` are expanded. Missing folders are skipped. Alias: `folders`. The Flatpak reads only `~/Videos`, `~/Downloads`, `/run/media`, `/media` and `/mnt`; other folders need a `flatpak override` ([INSTALL](INSTALL.md#troubleshooting)). |
 | `removable_media` | bool | `yes` | Also list mounted drives under `/run/media` and `/media` (microSD card, USB). |
 | `show_hidden` | bool | `no` | Show dot-files and dot-folders. |
 | `extensions` | csv | built-in list | File extensions treated as video. |
@@ -47,6 +47,15 @@ in `dvp/config.lua`.
 | `refresh_prefer` | `low` \| `high` | `low` | Lowest matching multiple (battery) or highest. |
 | `display_resample` | bool | `no` | Experimental: mpv `video-sync=display-resample`. |
 | `gpu_context` | string | `auto` | Read by the launcher. `auto` = `x11vk` under gamescope; otherwise any mpv `--gpu-context`. |
+
+## `[plex]`
+
+Plex servers are added from the library (*Menu → Sign in to Plex…*), not
+here.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `allow_insecure_lan` | bool | `no` | Also try plain `http://` on the server's local addresses. Only for routers that block Plex's `*.plex.direct` names (DNS rebinding protection) when Plex fails at home. The Plex token then travels unencrypted, so only enable it if the Deck stays on networks you trust (D39). |
 
 ## `[opensubtitles]`
 

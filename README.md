@@ -30,6 +30,10 @@ there is a single process and nothing between the video and the screen.
   (toggle in the audio menu).
 - **About** panel (library and playback menus) with version, build,
   licence and credits.
+- **Plex**: sign in with a code, browse your Plex servers next to your
+  folders (Continue watching, movies, shows), play the original files with
+  HDR and hardware decoding, and keep progress in sync with your other Plex
+  apps. Local network, and remote when your server allows it.
 - **Download subtitles** from OpenSubtitles.com from the subtitle menu
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).
@@ -81,8 +85,8 @@ what exists and where it falls short. Corrections are welcome.
   in an official release of either. Jellyfin's HDR request is still open:
   HDR worked in an experimental rewrite that was abandoned in August 2026
   ([jellyfin-desktop#523][jmp-hdr]). If you already run one of those
-  servers, try its client first (Plex support here is only planned, see
-  the [roadmap](docs/ROADMAP.md)).
+  servers, compare with its client: Deck Video Player also plays from Plex
+  since v0.3, as direct play only (no transcoding).
 - **[mpv](https://mpv.io)** itself (Flathub `io.mpv.Mpv`) is the engine
   this app uses, and it can output real HDR in Game Mode with the right
   settings (Vulkan, `gpu-next`, gamescope's WSI layer; see the
@@ -136,7 +140,8 @@ Our own caveats:
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Decision log with alternatives and reasons |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | Every source file and module API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, unit/headless/Flatpak/on-device testing, building, releasing, recipes |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Planned releases (v0.2 audio/subtitles, v0.3 Plex) and guiding rules |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Releases and plans (later Jellyfin, network shares) and guiding rules |
 | [AGENTS.md](AGENTS.md) | Quick orientation for AI agents and new contributors |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licences of bundled components, source availability, trademarks |
 
@@ -159,7 +164,9 @@ Our own caveats:
 
 3. Edit `~/.config/deckvideoplayer/config.ini` and set your video folders
    (`folder = ...`, one line per folder). The microSD card and USB drives
-   are listed automatically.
+   are listed automatically. The app can read `~/Videos`, `~/Downloads`,
+   removable drives and `/mnt`; other folders need one `flatpak override`
+   command ([INSTALL](docs/INSTALL.md#troubleshooting)).
 4. Return to **Gaming Mode** and start *Deck Video Player* from the library.
 
 For HDR enable *Settings → Display → HDR* (Steam Deck OLED or HDR TV). On an
@@ -277,9 +284,8 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md): v0.2 adds headphone surround and
-online subtitles, v0.3 Plex; later Jellyfin, network shares, thumbnails and
-touch input.
+See [docs/ROADMAP.md](docs/ROADMAP.md): later Jellyfin, network shares,
+thumbnails and touch input. Past releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations / to verify on hardware
 

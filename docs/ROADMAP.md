@@ -36,33 +36,29 @@ the device), scrolling instead of overflowing text (D32), "SD Card" /
 "USB drive" names (D33), About panel (D34), and the second audit's fixes
 (D35).
 
-## v0.3.0: Plex (planned)
+## v0.3.0: Plex (released 2026-10-24)
 
-Browse and play a Plex Media Server on the local network.
+| Feature | Status | Notes |
+|---|---|---|
+| **Sign-in with a code or QR** | Done | QR code (scan with a phone) or a code for plex.tv/link, from the library menu; servers and their addresses saved in `plex.json`. D37, D38. |
+| **Subtitle downloads** | Done | *Download subtitles…* works for Plex videos too (Plex metadata for the search, hash via HTTP range requests). D38. |
+| **Browse** | Done | Servers as library sources: *Continue watching*, movie and show libraries, seasons, episodes, Plex's progress and watched marks, sort by name/date. |
+| **Direct play** | Done | Original file over HTTP: HDR10, hardware decoding, 48 Hz matching, Plex's external subtitles. Verified with 4K HDR10 HEVC on the LAN. |
+| **Progress sync** | Done | Position and watched state reported back, so other Plex apps continue where you left off. |
+| **Remote access** | Released, partly tested | Remote addresses are used when the LAN ones don't answer; tested only through the router's public address from inside the LAN. Needs upload bandwidth above the file's bitrate (no transcoding). |
 
-- **New source kind** in `library.lua`: the server appears next to your
-  folders (Libraries → Movies / Shows → Seasons → Episodes). Browsing uses
-  the Plex HTTP API with JSON responses and curl, like the subtitle client.
-- **Direct play**: mpv opens the part URL (`/library/parts/…`) with the
-  token, so every format, HDR and hardware decoding keep working. No
-  transcoding.
-- **Sign-in**: v0.3 reads `server = http://192.168.x.x:32400` and a token
-  from `config.ini`. Later: a 4-letter code shown on screen and entered at
-  plex.tv/link on a phone (PIN flow), plus GDM server discovery.
-- **Resume**: start from Plex's `viewOffset` and report progress and
-  watched state back (`/:/timeline`, `/:/scrobble`) so "On Deck" stays
-  correct on other devices.
-- **Subtitles** on the server load as external tracks; online search
-  (v0.2) also works for Plex items.
-- Plex Pass is not required for direct play.
+Tested by the owner on a Deck OLED before release; remote play from
+outside the home network is still to be confirmed. Third and fourth audits
+resolved (D39, D40). Release notes: [CHANGELOG.md](../CHANGELOG.md).
 
-Groundwork shared with later sources: an async HTTP helper (extracted from
-`opensubtitles.lua`), a source interface with asynchronous listing and a
-loading state in the browser, and resume keys that aren't file paths.
+Possible follow-ups: transcoded streams for slow remote connections
+(Plex's universal transcoder, HLS), next-episode for *Continue watching*,
+Plex Home users, server discovery without an account (GDM).
 
 ## Later (not scheduled)
 
-- **Jellyfin / Emby** source: same shape as Plex.
+- **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
+  and the asynchronous listing in the browser).
 - **SMB/NFS network shares**: needs mounting or a userspace client
   (FFmpeg reads `smb://` only when built with libsmbclient, which our
   build isn't).

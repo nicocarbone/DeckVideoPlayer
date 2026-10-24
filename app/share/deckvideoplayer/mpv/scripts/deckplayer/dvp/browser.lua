@@ -3,6 +3,8 @@
 local ui = require "dvp.ui"
 local util = require "dvp.util"
 local library = require "dvp.library"
+local Resume = require "dvp.resume"
+local qrencode = require "dvp.qrencode"
 
 local M = {}
 M.__index = M
@@ -13,7 +15,7 @@ local ROW_H = 60
 local ROW_GAP = 4
 local FS = 26
 
--- ctx: cfg, resume, menu, play(list, start), quit(), quit_dialog(), help(), toast(text)
+-- ctx: cfg, resume, menu, plex, play(list, start), quit(), quit_dialog(), help(), toast(text)
 function M.new(ctx)
     local self = setmetatable({}, M)
     self.ctx = ctx
@@ -42,7 +44,7 @@ end
 -- Re-reads the configured folders and mounted drives, so an SD card or USB
 -- drive inserted while the app runs shows up. Cheap (reads mountinfo).
 function M:refresh_sources()
-    self.sources = library.sources(self.cfg)
+    self.sources = library.sources(self.cfg, self.ctx.plex and self.ctx.plex:sources())
     local top = self.stack[1]
     if top and top.is_root and #self.sources ~= 1 then
         -- No longer single-source: the folder becomes a normal level, so B
@@ -59,15 +61,18 @@ function M:load()
         self:refresh_sources()
         -- With a single source there is no point in showing the root list.
         if #self.sources == 1 then
-            self.stack = {{path = self.sources[1].path, label = self.sources[1].name, is_root = true}}
+            local s = self.sources[1]
+            self.stack = {{path = s.path, label = s.name, is_root = true, plex = s.plex}}
             return self:load()
         end
         self.entries = {}
         for _, s in ipairs(self.sources) do
             self.entries[#self.entries + 1] = {
-                label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind,
+                label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind, plex = s.plex,
             }
         end
+    elseif loc.plex then
+        return self:load_plex(loc)
     else
         local entries, err = library.list(loc.path, self.cfg, self.sort)
         if not entries then
@@ -76,23 +81,88 @@ function M:load()
         end
         self.entries = entries
     end
+    self.loading = false
     local remembered = self.cursor[loc_key(loc)]
     self.selected = util.clamp(remembered or 1, 1, math.max(1, #self.entries))
     self.scroll = 0
 end
 
-function M:show()
+-- Plex listings arrive asynchronously: show "Loading…", then fill in if
+-- the user is still at that location. `self.after_load` (optional) runs
+-- once the entries are there (e.g. to restore the cursor on a path).
+function M:load_plex(loc)
+    self.entries = {}
+    self.loading = true
+    self.selected, self.scroll = 1, 0
+    self.ctx.plex:list(loc.plex, function(entries, err)
+        if self:location() ~= loc then return end
+        self.loading = false
+        self.error = err
+        self.entries = entries or {}
+        if self:sortable() then library.sort_entries(self.entries, self.sort) end
+        local remembered = self.cursor[loc_key(loc)]
+        self.selected = util.clamp(remembered or 1, 1, math.max(1, #self.entries))
+        local after = self.after_load
+        self.after_load = nil
+        if after then after() end
+        self:render()
+    end)
+end
+
+-- Plex listings kept in the server's order: the server page, "Continue
+-- watching", and seasons/episodes (by number, whatever the sort).
+local SERVER_ORDER = {root = true, ondeck = true, seasons = true, episodes = true}
+
+-- Whether Y sorts this listing (not the source list, nor Plex listings kept
+-- in server order).
+function M:sortable()
+    local loc = self:location()
+    if not loc then return false end
+    return not (loc.plex and SERVER_ORDER[loc.plex.kind])
+end
+
+-- Progress of an entry: Plex entries carry their own state, local files
+-- use resume.json. Same shape either way: {pos, duration, watched}.
+function M:entry_state(e)
+    if e.state then return e.state end
+    return self.ctx.resume:get(e.path)
+end
+
+-- Position worth offering to resume from, or nil.
+function M:resume_position(e)
+    if e.state then
+        local s = e.state
+        if s.pos and s.pos >= Resume.MIN_POSITION and not Resume.is_finished(s.pos, s.duration or 0) then
+            return s.pos
+        end
+        return nil
+    end
+    return self.ctx.resume:position(e.path)
+end
+
+-- `select` (optional): path to put the cursor on, also when the listing
+-- arrives later (Plex).
+function M:show(select)
     self.active = true
     self:refresh_sources()
+    if select then self.after_load = function() self:select_path(select) end end
     self:load()
+    if select and not self.loading then
+        self.after_load = nil
+        self:select_path(select)
+    end
     self:render()
 end
 
 function M:reload()
     local cur = self.entries[self.selected]
     self:refresh_sources()
+    if cur then self.after_load = function() self:select_path(cur.path) end end
     self:load()
-    if cur then self:select_path(cur.path) end
+    if cur and not self.loading then
+        self.after_load = nil
+        self:select_path(cur.path)
+    end
     self:render()
 end
 
@@ -121,7 +191,7 @@ end
 
 function M:enter(entry)
     self.cursor[loc_key(self:location())] = self.selected
-    table.insert(self.stack, {path = entry.path, label = entry.label})
+    table.insert(self.stack, {path = entry.path, label = entry.label, plex = entry.plex})
     self:load()
     self:render()
 end
@@ -140,8 +210,12 @@ function M:go_back()
     self.cursor[loc_key(loc)] = self.selected
     local from = loc.path
     table.remove(self.stack)
+    self.after_load = function() self:select_path(from) end
     self:load()
-    self:select_path(from)
+    if not self.loading then
+        self.after_load = nil
+        self:select_path(from)
+    end
     self:render()
 end
 
@@ -155,7 +229,9 @@ function M:playlist_from(index)
             list[#list + 1] = e.path
         end
     end
-    if not self.cfg.playback.autoplay_next then
+    local loc = self:location()
+    -- "Continue watching" mixes unrelated videos: play just the chosen one.
+    if not self.cfg.playback.autoplay_next or (loc and loc.plex and loc.plex.kind == "ondeck") then
         return {self.entries[index].path}
     end
     local out = {}
@@ -167,7 +243,7 @@ function M:open_file(index, from_start)
     local entry = self.entries[index]
     self.cursor[loc_key(self:location())] = index
     local list = self:playlist_from(index)
-    local pos = self.cfg.playback.resume and self.ctx.resume:position(entry.path)
+    local pos = self.cfg.playback.resume and self:resume_position(entry)
     if pos and not from_start then
         self.ctx.menu:open({
             title = "Resume playback?",
@@ -183,15 +259,22 @@ function M:open_file(index, from_start)
             },
         })
     else
-        self.ctx.play(list, 0)
+        -- No explicit choice unless X (from start): playback then uses the
+        -- latest saved position (for Plex, fresh from the server: the
+        -- listing may be older than a play on another device).
+        self.ctx.play(list, from_start and 0 or nil)
     end
 end
 
 function M:toggle_sort()
     self.sort = self.sort == "name" and "date" or "name"
     local cur = self.entries[self.selected]
+    if cur then self.after_load = function() self:select_path(cur.path) end end
     self:load()
-    if cur then self:select_path(cur.path) end
+    if cur and not self.loading then
+        self.after_load = nil
+        self:select_path(cur.path)
+    end
     self:render()
     self.ctx.toast("Sorted by " .. (self.sort == "name" and "name" or "date added"))
 end
@@ -211,7 +294,17 @@ function M:open_menu()
         end})
     end
     local cur = self.entries[self.selected]
-    if cur and not cur.is_dir then
+    if cur and not cur.is_dir and cur.plex then
+        local st = cur.state or {}
+        local watched = st.watched or st.pos
+        table.insert(items, {label = watched and "Mark as unwatched" or "Mark as watched", action = function()
+            self.ctx.plex:set_watched(cur.plex, not watched, function(ok)
+                if not ok then self.ctx.toast("Plex didn't accept the change") return end
+                cur.state = {duration = st.duration, watched = not watched or nil}
+                self:render()
+            end)
+        end})
+    elseif cur and not cur.is_dir then
         if self.ctx.resume:position(cur.path) or self.ctx.resume:is_watched(cur.path) then
             table.insert(items, {label = "Mark as unwatched", action = function()
                 self.ctx.resume:forget(cur.path)
@@ -226,10 +319,105 @@ function M:open_menu()
             end})
         end
     end
+    local plex = self.ctx.plex
+    if plex and plex:signed_in() then
+        table.insert(items, {label = "Plex account", value = plex:username() or "signed in",
+                             action = function() self:plex_account_menu() end})
+    elseif plex then
+        table.insert(items, {label = "Sign in to Plex…", action = function() self:plex_sign_in() end})
+    end
     table.insert(items, {label = "Controls", action = function() self.ctx.help() end})
     table.insert(items, {label = "About", action = function() self.ctx.about() end})
     table.insert(items, {label = "Quit Deck Video Player", action = function() self.ctx.quit() end})
     self.ctx.menu:open({title = "Menu", style = "side", items = items})
+end
+
+---------------------------------------------------------------------------
+-- Plex account (sign-in with a code entered at plex.tv/link)
+---------------------------------------------------------------------------
+
+function M:plex_sign_in()
+    local plex, menu = self.ctx.plex, self.ctx.menu
+    local timer, cancelled = nil, false
+    -- Closing the dialog also drops the PINs, so answers still in flight
+    -- neither sign in nor touch whatever is on screen by then.
+    local function stop()
+        cancelled = true
+        if timer then timer:kill() end
+        plex:cancel_pin()
+    end
+    local spec = {
+        title = "Sign in to Plex", style = "center",
+        message = "Getting a code…",
+        -- (Choosing an item doesn't call on_cancel, so Cancel stops too.)
+        items = {{label = "Cancel", action = stop}},
+        on_cancel = stop,
+    }
+    menu:open(spec)
+    plex:start_pin(function(code, url, err)
+        if cancelled then
+            plex:cancel_pin()
+            return
+        end
+        if not code then
+            menu:update(spec, {message = "Could not reach plex.tv: " .. tostring(err)})
+            return
+        end
+        -- QR code: scanning it opens Plex's sign-in page with the code
+        -- filled in; typing the short code at plex.tv/link also works.
+        local ok, matrix = false, nil
+        if url then ok, matrix = qrencode.qrcode(url) end
+        local fields = ok and {qr = matrix, code = code,
+                               message = "Scan with your phone,\nor open " .. plex.LINK_URL .. " and enter:"}
+            or {code = code, message = "On a phone or PC, open " .. plex.LINK_URL .. " and enter:"}
+        if not menu:update(spec, fields) then return end
+        -- Poll every 2 s while the dialog is open (only then: battery).
+        local busy = false
+        timer = mp.add_periodic_timer(2, function()
+            if busy then return end
+            busy = true
+            plex:poll_pin(function(done, perr)
+                busy = false
+                if cancelled then return end
+                if done then
+                    timer:kill()
+                    menu:close_all()
+                    if perr then
+                        self.ctx.toast("Signed in, but the server list failed: " .. tostring(perr))
+                    else
+                        self.ctx.toast("Signed in to Plex as " .. (plex:username() or "?"))
+                    end
+                    self:reload()
+                elseif perr then
+                    timer:kill()
+                    menu:update(spec, {message = perr, code = false, qr = false})
+                end
+            end)
+        end)
+    end)
+end
+
+function M:plex_account_menu()
+    local plex = self.ctx.plex
+    local servers = {}
+    for _, s in ipairs(plex.account.servers or {}) do servers[#servers + 1] = s.name end
+    self.ctx.menu:open({title = "Plex", subtitle = plex:username(), style = "side", items = {
+        {label = "Servers", value = #servers > 0 and table.concat(servers, ", ") or "none"},
+        {label = "Refresh server list", action = function()
+            self.ctx.toast("Asking plex.tv…")
+            plex:refresh_account(function(err)
+                self.ctx.toast(err or "Plex server list updated")
+                self:reload()
+            end)
+        end},
+        {label = "Sign out", action = function()
+            plex:sign_out()
+            self.stack = {}
+            self:load()
+            self:render()
+            self.ctx.toast("Signed out of Plex")
+        end},
+    }})
 end
 
 function M:visible_rows()
@@ -265,7 +453,7 @@ function M:handle(action)
     elseif action == "x" then
         if entry and not entry.is_dir then self:open_file(self.selected, true) end
     elseif action == "y" then
-        if self:location() then self:toggle_sort() end
+        if self:sortable() then self:toggle_sort() end
     elseif action == "back" then
         self:go_back()
     elseif action == "menu" then
@@ -309,10 +497,12 @@ function M:render()
         if e.is_dir then n_dirs = n_dirs + 1 else n_files = n_files + 1 end
     end
     local counts = {}
-    if n_files > 0 then counts[#counts + 1] = n_files .. (n_files == 1 and " video" or " videos") end
-    if n_dirs > 0 then counts[#counts + 1] = n_dirs .. (n_dirs == 1 and " folder" or " folders") end
+    if not loc then
+        counts[1] = #self.entries .. (#self.entries == 1 and " source" or " sources")
+    elseif n_files > 0 then counts[#counts + 1] = n_files .. (n_files == 1 and " video" or " videos") end
+    if loc and n_dirs > 0 then counts[#counts + 1] = n_dirs .. (n_dirs == 1 and " folder" or " folders") end
     a:text(W - margin, 50, table.concat(counts, " · "), {size = 20, align = 6, color = t.subtext})
-    if loc then
+    if self:sortable() then
         a:text(W - margin, 78, "Sorted by " .. (self.sort == "name" and "name" or "date"),
             {size = 16, align = 6, color = t.dim})
     end
@@ -338,7 +528,9 @@ function M:render()
         local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
         local inner = sel and t.accent or t.bg
         local ix = x0 + 20
-        if e.source == "sdcard" then
+        if e.source == "plex" then
+            a:icon_server(ix, cy, 30, {color = icon_color, inner = inner})
+        elseif e.source == "sdcard" then
             a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
         elseif e.source == "usb" or e.source == "removable" then
             a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
@@ -354,8 +546,12 @@ function M:render()
         if e.is_dir then
             a:icon_triangle(rx - 6, cy, 14, "right", {color = sel and t.text or t.dim})
             status_w = 30
+            if e.state and e.state.watched then
+                a:icon_check(rx - 40, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
+                status_w = 62
+            end
         else
-            local r = self.ctx.resume:get(e.path)
+            local r = self:entry_state(e)
             if r and r.watched and not r.pos then
                 a:icon_check(rx - 12, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
                 status_w = 34
@@ -399,8 +595,11 @@ function M:render()
     -- Empty states
     if n == 0 then
         local cy = H / 2 - 30
-        if self.error then
-            a:text(W / 2, cy, "Cannot open this folder", {size = 30, bold = true, align = 5})
+        if self.loading then
+            a:text(W / 2, cy, "Loading…", {size = 30, bold = true, align = 5, color = t.subtext})
+        elseif self.error then
+            local what = (loc and loc.plex) and "Cannot load from Plex" or "Cannot open this folder"
+            a:text(W / 2, cy, what, {size = 30, bold = true, align = 5})
             a:text(W / 2, cy + 44, ui.fit_text(tostring(self.error), 20, W - 160),
                 {size = 20, align = 5, color = t.subtext})
         elseif not loc then
@@ -422,12 +621,12 @@ function M:render()
     local cur = self.entries[self.selected]
     if cur then
         hints[#hints + 1] = {"A", cur.is_dir and "Open" or "Play"}
-        if not cur.is_dir and self.cfg.playback.resume and self.ctx.resume:position(cur.path) then
+        if not cur.is_dir and self.cfg.playback.resume and self:resume_position(cur) then
             hints[#hints + 1] = {"X", "Play from start"}
         end
     end
     hints[#hints + 1] = {"B", (loc and not (loc.is_root and #self.stack == 1)) and "Back" or "Quit"}
-    if loc then hints[#hints + 1] = {"Y", "Sort"} end
+    if self:sortable() then hints[#hints + 1] = {"Y", "Sort"} end
     hints[#hints + 1] = {"MENU", "Menu"}
     a:hints(hints, W - margin, H - FOOTER_H / 2, {size = 28})
 

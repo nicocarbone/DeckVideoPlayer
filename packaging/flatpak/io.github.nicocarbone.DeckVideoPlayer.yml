@@ -17,8 +17,13 @@ finish-args:
   # gamescope (SteamOS game mode): the gamescope WSI Vulkan layer talks to
   # this socket to give mpv HDR10 swapchains.
   - --filesystem=xdg-run/gamescope-0:ro
-  # Video library: home folder, microSD card / USB drives, other mounts.
-  - --filesystem=home:ro
+  # Video library: Videos and Downloads, microSD card / USB drives, mounts.
+  # Read-only, and not the whole home folder: a malicious video exploiting
+  # a decoder bug must not be able to read SSH keys or other apps' data and
+  # send it out (the app has network access). Other folders:
+  #   flatpak override --user --filesystem=/path:ro io.github.nicocarbone.DeckVideoPlayer
+  - --filesystem=xdg-videos:ro
+  - --filesystem=xdg-download:ro
   - --filesystem=/run/media:ro
   - --filesystem=/media:ro
   - --filesystem=/mnt:ro

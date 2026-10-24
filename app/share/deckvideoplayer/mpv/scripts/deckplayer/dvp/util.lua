@@ -121,13 +121,35 @@ function M.read_file(path)
 end
 
 -- Write via temp file + rename so a crash never leaves a truncated file.
-function M.write_file_atomic(path, data)
+-- A failed write (e.g. disk full) keeps the old file and returns false, err.
+-- `private`: the temp file is made owner-only (600) before any data goes
+-- in, for files holding credentials (D39).
+function M.write_file_atomic(path, data, private)
     local tmp = path .. ".tmp"
     local f, err = io.open(tmp, "wb")
     if not f then return false, err end
-    f:write(data)
-    f:close()
+    if private then
+        f:close()
+        local r = mp.command_native({name = "subprocess", args = {"chmod", "600", tmp},
+                                     playback_only = false, capture_stdout = true, capture_stderr = true})
+        if not r or r.status ~= 0 then
+            os.remove(tmp)
+            return false, "cannot restrict permissions"
+        end
+        f, err = io.open(tmp, "wb")
+        if not f then return false, err end
+    end
+    local ok, werr = f:write(data)
+    local cok, cerr = f:close()
+    if not ok or not cok then
+        os.remove(tmp)
+        return false, werr or cerr or "write failed"
+    end
     return os.rename(tmp, path)
+end
+
+function M.write_private(path, data)
+    return M.write_file_atomic(path, data, true)
 end
 
 function M.is_dir(path)

@@ -14,6 +14,11 @@ CONFIG_DIR=${DVP_CONFIG_DIR:-"$HOME/.config/deckvideoplayer"}
 DATA_DIR=${DVP_DATA_DIR:-"${XDG_DATA_HOME:-$HOME/.local/share}/deckvideoplayer"}
 CONFIG_FILE="$CONFIG_DIR/config.ini"
 
+# Everything the app creates is owner-only from the moment it exists:
+# config.ini may hold an OpenSubtitles password, plex.json the Plex token
+# (D39, D40). Existing files and folders keep their permissions.
+umask 077
+
 mkdir -p "$CONFIG_DIR" "$DATA_DIR"
 if [ ! -f "$CONFIG_FILE" ]; then
     cp "$APPDIR/config.ini" "$CONFIG_FILE"

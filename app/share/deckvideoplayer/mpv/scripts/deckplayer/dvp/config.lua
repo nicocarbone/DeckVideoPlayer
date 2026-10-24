@@ -44,6 +44,9 @@ local SCHEMA = {
         display_resample = {default = false, type = "bool"},
         gpu_context      = {default = "auto", type = "string"}, -- read by the launcher
     },
+    plex = {
+        allow_insecure_lan = {default = false, type = "bool"},
+    },
     opensubtitles = {
         api_key          = {default = "", type = "string"},
         username         = {default = "", type = "string"},

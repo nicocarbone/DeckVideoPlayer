@@ -17,7 +17,9 @@ non-trivial.
 | Wiring, lifecycle, resume save/restore | `…/main.lua` |
 | Settings schema | `…/dvp/config.lua` + `app/share/deckvideoplayer/config.ini` |
 | HDR / refresh rate / device detection | `…/dvp/display.lua`, `helper/dvp-gamescope-refresh.c` (D31), `app/share/deckvideoplayer/mpv/mpv.conf`, `app/bin/deckvideoplayer` |
-| Folder listing, sources (future SMB/Plex) | `…/dvp/library.lua` |
+| Folder listing, sources, sorting | `…/dvp/library.lua` |
+| Plex (sign-in, servers, browse, playback, progress) | `…/dvp/plex.lua`, Plex parts of `…/dvp/browser.lua` and `…/main.lua`, `tools/plex-dev-account.py` |
+| HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` |
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
 | Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
@@ -62,7 +64,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-23)
+## Current state (2026-10-24, v0.3.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -79,11 +81,28 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   (D31, confirmed on a Deck OLED), text scrolling (D32), SD card naming
   (D33), About panel (D34), second audit resolved (D35). Still open on a
   Deck: checklist items 11–12 (surround listening, real download).
-- The repo is meant to become public: never commit API keys, tokens or
-  passwords. OpenSubtitles keys are per user, in their `config.ini` (D29).
+- The repo is public: never commit API keys, tokens or passwords.
+  OpenSubtitles keys are per user, in their `config.ini` (D29). Never
+  commit details of the owner's Plex server either (addresses, names,
+  library titles, ids, hashes from it): tests and docs use made-up data.
+- Every release gets a user-facing `CHANGELOG.md` section; CI publishes
+  it as the GitHub release text (D41, `docs/DEVELOPMENT.md` §7).
 - Adding or upgrading a Flatpak module: update `THIRD_PARTY_NOTICES.md`;
   `scripts/make-source-archive.py` picks the new pins up by itself (D36).
-- Planned: see `docs/ROADMAP.md` (v0.3 Plex; later Jellyfin, SMB/NFS,
-  thumbnails, touch input).
-- Network code must stay asynchronous (`command_native_async` + curl) and
-  only run on user request; secrets go on curl's stdin, never in argv.
+- v0.3.0 released 2026-10-24 (tag `v0.3.0`): Plex source (D37), QR
+  sign-in and Plex subtitle downloads (D38), verified against the owner's
+  server (local + remote address, 4K HDR10 direct play) and on a Deck. Third audit (ISSUES.md
+  Part III) resolved in D39: https-only Plex, hardened curl, narrowed
+  sandbox (Videos, Downloads, removable media; no whole home). Fourth
+  audit (Gemini, Part IV) reviewed in D40.
+  Testing against a real server: `tools/plex-dev-account.py`, read-only by
+  default in `headless-run.sh` (never change the owner's watch history
+  without `PLEX_WRITE=1`). Never let the account token reach mpv (logs):
+  playback uses a transient token.
+- Planned: see `docs/ROADMAP.md` (later Jellyfin, SMB/NFS, thumbnails,
+  touch input).
+- Network code must stay asynchronous (`dvp/http.lua`) and only run on
+  user request; secrets go on curl's stdin, never in argv. The only
+  blocking calls are short ones inside mpv hooks, where playback waits
+  anyway (Plex metadata/transient token in on_load, final progress report
+  in on_unload).

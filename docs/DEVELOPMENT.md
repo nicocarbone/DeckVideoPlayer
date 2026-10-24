@@ -237,16 +237,42 @@ Manifest maintenance:
   `DeckVideoPlayer-<tag>.tar.gz` (bundle + scripts + artwork + README) and
   `DeckVideoPlayer-<tag>-sources.tar.gz` (complete corresponding source,
   required by the GPL; `scripts/make-source-archive.py`, D36) to a GitHub
-  release. Users install from the installer tarball.
+  release. Users install from the installer tarball. The release text is
+  the tag's section of `CHANGELOG.md` (`scripts/release-notes.sh`, D41);
+  the job fails if there is none.
 
 The About panel shows the build date and commit automatically
 (`scripts/build-info.sh`, D34); a bundle built with uncommitted changes
 shows `<commit>-modified`.
 
 To release: bump `dvp/version.lua` (and the year in `About.COPYRIGHT` if
-needed) and add a `<release>` to the metainfo,
-update `docs/ROADMAP.md` and the "Current state" of `AGENTS.md`, commit,
-`git tag -a v0.x.y`, push the tag.
+needed), add a `## v0.x.y (date)` section to `CHANGELOG.md` (user-facing:
+new, changed, fixed; it becomes the GitHub release text) and a `<release>`
+to the metainfo, update `docs/ROADMAP.md` and the "Current state" of
+`AGENTS.md`, commit, `git tag -a v0.x.y`, push the tag. `tests/run.sh`
+fails while the changelog section or the metainfo entry is missing;
+`scripts/release-notes.sh` prints the text CI will publish.
+
+### Plex (against a real server)
+
+Sign in once with a link code (creates `.dev/plex/client-id` and
+`.dev/plex/token`, git-ignored; see D37), then give the headless test
+data a signed-in account:
+
+```sh
+rm -rf .dev/headless && tools/plex-dev-account.py .dev/headless/data
+# Sources → server → Movies → 2nd movie; info panel shows "Stream: Plex · … · local"
+KEEP=1 HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:PGDWN key:ENTER sleep:2 \
+    key:DOWN key:ENTER sleep:2 key:DOWN key:ENTER sleep:5 key:i sleep:1 shot:/tmp/plex.png
+```
+
+Runs are **read-only** by default (progress and watched changes are only
+logged: `plex (read-only): would report …`). `PLEX_WRITE=1` sends them;
+restore any item you changed afterwards (unscrobble + scrobble resets a
+watched movie). To test the remote path, drop the local connections from
+`.dev/headless/data/plex.json`. To check that no account token reaches the
+logs: `MPV_EXTRA=--msg-level=all=v LOG=/tmp/v.log …`, then
+`grep -c -F "$(cat .dev/plex/token)" /tmp/v.log` must print 0.
 
 ## 8. On-device test checklist (Steam Deck OLED)
 
@@ -286,6 +312,11 @@ DECISIONS.md or the README "Known limitations".
     subtitles…* on a real film. Results in your language, "Exact" on
     matching releases, download selects it, the toast shows downloads
     left, and the subtitle is back after replaying the film.
+13. Plex (v0.3): sign in from the library menu in game mode (code shown
+    big; enter it on a phone); the server appears as a source; play a
+    movie and an episode; stop halfway and check another Plex app resumes
+    at the same point; from outside the home network (phone hotspot), the
+    info panel says `remote` and playback holds up for a 1080p file.
 
 ## 9. Recipes for common changes
 
@@ -300,16 +331,16 @@ DECISIONS.md or the README "Known limitations".
 `value = function() … end` for live values and `adjust = function(dir)` for
 ◀ ▶ settings. The menu uses `rebuild`, so values refresh after each change.
 
-**Add a library source kind (e.g. SMB, Plex)**
-1. In `library.sources()` return roots with a new `kind` (e.g.
-   `{name="NAS", path="smb://nas/videos", kind="smb"}`).
-2. Make `library.list(path, …)` dispatch on the kind or on the path scheme
-   and return the same entry shape. `path` must be playable by `loadfile`:
-   local path, `smb://` (needs FFmpeg/mpv with libsmbclient; add it to the
-   manifest), `http(s)://` (Plex/Jellyfin direct-play URLs; add
-   `--share=network` to finish-args).
-3. `util.is_dir`/`file_info` don't apply to remote paths: keep remote calls
-   out of `render()` and cache listings.
+**Add a library source kind (e.g. Jellyfin, SMB)** — Plex is the model (D37)
+1. Return roots from the new module and pass them to
+   `library.sources(cfg, extra)` (see `plex:sources()`); give them a
+   `kind` and a table describing the location (Plex uses `entry.plex`).
+2. In `browser:load()`, dispatch such locations to an asynchronous lister
+   (like `load_plex`): entries with `label`, `name`/`sort_name`, `mtime`,
+   `is_dir`, a playable `path` (URL), and `state = {pos, duration,
+   watched}` for progress. Use `dvp/http.lua` for requests.
+3. Register playable paths so main.lua's hooks can find the item (headers,
+   resume point, progress reports): see `plex:item_for(path)`.
 4. Add an icon in `ui.lua` and use it in `browser:render` for the new kind.
 
 **Change the look**: colors in `ui.theme` (accent is configurable),
