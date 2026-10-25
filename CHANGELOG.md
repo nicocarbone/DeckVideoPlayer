@@ -5,6 +5,16 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.2 (2026-10-24)
+
+Keeps the Steam Deck awake during videos.
+
+### Fixed
+
+- **The screen no longer dims, and the Deck no longer goes to sleep,
+  while a video plays** in game mode. Paused or in the library, Steam's
+  usual timers apply. `keep_awake = no` in `config.ini` turns this off.
+
 ## v0.3.1 (2026-10-24)
 
 Small additions and fixes from testing v0.3.0 on a Steam Deck.

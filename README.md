@@ -122,10 +122,11 @@ Our own caveats:
   doesn't switch modes (gamescope only retunes the Deck's own screen); a
   120 Hz mode already suits 24/30/60 fps, and VRR covers the rest.
 - Players in Game Mode have been reported to be interrupted by the Deck's
-  dim/sleep timers even when they ask the system to stay awake
-  ([SteamOS#2619][sleep-issue]). Whether this app is affected is still
-  being checked. Decky plugins such as
-  [ScreenSaverEnhancements][sse] work around it.
+  dim/sleep timers ([SteamOS#2619][sleep-issue]). Since v0.3.2 this app
+  keeps the screen awake while a video plays (not while paused), through
+  the screensaver inhibition SteamOS honours; tested on a Steam Deck.
+  `keep_awake = no` turns it off. Decky plugins such as
+  [ScreenSaverEnhancements][sse] remain an option for other apps.
 
 [kodi-issue]: https://github.com/xbmc/xbmc/issues/27490
 [kodi22]: https://9to5linux.com/kodi-22-piers-promises-hdr-passthrough-on-opengl-and-hdr-on-wayland
@@ -302,8 +303,6 @@ publication at some point. Past releases: [CHANGELOG.md](CHANGELOG.md).
   the rate the app switched to; the performance overlay shows the real one.
   Moving that slider takes the rate back until the next video or unpause.
   Matching can be turned off in the playback menu.
-- Whether the Deck dims the screen during long videos in game mode
-  (gamescope has no idle-inhibit protocol) still needs checking.
 
 ## Support the project
 

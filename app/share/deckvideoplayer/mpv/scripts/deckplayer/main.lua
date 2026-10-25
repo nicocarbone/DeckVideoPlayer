@@ -23,6 +23,7 @@ local Menu = require "dvp.menu"
 local Browser = require "dvp.browser"
 local Player = require "dvp.player"
 local Surround = require "dvp.surround"
+local KeepAwake = require "dvp.keepawake"
 local SubDownload = require "dvp.subdownload"
 local About = require "dvp.about"
 local Plex = require "dvp.plex"
@@ -95,6 +96,7 @@ local app_dir = script_dir and util.dirname(util.dirname(util.dirname(script_dir
 local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna.sofa"))
 
 local resume = Resume.new(opts.data_dir)
+local keepawake = KeepAwake.new(cfg)
 local menu = Menu.new()
 local state = {
     screen = "browser",
@@ -225,7 +227,7 @@ end
 local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
-    help = help, toast = toast, surround = surround,
+    help = help, toast = toast, surround = surround, keepawake = keepawake,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex,
 }
 ctx.about = function() About.open(ctx) end
@@ -349,6 +351,7 @@ mp.register_event("file-loaded", function()
     local fps = mp.get_property_number("container-fps")
     display:match(fps, function() player:render() end)
     player:on_file_loaded()
+    keepawake:set_playing(not mp.get_property_native("pause"))
     if state.resumed_at then
         toast("Resumed at " .. util.format_time(state.resumed_at))
         state.resumed_at = nil
@@ -382,6 +385,7 @@ mp.observe_property("idle-active", "bool", function(_, idle)
         return
     end
     state.screen = "browser"
+    keepawake:set_playing(false)
     menu:close_all()
     player:stop_screen()
     display:restore()
@@ -397,6 +401,7 @@ mp.observe_property("pause", "bool", function(_, paused)
         -- (e.g. from the Quick Access Menu), ask for our rate again.
         display:reassert(function() player:render() end)
     end
+    if state.current_path then keepawake:set_playing(paused == false) end
     player:on_pause_change(paused)
 end)
 
@@ -408,6 +413,7 @@ end)
 
 mp.register_event("shutdown", function()
     save_timer:kill()
+    keepawake:set_playing(false)
     save_progress()
     resume:flush()
     display:restore()

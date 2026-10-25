@@ -809,3 +809,29 @@ From the owner's tests on a Deck OLED.
   marked unwatched. A partly watched video now gets both entries; watched
   clears the position (Plex's scrobble does the same on the server).
   *Mark as unwatched* keeps a played local file in *Recently played*.
+
+## D43. Keep the screen awake during playback (screensaver inhibition)
+
+- **Problem:** in game mode the screen dims and the Deck sleeps on Steam's
+  own idle timer during long videos. mpv's `stop-screensaver` doesn't
+  reach it (SteamOS#2619 for other players).
+- **Experiment:** a test bundle had four modes in the playback menu so a
+  test on a Deck could show what Steam honours: an idle-inhibit request
+  (the `org.freedesktop.portal.Inhibit` portal and the
+  `org.freedesktop.ScreenSaver` service), an F24 press every 20 s on a
+  virtual keyboard (`/dev/uinput`), or both. Result on a Steam Deck
+  (2026-10-24, dimming at its shortest, 1 minute): the portal is not
+  available in game mode, **the ScreenSaver inhibition is accepted and
+  prevents both dimming and sleep**; the key press worked too.
+- **Decision:** keep only the request. It is the standard mechanism, needs
+  no fake input and no device access (just
+  `--talk-name=org.freedesktop.ScreenSaver`), and goes away cleanly. The
+  virtual keyboard was removed; the portal call stays because it is what
+  desktop sessions offer. On by default (`[display] keep_awake = yes`):
+  a player should not dim mid-film, and only while playing.
+- **How:** a small C helper, `dvp-keep-awake` (sd-bus), because an
+  inhibition lasts only as long as the D-Bus connection that asked for it.
+  It runs only while a video plays and is killed on pause or stop, so
+  Steam's timers apply again when paused or in the library (battery). It
+  writes the outcome to a status file shown in the info panel (*Keep
+  awake*), which makes a failure visible.

@@ -60,6 +60,11 @@ Plex Home users, server discovery without an account (GDM).
 Crop black bars encoded in the video, B hides the playback controls before
 stopping, recently played videos on the start screen (D42).
 
+## v0.3.2: keep the screen awake
+
+The screen no longer dims and the Deck no longer sleeps while a video
+plays: a screensaver inhibition, held only while playing (D43).
+
 ## Next, in this order
 
 1. **Night mode (volume leveling)**: compress the dynamic range so

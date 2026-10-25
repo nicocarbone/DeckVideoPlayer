@@ -435,6 +435,13 @@ local qok, qm = qrencode.qrcode(Plex.auth_url(string.rep("a", 32), string.rep("b
 check("qr encodes sign-in url", qok and #qm == 45, tostring(qok and #qm))
 
 -- black bar detection ----------------------------------------------------------
+-- keep awake (D43) -------------------------------------------------------------
+local KeepAwake = require "dvp.keepawake"
+eq("awake args", table.concat(KeepAwake.args("/s"), " "), "dvp-keep-awake --status /s")
+local ks = KeepAwake.parse_status("request: portal not supported, screensaver accepted\n")
+eq("awake status", ks.request, "portal not supported, screensaver accepted")
+eq("awake status empty", next(KeepAwake.parse_status(nil)), nil)
+
 local cropdetect = require "dvp.cropdetect"
 -- A frame w x h with a picture at (px, py, pw, ph); `value` = its brightness.
 local function frame(px, py, pw, ph, value)

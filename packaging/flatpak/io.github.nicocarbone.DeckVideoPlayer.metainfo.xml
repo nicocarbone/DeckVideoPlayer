@@ -52,6 +52,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.3.2" date="2026-10-24">
+      <description>
+        <p>The screen no longer dims and the system no longer sleeps while a video plays (not while paused).</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-10-24">
       <description>
         <p>Fixes and a small addition from testing on a Steam Deck.</p>

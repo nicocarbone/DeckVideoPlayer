@@ -17,6 +17,9 @@ finish-args:
   # gamescope (SteamOS game mode): the gamescope WSI Vulkan layer talks to
   # this socket to give mpv HDR10 swapchains.
   - --filesystem=xdg-run/gamescope-0:ro
+  # Keep the screen awake during playback (D43): SteamOS game mode honours
+  # inhibitions on the screensaver service (the portal needs no permission).
+  - --talk-name=org.freedesktop.ScreenSaver
   # Video library: Videos and Downloads, microSD card / USB drives, mounts.
   # Read-only, and not the whole home folder: a malicious video exploiting
   # a decoder bug must not be able to read SSH keys or other apps' data and

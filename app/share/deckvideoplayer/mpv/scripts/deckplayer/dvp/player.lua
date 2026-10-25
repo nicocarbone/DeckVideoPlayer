@@ -610,6 +610,7 @@ function M:info_lines()
     add("Stream", self.ctx.plex and self.ctx.plex:describe(mp.get_property("path")))
     local ao = mp.get_property("current-ao")
     if ao then add("Audio out", ao .. (self.ctx.surround.active and " · headphone surround" or "")) end
+    for _, l in ipairs(self.ctx.keepawake:info_lines()) do add(l[1], l[2]) end
     local drop = mp.get_property_number("frame-drop-count", 0)
     local vo_drop = mp.get_property_number("vo-delayed-frame-count", 0)
     local mistimed = mp.get_property_number("mistimed-frame-count", 0)

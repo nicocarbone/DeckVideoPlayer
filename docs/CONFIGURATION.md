@@ -46,6 +46,7 @@ in `dvp/config.lua`.
 | `refresh_rates` | `auto` \| range \| list | `auto` | `auto` = the rates gamescope reports for the active display; or e.g. `40-60`, `48,50,60,72,90`. |
 | `refresh_prefer` | `low` \| `high` | `low` | Lowest matching multiple (battery) or highest. |
 | `display_resample` | bool | `no` | Experimental: mpv `video-sync=display-resample`. |
+| `keep_awake` | bool | `yes` | Keeps the screen from dimming and the system from sleeping while a video plays, not while paused (D43). The info panel shows whether the system accepted. |
 | `gpu_context` | string | `auto` | Read by the launcher. `auto` = `x11vk` under gamescope; otherwise any mpv `--gpu-context`. |
 
 ## `[plex]`

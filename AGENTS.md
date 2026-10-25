@@ -64,7 +64,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-24, v0.3.0)
+## Current state (2026-10-24, v0.3.2)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -88,6 +88,9 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - v0.3.1 (D42): *Crop black bars* picture mode (`dvp/cropdetect.lua`),
   B dismisses the controls before stopping, *Recently played* on the
   start screen.
+- v0.3.2 (D43): keep the screen awake while playing
+  (`helper/dvp-keep-awake.c`, `dvp/keepawake.lua`): ScreenSaver inhibition
+  verified on a Deck.
 - Hardware tested informally by the owner (2026-10-24): Steam Deck OLED,
   Steam Deck LCD, DIY Steam Machine with official SteamOS (4K HDR VRR
   120 Hz TV; no refresh switching there, as designed). Docs describe this

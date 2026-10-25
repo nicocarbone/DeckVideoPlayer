@@ -296,6 +296,27 @@ when not under gamescope. Built by `helper/build.sh OUTDIR` (wayland-scanner
 + cc), used by the Flatpak manifest (→ `/app/bin`) and by the dev scripts
 (→ `.dev/bin`, put on `PATH`).
 
+## `helper/dvp-keep-awake.c` (D43)
+
+`dvp-keep-awake [--status FILE]` calls `org.freedesktop.ScreenSaver.Inhibit`
+(what SteamOS game mode honours) and `org.freedesktop.portal.Inhibit.Inhibit`
+(flags idle + suspend; `handle_token` so the `Response` signal can be
+watched) over sd-bus, then waits: both inhibitions last while the process
+stays connected. Writes `request: portal …, screensaver …` to FILE
+(`accepted` / `requested` / `refused (n)` / `not running` / `not
+supported`). Exits on SIGTERM (closing the bus drops the inhibitions) and
+when its parent dies (`PR_SET_PDEATHSIG`). Built by `helper/build.sh` with
+libsystemd.
+
+## `dvp/keepawake.lua` (D43)
+
+`new(cfg)` (`[display] keep_awake`; status file in `XDG_RUNTIME_DIR`),
+`set_playing(on)` (main.lua: true after file-loaded or on unpause, false
+on pause, idle and shutdown) starts/kills the helper with
+`mp.command_native_async` / `mp.abort_async_command`, `info_lines()` (a
+*Keep awake* info panel row from the status file, while playing). Pure:
+`args(file)`, `parse_status(text)`.
+
 ## `dvp/media.lua`: descriptions
 
 Language names (ISO 639-1/2), codec display names (DTS profile aware),
