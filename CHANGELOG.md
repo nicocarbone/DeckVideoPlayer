@@ -5,6 +5,17 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.5 (2026-10-25)
+
+A clearer installer message when the Steam shortcut still needs fixing.
+
+### Changed
+
+- If the installer can't repair the Steam shortcut because Steam is open,
+  it no longer ends with "Done!": it says the shortcut needs one more step
+  and how to do it (close Steam and run it again, or edit the launch
+  options).
+
 ## v0.3.4 (2026-10-25)
 
 Fixes the Steam shortcut after the v0.3.3 update.

@@ -64,7 +64,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-25, v0.3.4)
+## Current state (2026-10-25, v0.3.5)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -91,7 +91,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - v0.3.2 (D43): keep the screen awake while playing
   (`helper/dvp-keep-awake.c`, `dvp/keepawake.lua`): ScreenSaver inhibition
   verified on a Deck.
-- v0.3.3–v0.3.4 (D44): CI builds the Flatpak on branch `stable` like
+- v0.3.3–v0.3.5 (D44): CI builds the Flatpak on branch `stable` like
   `scripts/build-flatpak.sh` (releases up to v0.3.2 were `master`, which
   installed next to test builds); the installer removes other installed
   branches first and unpins the Steam shortcut (`steam_shortcut.py repair`). Keep both on `stable`.

@@ -51,15 +51,16 @@ install_artwork() {
     warn "  $0 --artwork"
 }
 
+# Set when the Steam shortcut still names a Flatpak branch that no longer
+# exists (Steam was running): the closing message then says what to do.
+shortcut_broken=0
+
 add_to_steam() {
     if python3 "$here/steam_shortcut.py" status 2>/dev/null | grep -q 'app id'; then
         say "Already in your Steam library."
         # A shortcut made from the menu entry names a Flatpak branch; it
         # stops working when the app changes branch (v0.3.3), so unpin it.
-        python3 "$here/steam_shortcut.py" repair || {
-            warn "Close Steam and run this script again to repair the shortcut,"
-            warn "or remove the --branch=... part from its Properties > Launch options."
-        }
+        python3 "$here/steam_shortcut.py" repair >/dev/null || shortcut_broken=1
         python3 "$here/steam_shortcut.py" artwork >/dev/null 2>&1 || true
         return 0
     fi
@@ -125,6 +126,25 @@ if [ ! -f "$config_dir/config.ini" ]; then
 fi
 
 add_to_steam
+
+if [ "$shortcut_broken" = 1 ]; then
+    cat <<EOF
+
+Installed, but the Steam shortcut needs one more step.
+
+Your "Deck Video Player" shortcut still points to the previous version, which
+was just replaced, so launching it would return to Steam immediately.
+Fix it in one of two ways:
+
+  * Close Steam completely (in Desktop Mode: Steam menu > Exit), then run
+    this script again; it repairs the shortcut by itself.
+  * Or in Steam, open the shortcut's Properties and delete the
+    "--branch=master" part from Launch options.
+
+Your settings, resume points and Plex sign-in are not affected.
+EOF
+    exit 0
+fi
 
 cat <<EOF
 
