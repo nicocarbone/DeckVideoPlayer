@@ -32,6 +32,9 @@ jobs:
         with:
           bundle: DeckVideoPlayer.flatpak
           manifest-path: packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml
+          # Same branch as scripts/build-flatpak.sh: bundles from different
+          # branches install side by side and `flatpak run` keeps the old one.
+          branch: stable
           cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/*.yml') }}
 
   release:

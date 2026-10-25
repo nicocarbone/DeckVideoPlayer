@@ -5,6 +5,18 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.3 (2026-10-25)
+
+Fixes updates that left the previous version running.
+
+### Fixed
+
+- **Updating could leave the old version running.** Release bundles and
+  test builds used different Flatpak branches, so installing one next to
+  the other kept two copies, and Steam started the older one. Releases now
+  use the same branch, and the installer removes any other installed copy
+  first (settings are kept).
+
 ## v0.3.2 (2026-10-24)
 
 Keeps the Steam Deck awake during videos.

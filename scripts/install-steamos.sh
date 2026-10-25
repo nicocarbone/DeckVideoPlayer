@@ -22,6 +22,13 @@ warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 
 steam_running() { pgrep -x steam >/dev/null 2>&1; }
 
+# Uninstalls every installed branch of the app (keeps settings and data).
+remove_installed_branches() {
+    for ref in $(flatpak list --user --app --columns=ref 2>/dev/null | grep "^$APP_ID/"); do
+        flatpak uninstall --user -y --noninteractive "$ref" >/dev/null 2>&1 || true
+    done
+}
+
 desktop_file() {
     local f
     for f in "$HOME/.local/share/flatpak/exports/share/applications/$APP_ID.desktop" \
@@ -76,7 +83,7 @@ case "${1:-}" in
         else
             python3 "$here/steam_shortcut.py" remove || true
         fi
-        flatpak uninstall --user -y "$APP_ID" || true
+        remove_installed_branches
         say "Uninstalled. Your settings remain in $config_dir"
         exit 0
         ;;
@@ -93,6 +100,11 @@ say "Setting up Flathub (user installation)..."
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 say "Installing Deck Video Player..."
+# Bundles built on another Flatpak branch (releases before v0.3.3 used
+# "master", test builds "stable") would install next to the current one,
+# and `flatpak run` would keep starting the old copy. Settings and data
+# are kept.
+remove_installed_branches
 flatpak install --user -y --reinstall "$bundle"
 
 say "Installing the gamescope Vulkan layer (needed for HDR in game mode)..."
