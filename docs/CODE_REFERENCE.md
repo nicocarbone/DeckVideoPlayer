@@ -253,15 +253,18 @@ Recently played (D42): `update()` stamps `played` (time of the last
 playback); `mark_watched()` on a never-played file sets `played = false`;
 `hide_recent(path)` sets it to `false` too. `recent(n, exists)` returns the
 `n` newest played paths, calling `exists(path)` only until `n` are found
-(entries from before v0.3.1 have no `played` and use `t`).
+(entries from before v0.3.1 have no `played` and use `t`; marking one
+migrates `t` to `played` first, so it keeps its place, D45).
+`mark_unwatched(path)` keeps a played entry (timestamps) and drops others.
 
 ## `dvp/cropdetect.lua`: black bars encoded in the video
 
 `bounds(pixel, w, h)` scans lines inward from each edge (`SAMPLES` pixels
 per line; dark = brightest channel ≤ `THRESHOLD`) and returns the picture
-`{x, y, w, h}` or nil (no bars; bars thinner than `MIN_BAR`; or a side
-dark up to `MAX_BAR`, i.e. a dark scene). Bars are rounded down to even
-sizes. `from_screenshot(shot)` reads a `screenshot-raw` result (bgr0).
+`{x, y, w, h}` or nil (no bars; bars thinner than `MIN_BAR`; or a pair
+dark up to `MAX_BAR`, i.e. a dark scene). Opposite sides are paired and
+cropped by the thinner one (bars are symmetric; a dark sky at the top is
+picture, D45), rounded down to even sizes. `from_screenshot(shot)` reads a `screenshot-raw` result (bgr0).
 
 ## `dvp/display.lua`: device, profile, refresh rate
 
@@ -304,17 +307,21 @@ when not under gamescope. Built by `helper/build.sh OUTDIR` (wayland-scanner
 watched) over sd-bus, then waits: both inhibitions last while the process
 stays connected. Writes `request: portal …, screensaver …` to FILE
 (`accepted` / `requested` / `refused (n)` / `not running` / `not
-supported`). Exits on SIGTERM (closing the bus drops the inhibitions) and
-when its parent dies (`PR_SET_PDEATHSIG`). Built by `helper/build.sh` with
+supported`). Exits on SIGTERM (handler without `SA_RESTART`; closing the
+bus drops the inhibitions), when its parent dies (`PR_SET_PDEATHSIG`, plus a
+`getppid()` check each second for subreapers) and when the bus goes away;
+the wait is bounded to 1 s so a signal just before it can't hang it (D45). Built by `helper/build.sh` with
 libsystemd.
 
 ## `dvp/keepawake.lua` (D43)
 
-`new(cfg)` (`[display] keep_awake`; status file in `XDG_RUNTIME_DIR`),
+`new(cfg, data_dir)` (`[display] keep_awake`; status file in
+`XDG_RUNTIME_DIR`, else the private data dir; removed by `stop()`),
 `set_playing(on)` (main.lua: true after file-loaded or on unpause, false
 on pause, idle and shutdown) starts/kills the helper with
-`mp.command_native_async` / `mp.abort_async_command`, `info_lines()` (a
-*Keep awake* info panel row from the status file, while playing). Pure:
+`mp.command_native_async` / `mp.abort_async_command`; a helper that exits
+by itself sets `error` (exit 1: the status file says why), `info_lines()`
+(a *Keep awake* info panel row from the status file, while playing). Pure:
 `args(file)`, `parse_status(text)`.
 
 ## `dvp/media.lua`: descriptions
@@ -412,11 +419,15 @@ once claimed, even if the server list then failed) / `cancel_pin()`
 `/identity` probes without token, answer must carry the server's
 `machineIdentifier`; cached per session; then `prefetch_token(machine)`
 fetches the transient token in the background), `forget_session(machine)` (drops
-the cached connection and transient token after a failed load), `list(loc, cb)` (loc = `{machine, key,
+the cached connection and transient token when the server was unreachable),
+`forget_token(machine)` (only the transient token: a file failed although
+the server answered, D45), `list(loc, cb)` (loc = `{machine, key,
 kind}`; kinds `root`, `ondeck`, `items`, `shows`, `seasons`, `episodes`),
 `item_for(path)`, `describe(path)` (info panel), `fetch_range(path, from,
 to, file, cb)` (capped at the range size, needs HTTP 206), `prepare(item)` (blocking: resume point +
-external subtitles; `ok` false when the server didn't answer),
+external subtitles; `ok` false without metadata, `unreachable` when there
+is no connection or no answer: main.lua then clears the playlist and makes
+the file fail at once via `stream-open-filename`, D45),
 `media_token(item)` / `header_fields(item)` (transient token for mpv;
 never falls back to the account token), `report(item, state, time, duration, sync)`,
 `set_watched(item, watched, cb, sync)`. `readonly` (development) turns
@@ -547,11 +558,14 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   `video-crop` (Fit for the rest); other modes clear it.
 - Lifecycle: `start()` (on start-file), `on_file_loaded()`, `stop_screen()`, `show_overlay()`
   (auto-hides after `overlay_timeout`; stays while paused or while a menu is
-  open), `hide_overlay()`, `update_timer()` (the 0.5 s timer runs only while
-  something is visible).
+  open; while paused the hide timeout isn't re-armed, unpausing does it),
+  `hide_overlay()`, `update_timer()` (the 0.5 s timer runs only while
+  something is visible and the video plays, D45). `toggle_stats()` tracks
+  mpv's *Advanced statistics* so B closes it and `stop_screen()` turns it
+  off.
 - `handle(action)`: see the controls table in DECISIONS D10. B (`back`)
-  hides the controls, then the info panel, and only stops with nothing on
-  screen (D42); the `stop` key always stops.
+  hides the controls, then the info panel, then Advanced statistics, and
+  only stops with nothing on screen (D42, D45); the `stop` key always stops.
   Short seeks are `relative+exact`, long seeks `relative+keyframes`.
   `chapter(dir)`: going back first jumps to the start of the current chapter
   when more than 3 s into it; with no chapters it seeks ±300 s.

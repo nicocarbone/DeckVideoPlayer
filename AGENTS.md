@@ -64,7 +64,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-25, v0.3.5)
+## Current state (2026-10-25, v0.3.6)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -95,6 +95,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   `scripts/build-flatpak.sh` (releases up to v0.3.2 were `master`, which
   installed next to test builds); the installer removes other installed
   branches first and unpins the Steam shortcut (`steam_shortcut.py repair`). Keep both on `stable`.
+- v0.3.6: fifth audit (Gemini, ISSUES.md Part V) reviewed and fixed in D45.
 - Hardware tested informally by the owner (2026-10-24): Steam Deck OLED,
   Steam Deck LCD, DIY Steam Machine with official SteamOS (4K HDR VRR
   120 Hz TV; no refresh switching there, as designed). Docs describe this

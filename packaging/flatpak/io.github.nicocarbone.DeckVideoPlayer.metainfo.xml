@@ -25,6 +25,8 @@
       <li>Audio and subtitle track selection, resume playback</li>
       <li>Headphone surround: 5.1/7.1 soundtracks as 3D sound on headphones</li>
       <li>Subtitle downloads from OpenSubtitles.com (free personal API key)</li>
+      <li>Plex Media Server streaming with progress sync (sign in with a QR code)</li>
+      <li>Recently played list, black-bar cropping, screen kept awake while playing</li>
     </ul>
   </description>
   <screenshots>
@@ -52,6 +54,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.3.6" date="2026-10-25">
+      <description>
+        <p>Fixes from a code audit.</p>
+        <ul>
+          <li>Plex auto-play continues after an episode fails, and stops at once when the server can't be reached</li>
+          <li>Crop black bars no longer crops dark scene edges, and retries after a miss</li>
+          <li>B closes Advanced statistics; the Subtitles menu shows new downloads right away</li>
+          <li>Sturdier keep-awake, less battery use while paused, instant sorting of Plex libraries</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.5" date="2026-10-25">
       <description>
         <p>When the installer can't repair the Steam shortcut because Steam is open, it says so at the end and explains the remaining step.</p>

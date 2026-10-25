@@ -157,7 +157,7 @@ def find_ours(shortcuts):
 
 # "--branch=master" / "--branch master", as copied from the Flatpak menu
 # entry by "Add a Non-Steam Game" or steamos-add-to-steam.
-BRANCH_RE = re.compile(r"\s*--branch(?:=|\s+)(\S+)")
+BRANCH_RE = re.compile(r"\s*--branch(?:=|\s+)([^\s\"']+)")
 CURRENT_BRANCH = "stable"   # scripts/build-flatpak.sh and CI
 
 

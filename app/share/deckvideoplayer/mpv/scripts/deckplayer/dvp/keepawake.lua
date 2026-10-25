@@ -26,13 +26,15 @@ function M.parse_status(text)
     return out
 end
 
-function M.new(cfg)
+-- data_dir: fallback for the status file when XDG_RUNTIME_DIR is unset
+-- (private, unlike /tmp).
+function M.new(cfg, data_dir)
     local self = setmetatable({}, M)
     self.enabled = cfg.display.keep_awake
     self.playing = false
     self.job = nil
     local dir = os.getenv("XDG_RUNTIME_DIR")
-    if not dir or dir == "" then dir = "/tmp" end
+    if not dir or dir == "" then dir = (data_dir and data_dir ~= "") and data_dir or "/tmp" end
     self.status_file = util.join(dir, "dvp-keep-awake-" .. tostring(mp.get_property("pid") or "0") .. ".status")
     return self
 end
@@ -45,11 +47,16 @@ function M:start()
     job = mp.command_native_async({name = "subprocess", args = M.args(self.status_file), playback_only = false},
         function(_, result, err)
             if self.job ~= job then return end   -- killed by stop()
+            -- It should run until stop(): any exit means the screen is no
+            -- longer kept awake. Exit 1 = request failed (the status file
+            -- says why); anything else gets its own message.
             self.job = nil
             local status = result and result.status
-            if err or (status and status < 0) then
+            if err or not status or status < 0 then
                 self.error = (result and result.error_string ~= "" and result.error_string) or err or "failed"
                 if self.error == "init" then self.error = HELPER .. " not found" end
+            elseif status ~= 1 then
+                self.error = "stopped unexpectedly (exit " .. tostring(status) .. ")"
             end
         end)
     self.job = job
@@ -61,6 +68,7 @@ function M:stop()
         self.job = nil
         mp.abort_async_command(job)
     end
+    os.remove(self.status_file)
 end
 
 -- Called whenever playback starts, pauses, resumes or stops.

@@ -22,9 +22,11 @@ warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 
 steam_running() { pgrep -x steam >/dev/null 2>&1; }
 
-# Uninstalls every installed branch of the app (keeps settings and data).
+# Uninstalls installed branches of the app (keeps settings and data):
+# all of them, or all but KEEP (remove_installed_branches [KEEP]).
 remove_installed_branches() {
     for ref in $(flatpak list --user --app --columns=ref 2>/dev/null | grep "^$APP_ID/"); do
+        [ -n "${1:-}" ] && [ "${ref##*/}" = "$1" ] && continue
         flatpak uninstall --user -y --noninteractive "$ref" >/dev/null 2>&1 || true
     done
 }
@@ -56,6 +58,13 @@ install_artwork() {
 shortcut_broken=0
 
 add_to_steam() {
+    if ! steam_running; then
+        # Adds the shortcut to every Steam profile that lacks it, unpins an
+        # existing one from a Flatpak branch and installs the artwork.
+        say "Adding to Steam (or updating the shortcut)..."
+        python3 "$here/steam_shortcut.py" add
+        return 0
+    fi
     if python3 "$here/steam_shortcut.py" status 2>/dev/null | grep -q 'app id'; then
         say "Already in your Steam library."
         # A shortcut made from the menu entry names a Flatpak branch; it
@@ -64,18 +73,13 @@ add_to_steam() {
         python3 "$here/steam_shortcut.py" artwork >/dev/null 2>&1 || true
         return 0
     fi
-    if steam_running; then
-        if command -v steamos-add-to-steam >/dev/null 2>&1 && desktop=$(desktop_file); then
-            say "Adding to Steam..."
-            steamos-add-to-steam "$desktop"
-            install_artwork
-        else
-            warn "Steam is running: close Steam and run this script again,"
-            warn "or add it manually: Steam > Add a Game > Add a Non-Steam Game > Deck Video Player."
-        fi
-    else
+    if command -v steamos-add-to-steam >/dev/null 2>&1 && desktop=$(desktop_file); then
         say "Adding to Steam..."
-        python3 "$here/steam_shortcut.py" add
+        steamos-add-to-steam "$desktop"
+        install_artwork
+    else
+        warn "Steam is running: close Steam and run this script again,"
+        warn "or add it manually: Steam > Add a Game > Add a Non-Steam Game > Deck Video Player."
     fi
 }
 
@@ -111,7 +115,9 @@ say "Installing Deck Video Player..."
 # "master", test builds "stable") would install next to the current one,
 # and `flatpak run` would keep starting the old copy. Settings and data
 # are kept.
-remove_installed_branches
+# The bundle's own branch ("stable") is replaced by --reinstall, so a
+# failed install never leaves the app missing.
+remove_installed_branches stable
 flatpak install --user -y --reinstall "$bundle"
 
 say "Installing the gamescope Vulkan layer (needed for HDR in game mode)..."

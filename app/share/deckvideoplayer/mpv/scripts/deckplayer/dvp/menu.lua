@@ -84,7 +84,7 @@ function M:refresh()
     local spec = self:top()
     if spec and spec.rebuild then
         spec.items = spec.rebuild()
-        spec.selected = math.min(spec.selected, #spec.items)
+        spec.selected = first_selectable(spec.items, math.min(spec.selected, #spec.items), -1)
     end
     self:render()
 end

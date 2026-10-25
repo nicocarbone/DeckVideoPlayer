@@ -72,14 +72,17 @@ function M:stop_screen()
     self.active = false
     self.overlay_visible = false
     self.info_visible = false
+    if self.stats_visible then self:toggle_stats() end   -- not over the library
     self.layer:clear()
     self.info_layer:clear()
     self.timer:kill()
     if self.hide_timer then self.hide_timer:kill() end
 end
 
+-- The 0.5 s tick only runs while the overlay or info panel is visible and
+-- the video plays: paused, nothing on screen changes by itself.
 function M:update_timer()
-    if self.active and (self.overlay_visible or self.info_visible) then
+    if self.active and (self.overlay_visible or self.info_visible) and not mp.get_property_native("pause") then
         self.timer:resume()
     else
         self.timer:kill()
@@ -97,8 +100,11 @@ function M:show_overlay(sticky_seconds)
     if self.hide_timer then self.hide_timer:kill() end
     local timeout = sticky_seconds or self.cfg.interface.overlay_timeout
     self.hide_timer = mp.add_timeout(timeout, function()
-        -- Stay visible while paused or while a menu is open over the video.
-        if mp.get_property_native("pause") or self.ctx.menu:is_open() then
+        -- Stay visible while paused (unpausing re-arms the timeout, see
+        -- on_pause_change; nothing to redraw meanwhile) or while a menu is
+        -- open over the video (checked again later).
+        if mp.get_property_native("pause") then return end
+        if self.ctx.menu:is_open() then
             self:show_overlay()
             return
         end
@@ -117,7 +123,8 @@ end
 
 function M:on_pause_change(paused)
     if not self.active then return end
-    if paused then self:show_overlay() elseif self.overlay_visible then self:show_overlay() end
+    if paused or self.overlay_visible then self:show_overlay() else self:update_timer() end
+    if self.info_visible then self:render_info() end   -- e.g. Keep awake stops/starts
 end
 
 ---------------------------------------------------------------------------
@@ -160,6 +167,12 @@ function M:change_volume(delta)
     self.ctx.toast(string.format("Volume %d%%", v))
 end
 
+-- mpv's own statistics overlay (stats.lua); tracked so B can close it.
+function M:toggle_stats()
+    self.stats_visible = not self.stats_visible
+    mp.commandv("script-binding", "stats/display-stats-toggle")
+end
+
 function M:toggle_info()
     self.info_visible = not self.info_visible
     if self.info_visible then self:render_info() else self.info_layer:clear() end
@@ -177,6 +190,8 @@ function M:handle(action)
             self:hide_overlay()
         elseif self.info_visible then
             self:toggle_info()
+        elseif self.stats_visible then
+            self:toggle_stats()
         else
             self.ctx.stop()
         end
@@ -294,7 +309,8 @@ end
 function M:open_subtitle_menu()
     local items = self:subtitle_items()
     self.ctx.menu:open({title = "Subtitles", style = "side", items = items,
-                        selected = selected_index(items), close_action = "x"})
+                        selected = selected_index(items), close_action = "x",
+                        rebuild = function() return self:subtitle_items() end})
     self:show_overlay()
 end
 
@@ -318,8 +334,9 @@ function M:set_zoom(mode)
     mp.set_property_bool("keepaspect", mode ~= "stretch")
     self.zoom_touched = true
     if mode == "bars" then
-        self.crop_bars = true
-        self:crop_black_bars()
+        -- Only shown as the mode when a crop was applied: after "no bars
+        -- found" the row says Fit, and the next press tries again.
+        self.crop_bars = self:crop_black_bars()
     elseif self.crop_bars then
         self.crop_bars = false
         mp.set_property("file-local-options/video-crop", "")
@@ -338,9 +355,10 @@ function M:crop_black_bars()
     if b then
         mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d", b.w, b.h, b.x, b.y))
         self.ctx.toast(string.format("Cropped to %dx%d", b.w, b.h))
-    else
-        self.ctx.toast("No black bars found (try again in a brighter scene)")
+        return true
     end
+    self.ctx.toast("No black bars found (try again in a brighter scene)")
+    return false
 end
 
 local function cycle(list, current, dir)
@@ -418,9 +436,7 @@ function M:main_menu_items()
         items[#items + 1] = {label = "Play next video", action = function() mp.commandv("playlist-next") end}
     end
     items[#items + 1] = {label = "Playback info", action = function() self:toggle_info() end}
-    items[#items + 1] = {label = "Advanced statistics", action = function()
-        mp.commandv("script-binding", "stats/display-stats-toggle")
-    end}
+    items[#items + 1] = {label = "Advanced statistics", action = function() self:toggle_stats() end}
     items[#items + 1] = {label = "About", action = function() self.ctx.about() end}
     items[#items + 1] = {label = "Stop and return to library", action = function() self.ctx.stop() end}
     items[#items + 1] = {label = "Quit Deck Video Player", action = function() self.ctx.quit() end}
@@ -444,10 +460,9 @@ end
 
 function M:badges()
     local out = {}
-    local vp = mp.get_property_native("video-params") or {}
+    local source, output_hdr, vp = media.hdr_state(self.video_track)
     local res = media.resolution_badge(vp.w, vp.h)
     if res then out[#out + 1] = {text = res} end
-    local source, output_hdr = media.hdr_state(self.video_track)
     if source and source ~= "SDR" then
         if output_hdr then
             out[#out + 1] = {text = source, color = ui.theme.warn}
@@ -582,7 +597,7 @@ end
 function M:info_lines()
     local lines = {}
     local function add(k, v) if v and v ~= "" then lines[#lines + 1] = {k, v} end end
-    local vp = mp.get_property_native("video-params") or {}
+    local source, output_hdr, vp, target = media.hdr_state(self.video_track)
     local vt = self.video_track
     local fps = mp.get_property_number("container-fps")
     if vt then
@@ -593,7 +608,6 @@ function M:info_lines()
     end
     local hw = mp.get_property("hwdec-current")
     add("Decoder", (hw and hw ~= "" and hw ~= "no") and ("Hardware (" .. hw .. ")") or "Software")
-    local source, output_hdr, _, target = media.hdr_state(self.video_track)
     if source then
         local s = source
         if vp.primaries then s = s .. " · " .. vp.primaries end

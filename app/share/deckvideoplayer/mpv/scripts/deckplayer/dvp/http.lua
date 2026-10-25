@@ -14,7 +14,8 @@ local M = {}
 
 -- A double-quoted string for a curl config file.
 function M.curl_quote(s)
-    s = tostring(s):gsub('[\\"]', "\\%0"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+    -- NUL would end the value early in curl's config parser: drop it.
+    s = tostring(s):gsub("%z", ""):gsub('[\\"]', "\\%0"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
     return '"' .. s .. '"'
 end
 

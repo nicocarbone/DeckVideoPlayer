@@ -372,12 +372,15 @@ function M:poll_pin(cb)
     local pins = self.pin
     if not pins then return cb(false, "no code") end
     local list = {pins.short, pins.strong}
-    local pending, finished = #list, false
+    local pending, finished, expired = #list, false, false
     for _, pin in ipairs(list) do
         http.request({url = M.PLEX_TV .. "/api/v2/pins/" .. pin.id, headers = self:headers(),
                       tag = "plex", timeout = 10}, function(code, body)
             pending = pending - 1
             if finished or self.pin ~= pins then return end
+            -- The short code is what the user types: its expiry ends the
+            -- dialog, whichever answer arrives last.
+            if code == 404 and pin == pins.short then expired = true end
             if code == 200 and type(body) == "table" and body.authToken and body.authToken ~= "" then
                 finished = true
                 self.account.token = body.authToken
@@ -386,8 +389,7 @@ function M:poll_pin(cb)
                 self:save()
                 self:refresh_account(function(err) cb(true, err) end)
             elseif pending == 0 then
-                -- The short code is what the user types: its expiry ends the dialog.
-                cb(false, (code == 404 and pin == pins.short) and "The code expired" or nil)
+                cb(false, expired and "The code expired" or nil)
             end
         end)
     end
@@ -482,6 +484,12 @@ end
 -- failed load: the server may have restarted or the network changed).
 function M:forget_session(machine)
     self.bases[machine] = nil
+    self.transient[machine] = nil
+end
+
+-- A file failed although the server answered: only the streaming token may
+-- be stale (server restart); the connection stays for the next file.
+function M:forget_token(machine)
     self.transient[machine] = nil
 end
 
@@ -590,12 +598,15 @@ end
 
 -- Fresh metadata just before playback (blocking, short timeout; called from
 -- the on_load hook): resume offset (s) and external subtitles.
+-- `unreachable` when there is no connection or the server didn't answer
+-- (as opposed to an answer without the item).
 function M:prepare(item)
     local base = self.bases[item.machine]
     local server = self:server(item.machine)
-    if not base or not server then return {subs = {}} end
+    if not base or not server then return {subs = {}, unreachable = true} end
     local code, body = http.request_sync({url = base.url .. item.key, headers = self:headers(server.token),
                                           tag = "plex", timeout = 5})
+    if code == nil then return {subs = {}, unreachable = true} end
     local md = code == 200 and type(body) == "table" and body.MediaContainer
         and body.MediaContainer.Metadata and body.MediaContainer.Metadata[1]
     if not md then return {subs = {}} end

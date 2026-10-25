@@ -115,6 +115,12 @@ class ShortcutFileTests(unittest.TestCase):
         with mock.patch.object(ss, "steam_running", lambda: True):
             ss.cmd_repair(None)   # no exit: it still works
 
+    def test_unpin_keeps_quotes(self):
+        sc = {"Exe": '"/usr/bin/flatpak run --branch=master"', "LaunchOptions": ""}
+        self.assertEqual(ss.pinned_branch(sc), "master")
+        ss.unpin_branch(sc)
+        self.assertEqual(sc["Exe"], '"/usr/bin/flatpak run"')
+
     def test_add_unpins_existing(self):
         self.pin("run --branch=master " + ss.FLATPAK_ID)
         ss.cmd_add(None)

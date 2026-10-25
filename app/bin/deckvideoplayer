@@ -38,7 +38,11 @@ ini_get() {
             k = substr(line, 1, i - 1); v = substr(line, i + 1)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-            if (tolower(k) == key) val = v
+            # Same rules as dvp/config.lua: "gpu-context" = "gpu_context",
+            # optional quotes around the value.
+            k = tolower(k); gsub(/[[:space:]-]/, "_", k)
+            if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+            if (k == key) val = v
         }
         END { print val }
     ' "$CONFIG_FILE"

@@ -141,9 +141,12 @@ end
 -- Downloaded subtitles of a video: list of {path, title, lang}.
 function M:stored(path)
     if not self.dir or not (is_local(path) or self:plex_item(path)) then return {} end
-    -- Nothing downloaded yet (the usual case): no hashing at all.
-    local top = utils.readdir(self.dir, "dirs")
-    if not top or #top == 0 then return {} end
+    -- Nothing downloaded yet (the usual case): no hashing at all. Plex
+    -- items and known keys cost no hashing, so they skip this check.
+    if self.keys[path] == nil and not self:plex_item(path) then
+        local top = utils.readdir(self.dir, "dirs")
+        if not top or #top == 0 then return {} end
+    end
     local key = self:key(path)
     if not key then return {} end
     local dir = util.join(self.dir, key)

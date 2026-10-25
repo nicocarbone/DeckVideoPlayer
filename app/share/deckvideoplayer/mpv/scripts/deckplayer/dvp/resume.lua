@@ -73,8 +73,9 @@ end
 -- dated by `t`).
 function M:mark_watched(path)
     local e = self.entries[path] or {}
+    -- Before v0.3.1 `t` was also the play time; keep it as such.
+    if e.played == nil then e.played = e.duration and e.t or false end
     e.pos, e.watched, e.t = nil, true, os.time()
-    if e.played == nil and not e.duration then e.played = false end
     self.entries[path] = e
     self.dirty = true
 end
@@ -84,6 +85,7 @@ end
 function M:mark_unwatched(path)
     local e = self.entries[path]
     if not e then return end
+    if e.played == nil then e.played = e.t end   -- entry from before v0.3.1
     if e.played then
         e.pos, e.watched = nil, nil
     else

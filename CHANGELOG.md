@@ -5,6 +5,34 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.6 (2026-10-25)
+
+Fixes from a fifth code audit: Plex auto-play, black-bar cropping,
+keep-awake and the installer.
+
+### Fixed
+
+- **Plex auto-play:** when one episode failed to open, the following ones
+  failed too. Now only that one is skipped; if the server can't be
+  reached, playback stops at once with "Can't reach the Plex server"
+  instead of trying every remaining episode.
+- *Crop black bars* no longer mistakes a dark sky or a shadow on one side
+  for a bar; after "No black bars found" pressing again retries.
+- Episodes started from *Recently played* continue in episode order.
+- The Plex sign-in dialog notices when the code expires.
+- **B** closes *Advanced statistics*, which no longer stays over the
+  library after stopping.
+- The Subtitles menu shows a downloaded subtitle right away.
+- Keep-awake is sturdier: it can't get stuck or use CPU if the system
+  session changes, and the info panel says if it stopped.
+- The installer keeps the current version installed until the new one is
+  in, and adds the shortcut to every Steam account on the device.
+
+### Changed
+
+- Paused playback uses less battery (no periodic redraws).
+- Changing the sort order of a Plex library is instant.
+
 ## v0.3.5 (2026-10-25)
 
 A clearer installer message when the Steam shortcut still needs fixing.

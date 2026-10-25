@@ -96,7 +96,7 @@ local app_dir = script_dir and util.dirname(util.dirname(util.dirname(script_dir
 local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna.sofa"))
 
 local resume = Resume.new(opts.data_dir)
-local keepawake = KeepAwake.new(cfg)
+local keepawake = KeepAwake.new(cfg, opts.data_dir)
 local menu = Menu.new()
 local state = {
     screen = "browser",
@@ -287,10 +287,17 @@ mp.add_hook("on_load", 50, function()
         -- Plex: the token goes in a header (never in the URL), and the
         -- server's resume point and subtitle files are fetched now.
         local prep = plex:prepare(item)
+        state.plex_prepared = prep.ok
+        state.plex_unreachable = prep.unreachable
         -- Streaming token only if the server answered (don't wait twice for
         -- an unreachable server).
         if prep.ok then
             mp.set_property("file-local-options/http-header-fields", plex:header_fields(item))
+        elseif prep.unreachable then
+            -- Fail now instead of waiting for a network timeout, and drop the
+            -- rest of the playlist: every next episode would wait as well.
+            mp.commandv("playlist-clear")
+            mp.set_property("stream-open-filename", "dvp-plex-unreachable://")
         end
         mp.set_property("file-local-options/force-media-title", item.title or "")
         state.plex_subs = prep.subs
@@ -360,11 +367,16 @@ end)
 
 mp.register_event("end-file", function(ev)
     if ev.reason == "error" then
-        -- A Plex server may have restarted (stale streaming token) or the
-        -- network changed: reconnect and ask for a new token next time.
         local item = plex:item_for(state.loading_path)
-        if item then plex:forget_session(item.machine) end
-        toast("Could not play this file")
+        if item and state.plex_prepared then
+            -- The server answered: keep the connection for the next episode;
+            -- only the streaming token may be stale (server restart).
+            plex:forget_token(item.machine)
+        elseif item then
+            -- Unreachable: reconnect (maybe another address) next time.
+            plex:forget_session(item.machine)
+        end
+        toast(item and state.plex_unreachable and "Can't reach the Plex server" or "Could not play this file")
         msg.error("playback failed: " .. tostring(ev.file_error))
     end
     state.current_path = nil

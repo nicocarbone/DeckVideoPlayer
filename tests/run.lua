@@ -173,6 +173,14 @@ rr:mark_unwatched("/a.mkv")
 check("unwatched stays recent", rr:recent(1, exists)[1] == "/a.mkv" and not rr:position("/a.mkv"))
 rr:mark_unwatched("/new.mkv")
 eq("unwatched never played dropped", rr.entries["/new.mkv"], nil)
+-- entries from before v0.3.1 (no `played`): marking keeps their place
+local legacy = Resume.new(nil)
+legacy.entries = {["/l.mkv"] = {t = 100, pos = 50, duration = 3600}, ["/n.mkv"] = {t = 200, played = 200}}
+legacy:mark_watched("/l.mkv")
+eq("legacy watched keeps place", table.concat(legacy:recent(5), " "), "/n.mkv /l.mkv")
+legacy.entries["/m.mkv"] = {t = 50, pos = 60, duration = 3600}
+legacy:mark_unwatched("/m.mkv")
+check("legacy unwatched stays recent", legacy.entries["/m.mkv"] ~= nil and legacy.entries["/m.mkv"].played == 50)
 
 -- media --------------------------------------------------------------------
 eq("lang", media.language("spa"), "Spanish")
@@ -458,6 +466,12 @@ eq("no bars", cropdetect.bounds(frame(0, 0, 1920, 1080, 200), 1920, 1080), nil)
 eq("thin edge ignored", cropdetect.bounds(frame(4, 0, 1912, 1080, 200), 1920, 1080), nil)
 eq("dark frame", cropdetect.bounds(frame(0, 0, 1920, 1080, 20), 1920, 1080), nil)
 eq("small bright spot", cropdetect.bounds(frame(900, 500, 100, 60, 200), 1920, 1080), nil)
+eq("dark sky at the top only", cropdetect.bounds(frame(0, 260, 1920, 820, 200), 1920, 1080), nil)
+-- letterboxed film whose left side is in shadow: only the bars go
+eq("letterbox with dark left side", box(cropdetect.bounds(frame(360, 138, 1560, 804, 200), 1920, 1080)),
+    "1920x804+0+138")
+eq("uneven bars use the thinner", box(cropdetect.bounds(frame(0, 136, 1920, 806, 200), 1920, 1080)),
+    "1920x808+0+136")
 local raw = {}
 for y = 0, 9 do for x = 0, 15 do
     raw[#raw + 1] = (x >= 2 and x < 14) and "\200\200\200\0" or "\0\0\0\0"

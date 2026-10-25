@@ -36,16 +36,19 @@ function M.bounds(pixel, w, h)
     while bottom < max_y and row_dark(h - 1 - bottom) do bottom = bottom + 1 end
     while left < max_x and col_dark(left) do left = left + 1 end
     while right < max_x and col_dark(w - 1 - right) do right = right + 1 end
-    -- A side that reached the limit is a dark scene, not a bar.
-    if top >= max_y or bottom >= max_y or left >= max_x or right >= max_x then return nil end
+    -- Encoded bars come in pairs (letterbox: top and bottom; pillarbox: left
+    -- and right), so each pair is cropped by its thinner side: a dark sky
+    -- at the top or a shadow on one side is picture, not a bar.
+    local v, s = math.min(top, bottom), math.min(left, right)
+    -- A pair dark up to the limit is a dark scene, not bars.
+    if v >= max_y or s >= max_x then return nil end
     local function bar(n, size)
         if n < size * M.MIN_BAR then return 0 end
         return n - n % 2   -- even values: chroma subsampling
     end
-    top, bottom = bar(top, h), bar(bottom, h)
-    left, right = bar(left, w), bar(right, w)
-    if top + bottom + left + right == 0 then return nil end
-    return {x = left, y = top, w = w - left - right, h = h - top - bottom}
+    v, s = bar(v, h), bar(s, w)
+    if v + s == 0 then return nil end
+    return {x = s, y = v, w = w - 2 * s, h = h - 2 * v}
 end
 
 -- Bounds from a screenshot-raw result ({w, h, stride, data} in bgr0).

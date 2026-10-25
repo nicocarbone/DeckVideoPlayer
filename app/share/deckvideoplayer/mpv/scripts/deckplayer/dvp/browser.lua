@@ -228,6 +228,7 @@ function M:select_path(path)
 end
 
 function M:enter(entry)
+    self.after_load = nil   -- meant for a listing we are leaving
     self.cursor[loc_key(self:location())] = self.selected
     table.insert(self.stack, {path = entry.path, label = entry.label, plex = entry.plex})
     self:load()
@@ -282,7 +283,9 @@ end
 function M:recent_playlist(path)
     if not self.cfg.playback.autoplay_next then return {path} end
     local out
-    for _, e in ipairs(library.list(util.dirname(path), self.cfg, self.sort) or {}) do
+    -- By name whatever the folder sort (not shown on the start screen), so
+    -- episodes continue in order.
+    for _, e in ipairs(library.list(util.dirname(path), self.cfg, "name") or {}) do
         if e.path == path then out = {} end
         if out and not e.is_dir then out[#out + 1] = e.path end
     end
@@ -319,11 +322,14 @@ end
 function M:toggle_sort()
     self.sort = self.sort == "name" and "date" or "name"
     local cur = self.entries[self.selected]
-    if cur then self.after_load = function() self:select_path(cur.path) end end
-    self:load()
-    if cur and not self.loading then
-        self.after_load = nil
-        self:select_path(cur.path)
+    if self.loading then
+        -- The listing on its way is sorted with the new order when it lands.
+        if cur then self.after_load = function() self:select_path(cur.path) end end
+    else
+        -- Entries carry names and dates: re-sort in place, no new listing
+        -- (for Plex, no new request to the server).
+        library.sort_entries(self.entries, self.sort)
+        if cur then self:select_path(cur.path) end
     end
     self:render()
     self.ctx.toast("Sorted by " .. (self.sort == "name" and "name" or "date added"))
@@ -361,6 +367,7 @@ function M:open_menu()
         table.insert(items, {label = "Go to library start", action = function()
             local top = self.stack[1]
             self.stack = (top and top.is_root) and {top} or {}
+            self.after_load = nil
             self:load()
             self:render()
         end})

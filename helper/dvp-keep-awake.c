@@ -14,6 +14,7 @@
  * or stop; it also exits when its parent dies (PR_SET_PDEATHSIG).
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,7 +32,8 @@ static void write_status(void)
 {
     if (!status_file) return;
     char tmp[4096];
-    snprintf(tmp, sizeof tmp, "%s.tmp", status_file);
+    int n = snprintf(tmp, sizeof tmp, "%s.tmp", status_file);
+    if (n < 0 || (size_t)n >= sizeof tmp) return;
     FILE *f = fopen(tmp, "w");
     if (!f) return;
     fprintf(f, "request: portal %s, screensaver %s\n", portal_result, screensaver_result);
@@ -79,7 +81,7 @@ static void request_inhibit(sd_bus *bus)
     /* Portal: subscribe to the predictable request path first. */
     const char *unique = NULL;
     char sender[128] = "", path[256];
-    if (sd_bus_get_unique_name(bus, &unique) >= 0 && unique) {
+    if (sd_bus_get_unique_name(bus, &unique) >= 0 && unique && unique[0] == ':') {
         size_t j = 0;
         for (const char *p = unique + 1; *p && j < sizeof sender - 1; p++) sender[j++] = (*p == '.') ? '_' : *p;
         sender[j] = 0;
@@ -121,10 +123,17 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    /* Exit with the app: PDEATHSIG covers a crash; the parent check in the
+     * loop covers the window before prctl and subreapers (Flatpak, systemd)
+     * that adopt orphans under another PID than 1. */
+    pid_t parent = getppid();
     prctl(PR_SET_PDEATHSIG, SIGTERM);
-    if (getppid() == 1) return 0;
-    signal(SIGTERM, on_signal);
-    signal(SIGINT, on_signal);
+    if (getppid() != parent) return 0;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_signal;   /* no SA_RESTART: interrupt the wait */
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
 
     sd_bus *bus = NULL;
     int r = sd_bus_open_user(&bus);
@@ -136,9 +145,14 @@ int main(int argc, char **argv)
     }
     request_inhibit(bus);
 
-    while (!stop) {
-        while (sd_bus_process(bus, NULL) > 0) {}
-        sd_bus_wait(bus, UINT64_MAX);   /* a signal interrupts it */
+    while (!stop && getppid() == parent) {
+        while ((r = sd_bus_process(bus, NULL)) > 0) {}
+        if (r < 0) break;   /* bus gone (e.g. session ended): nothing to hold */
+        if (stop) break;
+        /* Bounded, so a signal that lands just before the wait, or a parent
+         * that died without one, is noticed within a second. */
+        r = sd_bus_wait(bus, 1000000);
+        if (r < 0 && r != -EINTR) break;
     }
     sd_bus_flush_close_unref(bus);   /* drops both inhibitions */
     return 0;

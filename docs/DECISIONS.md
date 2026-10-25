@@ -855,3 +855,47 @@ From the owner's tests on a Deck OLED.
   works, so it is repaired quietly the next time Steam is closed.
 - **Rule:** keep CI and `scripts/build-flatpak.sh` on `stable`.
 
+## D45. Fifth audit (ISSUES.md Part V, Gemini, v0.3.5) reviewed
+
+Each finding was checked against the code; fixed unless noted.
+
+- **Plex playlist after an error:** a failed file used to drop the server
+  connection, so every following episode played without its token and
+  failed too. Now a file that fails although the server answered only
+  drops the streaming token (`forget_token`); when the server is
+  unreachable (`prepare` → `unreachable`), the rest of the playlist is
+  cleared and the file fails at once (`stream-open-filename` set to an
+  unknown protocol: 0.03 s instead of a network timeout per episode), with
+  "Can't reach the Plex server".
+- **Keep-awake helper:** breaks out when the bus goes away (was a 100 % CPU
+  loop), waits at most 1 s at a time with a SIGTERM handler that
+  interrupts the wait (a signal just before the wait could hang it while
+  holding the inhibition), checks its parent each second (subreapers),
+  guards the unique-name parsing and the status path length. The Lua side
+  reports a helper that exits by itself, falls back to the private data
+  dir instead of `/tmp`, and removes the status file on stop.
+  *Not adopted:* the claim that `PR_SET_PDEATHSIG` would fire when an mpv
+  worker thread ends mid-film: the thread that spawned the helper stays
+  blocked on it until it exits.
+- **Crop black bars:** opposite sides are paired (bars are symmetric), so
+  a dark sky or a shadow on one side is no longer cropped; a failed
+  detection leaves the mode at Fit so the next press retries. *Not
+  applicable:* the still-cropped screenshot after clearing `video-crop`;
+  detection never runs while a crop is active.
+- **Smaller fixes:** recently played episodes continue in name order; pre-
+  v0.3.1 resume entries keep their place when marked; the Plex PIN expiry
+  is noticed whichever answer arrives last; the Subtitles menu rebuilds
+  after a download; stale `after_load` callbacks are cleared; B closes
+  Advanced statistics; NUL bytes are dropped from curl config values; the
+  launcher reads `config.ini` keys and values like the app (`-`, quotes).
+- **Installer:** keeps the `stable` copy while installing (a failed install
+  no longer leaves nothing), runs `steam_shortcut.py add` whenever Steam is
+  closed (adds the shortcut to every Steam profile, unpins, artwork), and
+  `BRANCH_RE` no longer swallows quotes.
+- **Battery / speed:** paused playback does no periodic work (no overlay
+  re-render every 4 s, no 0.5 s tick); Y re-sorts the loaded entries in
+  place (no new Plex request); `video-params` is read once per render; the
+  subtitle store skips its folder check for Plex items and known keys.
+- **Polish:** the metainfo feature list mentions Plex, recently played,
+  black-bar cropping and keeping the screen awake.
+
