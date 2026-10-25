@@ -54,6 +54,12 @@ install_artwork() {
 add_to_steam() {
     if python3 "$here/steam_shortcut.py" status 2>/dev/null | grep -q 'app id'; then
         say "Already in your Steam library."
+        # A shortcut made from the menu entry names a Flatpak branch; it
+        # stops working when the app changes branch (v0.3.3), so unpin it.
+        python3 "$here/steam_shortcut.py" repair || {
+            warn "Close Steam and run this script again to repair the shortcut,"
+            warn "or remove the --branch=... part from its Properties > Launch options."
+        }
         python3 "$here/steam_shortcut.py" artwork >/dev/null 2>&1 || true
         return 0
     fi

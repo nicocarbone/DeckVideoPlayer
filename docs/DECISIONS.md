@@ -835,3 +835,23 @@ From the owner's tests on a Deck OLED.
   Steam's timers apply again when paused or in the library (battery). It
   writes the outcome to a status file shown in the info panel (*Keep
   awake*), which makes a failure visible.
+
+## D44. One Flatpak branch, and shortcuts that don't name it
+
+- **Problem:** releases up to v0.3.2 were built on branch `master` (the
+  flatpak-builder action's default), test builds on `stable`; installed
+  side by side, `flatpak run` kept starting the older one. v0.3.3 moved CI
+  to `stable` and made the installer remove other installed branches.
+  That broke shortcuts created from the app's menu entry (*Add a Non-Steam
+  Game*, or `steamos-add-to-steam`, which the installer uses while Steam is
+  running): Flatpak writes `--branch=master` into the entry's command, and
+  that branch was now gone, so the app returned to Steam immediately.
+- **Fix:** `steam_shortcut.py repair` removes `--branch=…` from the app's
+  own shortcut (no other shortcut is touched); `add` does the same for an
+  existing shortcut, and the installer runs `repair` when the app is
+  already in the library. While Steam runs nothing is written (Steam would
+  overwrite it); if the named branch no longer exists the installer asks
+  to close Steam and run it again. A shortcut pinned to `stable` still
+  works, so it is repaired quietly the next time Steam is closed.
+- **Rule:** keep CI and `scripts/build-flatpak.sh` on `stable`.
+

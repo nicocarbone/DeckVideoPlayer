@@ -5,6 +5,19 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.3.4 (2026-10-25)
+
+Fixes the Steam shortcut after the v0.3.3 update.
+
+### Fixed
+
+- **After updating to v0.3.3 the app could return to Steam immediately**
+  when its Steam shortcut was added from the app menu (*Add a Non-Steam
+  Game*, or by the installer while Steam was running): that shortcut named
+  the old Flatpak branch. The installer now repairs the shortcut (close
+  Steam first). To fix it by hand, remove `--branch=master` from the
+  shortcut's *Properties → Launch options*.
+
 ## v0.3.3 (2026-10-25)
 
 Fixes updates that left the previous version running.

@@ -52,6 +52,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.3.4" date="2026-10-25">
+      <description>
+        <p>The installer repairs Steam shortcuts that named the old Flatpak branch, which made the app return to Steam immediately after updating to 0.3.3.</p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-10-25">
       <description>
         <p>Updating no longer leaves the previous version running: releases use the same Flatpak branch as test builds, and the installer removes other installed copies.</p>

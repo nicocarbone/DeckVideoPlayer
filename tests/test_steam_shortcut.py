@@ -84,6 +84,42 @@ class ShortcutFileTests(unittest.TestCase):
         self.assertEqual([s["AppName"] for s in shortcuts.values()], ["Other Game"])
         self.assertEqual(os.listdir(os.path.join(self.config, "grid")), [])
 
+    def pin(self, launch):
+        ss.cmd_add(None)
+        path, data = ss.load_shortcuts(self.config)
+        _, sc = ss.find_ours(data)
+        sc["LaunchOptions"] = launch
+        ss.save_shortcuts(path, data)
+
+    def ours(self):
+        return [s for s in self.load().values() if s["AppName"] == ss.APP_NAME][0]
+
+    def test_repair_unpins_branch(self):
+        self.pin("run --branch=master --arch=x86_64 --command=deckvideoplayer " + ss.FLATPAK_ID)
+        ss.cmd_repair(None)
+        self.assertEqual(self.ours()["LaunchOptions"],
+                         "run --arch=x86_64 --command=deckvideoplayer " + ss.FLATPAK_ID)
+        self.assertEqual(self.ours()["AppName"], ss.APP_NAME)
+        self.assertEqual(self.load()["0"]["LastPlayTime64"], 2 ** 40 + 5)
+
+    def test_repair_waits_for_steam(self):
+        self.pin("run --branch master " + ss.FLATPAK_ID)
+        with mock.patch.object(ss, "steam_running", lambda: True):
+            with self.assertRaises(SystemExit) as cm:
+                ss.cmd_repair(None)
+        self.assertEqual(cm.exception.code, 3)
+        self.assertIn("--branch master", self.ours()["LaunchOptions"])
+
+    def test_repair_current_branch_is_fine_while_steam_runs(self):
+        self.pin("run --branch=stable " + ss.FLATPAK_ID)
+        with mock.patch.object(ss, "steam_running", lambda: True):
+            ss.cmd_repair(None)   # no exit: it still works
+
+    def test_add_unpins_existing(self):
+        self.pin("run --branch=master " + ss.FLATPAK_ID)
+        ss.cmd_add(None)
+        self.assertEqual(self.ours()["LaunchOptions"], "run " + ss.FLATPAK_ID)
+
     def test_failed_save_leaves_file_intact(self):
         before = open(self.vdf, "rb").read()
         with mock.patch.object(ss, "vdf_dump", side_effect=TypeError("boom")):

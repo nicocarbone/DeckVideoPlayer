@@ -4,6 +4,7 @@
     steam_shortcut.py add       Add the shortcut (Steam must NOT be running)
     steam_shortcut.py artwork   Copy library artwork for an existing shortcut
     steam_shortcut.py remove    Remove the shortcut (Steam must NOT be running)
+    steam_shortcut.py repair    Unpin the shortcut from a Flatpak branch
     steam_shortcut.py status    Show the shortcut's app id per Steam user
 
 Works on Steam's binary shortcuts.vdf in every local Steam user profile.
@@ -12,6 +13,7 @@ Works on Steam's binary shortcuts.vdf in every local Steam user profile.
 import argparse
 import binascii
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -153,6 +155,35 @@ def find_ours(shortcuts):
     return None, None
 
 
+# "--branch=master" / "--branch master", as copied from the Flatpak menu
+# entry by "Add a Non-Steam Game" or steamos-add-to-steam.
+BRANCH_RE = re.compile(r"\s*--branch(?:=|\s+)(\S+)")
+CURRENT_BRANCH = "stable"   # scripts/build-flatpak.sh and CI
+
+
+def pinned_branch(sc):
+    """The Flatpak branch the shortcut's command line names, or None."""
+    for field in ("Exe", "LaunchOptions"):
+        value = sc.get(field)
+        m = isinstance(value, str) and BRANCH_RE.search(value)
+        if m:
+            return m.group(1)
+    return None
+
+
+def unpin_branch(sc):
+    """Removes a Flatpak branch from the shortcut's command line, so it keeps
+    working when the app moves to another branch (v0.3.3: master -> stable).
+    Returns True if anything changed."""
+    changed = False
+    for field in ("Exe", "LaunchOptions"):
+        value = sc.get(field)
+        if isinstance(value, str) and BRANCH_RE.search(value):
+            sc[field] = BRANCH_RE.sub("", value).strip()
+            changed = True
+    return changed
+
+
 def unsigned(appid):
     return appid & 0xFFFFFFFF
 
@@ -205,6 +236,7 @@ def cmd_add(_):
             key = str(max([int(k) for k in data["shortcuts"] if k.isdigit()] + [-1]) + 1)
             sc = shortcut_entry("")
             data["shortcuts"][key] = sc
+        unpin_branch(sc)
         sc["icon"] = install_artwork(config_dir, sc["appid"])
         os.makedirs(config_dir, exist_ok=True)
         save_shortcuts(path, data)
@@ -247,14 +279,45 @@ def cmd_status(_):
     for config_dir in user_config_dirs():
         _, data = load_shortcuts(config_dir)
         _, sc = find_ours(data)
-        print(config_dir, "->", ("app id %d" % unsigned(sc["appid"])) if sc and "appid" in sc else "not added")
+        if not sc or "appid" not in sc:
+            print(config_dir, "-> not added")
+            continue
+        branch = pinned_branch(sc)
+        pinned = " (pinned to Flatpak branch %s: run repair)" % branch if branch else ""
+        print(config_dir, "-> app id %d%s" % (unsigned(sc["appid"]), pinned))
+
+
+def cmd_repair(_):
+    """Unpins the app's own shortcut from a Flatpak branch. While Steam runs
+    (it would overwrite the change) nothing is written; exit status 3 when
+    the shortcut names a branch that no longer exists."""
+    todo, broken = [], False
+    for config_dir in user_config_dirs():
+        path, data = load_shortcuts(config_dir)
+        _, sc = find_ours(data)
+        branch = sc is not None and pinned_branch(sc)
+        if branch:
+            broken = broken or branch != CURRENT_BRANCH
+            unpin_branch(sc)
+            todo.append((path, data))
+    if not todo:
+        return
+    if steam_running():
+        if broken:
+            print("The Steam shortcut names an old Flatpak branch; close Steam to repair it.")
+            sys.exit(3)
+        return
+    for path, data in todo:
+        save_shortcuts(path, data)
+        print("Repaired the shortcut in", path)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["add", "artwork", "remove", "status"])
+    parser.add_argument("command", choices=["add", "artwork", "remove", "repair", "status"])
     args = parser.parse_args()
-    {"add": cmd_add, "artwork": cmd_artwork, "remove": cmd_remove, "status": cmd_status}[args.command](args)
+    {"add": cmd_add, "artwork": cmd_artwork, "remove": cmd_remove, "repair": cmd_repair,
+     "status": cmd_status}[args.command](args)
 
 
 if __name__ == "__main__":
