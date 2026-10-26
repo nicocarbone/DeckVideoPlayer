@@ -5,7 +5,10 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## Unreleased
+## v0.4.0 (2026-10-25)
+
+Better sound: night mode and fuller headphone surround. Plex skips intros
+and credits.
 
 ### New
 

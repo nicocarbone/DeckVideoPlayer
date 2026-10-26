@@ -65,21 +65,21 @@ stopping, recently played videos on the start screen (D42).
 The screen no longer dims and the Deck no longer sleeps while a video
 plays: a screensaver inhibition, held only while playing (D43).
 
-## v0.4.0 (in progress)
+## v0.4.0: night mode, skip intro/credits, better headphone surround
 
-| Feature | Status | Notes |
-|---|---|---|
-| **Night mode** | Done | Compressor + limiter, audio menu (Y), any output (D46). |
-| **Skip intro / credits (Plex)** | Done | R2 prompt from Plex's markers; `skip_intro = auto` (D47). |
-| **Headphone surround tone and level** | Done | Diffuse-field equalized HRTF (fuller bass, no 2.5 kHz peak), dialogue as loud as without it, LFE included (D48). |
-| **Next episode from *Continue watching*** | To do | Finishing an episode started there should offer the next one. |
+Night mode for any output (D46), R2 to skip intros and credits or go to
+the next episode on Plex (D47), headphone surround with a diffuse-field
+equalized HRTF and dialogue-matched level (D48), sixth audit (D49).
 
 ## Next, in this order
 
-1. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
+1. **Next episode from *Continue watching*** (Plex): finishing an episode
+   started there should offer the next one (today *Continue watching*
+   plays one item at a time).
+2. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
    and the asynchronous listing in the browser). A whole new source to
    maintain.
-2. **SMB/NFS network shares**: many people keep video on a NAS. Needs
+3. **SMB/NFS network shares**: many people keep video on a NAS. Needs
    mounting or a userspace client: FFmpeg reads `smb://` only when built
    with libsmbclient (GPLv3, which would move the bundle to GPLv3), or the
    share has to be mounted outside the sandbox.

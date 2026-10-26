@@ -64,7 +64,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-25, v0.3.6)
+## Current state (2026-10-25, v0.4.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -114,11 +114,13 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   default in `headless-run.sh` (never change the owner's watch history
   without `PLEX_WRITE=1`). Never let the account token reach mpv (logs):
   playback uses a transient token.
-- v0.4.0 in progress: night mode (D46, `dvp/nightmode.lua`), skip intro /
-  credits from Plex markers (D47, `dvp/markers.lua`, R2), headphone
-  surround with a diffuse-field equalized HRTF and dialogue-matched level
-  (D48); sixth audit (ISSUES.md Part VI) fixed in D49. Still to do: next episode from *Continue watching*.
-- Planned: see `docs/ROADMAP.md`. Next, in order: Jellyfin, SMB/NFS;
+- v0.4.0 (2026-10-25): night mode (D46, `dvp/nightmode.lua`), skip intro /
+  credits from Plex markers (D47, `dvp/markers.lua`, R2; *Next episode*
+  verified read-only), headphone surround with a diffuse-field equalized
+  HRTF and dialogue-matched level (D48, liked by the owner on a Deck);
+  sixth audit (ISSUES.md Part VI) fixed in D49.
+- Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
+  *Continue watching*, Jellyfin, SMB/NFS;
   Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only

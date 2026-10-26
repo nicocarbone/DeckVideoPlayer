@@ -27,6 +27,7 @@
       <li>Subtitle downloads from OpenSubtitles.com (free personal API key)</li>
       <li>Plex Media Server streaming with progress sync (sign in with a QR code)</li>
       <li>Recently played list, black-bar cropping, screen kept awake while playing</li>
+      <li>Night mode, and intro/credits skipping for Plex</li>
     </ul>
   </description>
   <screenshots>
@@ -54,6 +55,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.4.0" date="2026-10-25">
+      <description>
+        <p>Better sound, and intro and credits skipping for Plex.</p>
+        <ul>
+          <li>Night mode: evens out loud and quiet passages on speakers, headphones and TVs</li>
+          <li>Skip intro, skip credits and next episode with R2 on Plex videos that have markers</li>
+          <li>Headphone surround sounds fuller and as loud as normal playback, with the subwoofer channel</li>
+          <li>Holding L2 or R2 no longer skips several chapters</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.6" date="2026-10-25">
       <description>
         <p>Fixes from a code audit.</p>
