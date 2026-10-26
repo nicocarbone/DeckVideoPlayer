@@ -28,6 +28,7 @@
       <li>Plex Media Server streaming with progress sync (sign in with a QR code)</li>
       <li>Recently played list, black-bar cropping, screen kept awake while playing</li>
       <li>Night mode, and intro/credits skipping for Plex</li>
+      <li>Video info for every file, and HDR settings (HDR off, tone mapping, SDR to HDR)</li>
     </ul>
   </description>
   <screenshots>
@@ -55,6 +56,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.4.1" date="2026-10-26">
+      <description>
+        <p>Video info, HDR settings, and Plex in Recently played.</p>
+        <ul>
+          <li>Video info in the library: codec, bitrate, HDR type, audio and subtitle tracks, location</li>
+          <li>Video menu with picture, refresh rate and HDR settings: HDR off, who tone-maps HDR, SDR to HDR</li>
+          <li>Plex videos in Recently played, and Remove from Continue watching</li>
+          <li>Picture mode no longer gets stuck after "No black bars found"</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-10-25">
       <description>
         <p>Better sound, and intro and credits skipping for Plex.</p>

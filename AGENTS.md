@@ -66,7 +66,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-25, v0.4.0)
+## Current state (2026-10-26, v0.4.1)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -121,7 +121,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   verified read-only), headphone surround with a diffuse-field equalized
   HRTF and dialogue-matched level (D48, liked by the owner on a Deck);
   sixth audit (ISSUES.md Part VI) fixed in D49.
-- v0.4.1 work (D50, unreleased): Video info in the library (View),
+- v0.4.1 (2026-10-26, D50): Video info in the library (View),
   Plex videos in *Recently played*, *Remove from Continue watching*,
   Picture-mode fix after "No black bars found". HDR test build (D51)
   judged a matter of taste by the owner, so the choices ship as settings

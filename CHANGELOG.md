@@ -5,7 +5,10 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## v0.4.1 (unreleased)
+## v0.4.1 (2026-10-26)
+
+Video info in the library, a Video menu with HDR settings, and Plex
+videos in *Recently played*.
 
 ### New
 
