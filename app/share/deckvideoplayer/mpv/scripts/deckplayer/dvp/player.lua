@@ -10,16 +10,19 @@ local media = require "dvp.media"
 local library = require "dvp.library"
 local Menu = require "dvp.menu"
 local cropdetect = require "dvp.cropdetect"
+local Markers = require "dvp.markers"
 
 local M = {}
 M.__index = M
 
--- ctx: cfg, menu, display, surround, subtitles, stop(), quit(), toast(text)
+-- ctx: cfg, menu, display, surround, night, subtitles, stop(), quit(), toast(text),
+-- finished() (the current file counts as watched when it ends)
 function M.new(ctx)
     local self = setmetatable({}, M)
     self.ctx = ctx
     self.cfg = ctx.cfg
     self.layer = ui.layer(10)
+    self.marker_layer = ui.layer(15)
     self.info_layer = ui.layer(20)
     self.overlay_visible = false
     self.info_visible = false
@@ -40,6 +43,15 @@ function M.new(ctx)
     self.timer = mp.add_periodic_timer(0.5, function() self:tick() end)
     self.timer:kill()
     self.hide_timer = nil
+    -- Intro / credits markers of the current file (D47): checked once a
+    -- second while it plays, and right after every seek.
+    self.markers = {}
+    self.marker_timer = mp.add_periodic_timer(1, function() self:check_marker() end)
+    self.marker_timer:kill()
+    mp.register_event("playback-restart", function()
+        self:update_marker_timer()   -- stopped by skip_marker()
+        self:check_marker()
+    end)
     return self
 end
 
@@ -66,6 +78,8 @@ end
 function M:on_file_loaded()
     self.video_track = media.selected_track("video")
     self:render()
+    self:update_marker_timer()
+    self:check_marker()
 end
 
 function M:stop_screen()
@@ -73,6 +87,7 @@ function M:stop_screen()
     self.overlay_visible = false
     self.info_visible = false
     if self.stats_visible then self:toggle_stats() end   -- not over the library
+    self:set_markers({})
     self.layer:clear()
     self.info_layer:clear()
     self.timer:kill()
@@ -112,6 +127,7 @@ function M:show_overlay(sticky_seconds)
     end)
     self:render()
     self:update_timer()
+    if self.marker then self:render_marker() end   -- moves above the controls
 end
 
 function M:hide_overlay()
@@ -119,12 +135,105 @@ function M:hide_overlay()
     if self.hide_timer then self.hide_timer:kill() end
     self.layer:clear()
     self:update_timer()
+    if self.marker then self:render_marker() end
 end
 
 function M:on_pause_change(paused)
     if not self.active then return end
+    self:update_marker_timer()
     if paused or self.overlay_visible then self:show_overlay() else self:update_timer() end
     if self.info_visible then self:render_info() end   -- e.g. Keep awake stops/starts
+end
+
+---------------------------------------------------------------------------
+-- Intro / credits markers (D47)
+---------------------------------------------------------------------------
+
+-- list: markers of the file being loaded (dvp/markers.lua), or {}.
+function M:set_markers(list)
+    self.markers = list or {}
+    self.marker = nil
+    self.auto_skipped = {}
+    self.marker_layer:clear()
+    self:update_marker_timer()
+end
+
+-- The 1 s check runs only while a file with markers plays.
+function M:update_marker_timer()
+    if self.active and #self.markers > 0 and not mp.get_property_native("pause") then
+        self.marker_timer:resume()
+    else
+        self.marker_timer:kill()
+    end
+end
+
+function M:marker_wanted(mk)
+    local pb = self.cfg.playback
+    if not mk then return nil end
+    if mk.kind == "intro" and pb.skip_intro == "off" then return nil end
+    if mk.kind == "credits" and pb.skip_credits == "off" then return nil end
+    return mk
+end
+
+-- Returns true if it skipped an intro by itself (skip_intro = auto).
+function M:check_marker()
+    if not self.active or #self.markers == 0 then return false end
+    local mk = self:marker_wanted(Markers.at(self.markers, mp.get_property_number("time-pos")))
+    if mk == self.marker then return false end
+    self.marker = mk
+    if mk and mk.kind == "intro" and self.cfg.playback.skip_intro == "auto" and not self.auto_skipped[mk] then
+        self.auto_skipped[mk] = true   -- once: seeking back into it shows the prompt
+        self:skip_marker()
+        return true
+    end
+    self:render_marker()
+    return false
+end
+
+function M:marker_action()
+    local count = mp.get_property_number("playlist-count", 1)
+    local has_next = mp.get_property_number("playlist-pos", 0) + 1 < count
+    local item = self.ctx.plex and self.ctx.plex:item_for(mp.get_property("path"))
+    return Markers.action(self.marker, has_next, item and item.kind == "episode")
+end
+
+function M:skip_marker()
+    if not self.marker then return end
+    local a = self:marker_action()
+    self.marker = nil
+    self.marker_layer:clear()
+    -- No checks until the seek lands (playback-restart restarts the timer),
+    -- so the prompt can't come back from a stale position.
+    self.marker_timer:kill()
+    if a.next then
+        -- Skipping the closing credits finishes this episode (watched).
+        self.ctx.finished()
+        self:set_markers({})
+        mp.commandv("playlist-next")
+    else
+        mp.commandv("seek", tostring(a.target), "absolute+exact")
+    end
+    self.ctx.toast(a.done)
+end
+
+-- "R2 Skip intro" at the bottom right, above the controls when they show.
+function M:render_marker()
+    if not (self.active and self.marker) then
+        self.marker_layer:clear()
+        return
+    end
+    local t = ui.theme
+    local W, H = ui.size()
+    local hints = {{"R2", self:marker_action().label}}
+    local o = {size = 30}
+    local w = ui.hints_width(hints, o)
+    local pad, h = 22, 58
+    local right = W - 44
+    local cy = self.overlay_visible and H - 170 or H - 80
+    local a = ui.ass()
+    a:rect(right - w - 2 * pad, cy - h / 2, w + 2 * pad, h, {radius = h / 2, color = t.panel, opacity = 0.92})
+    a:hints(hints, right - pad, cy, o)
+    self.marker_layer:set(a:build())
 end
 
 ---------------------------------------------------------------------------
@@ -208,7 +317,10 @@ function M:handle(action)
     elseif action == "lt" then
         self:chapter(-1)
     elseif action == "rt" then
-        self:chapter(1)
+        -- Inside an intro or credits marker R2 skips it, else next chapter.
+        -- Checked now: the 1 s timer may not have seen the marker yet.
+        if self:check_marker() then return end
+        if self.marker then self:skip_marker() else self:chapter(1) end
     elseif action == "up" then
         self:change_volume(5)
     elseif action == "down" then
@@ -240,9 +352,19 @@ function M:audio_items()
         }
     end
     if #items == 0 then items[1] = {label = "No audio tracks", disabled = true} end
-    local surround = self.ctx.surround
+    local surround, night = self.ctx.surround, self.ctx.night
+    if surround.available or night.available then items[#items + 1] = {separator = true} end
+    if night.available then
+        items[#items + 1] = {
+            label = "Night mode",
+            value = function() return night.enabled and "On" or "Off" end,
+            adjust = function()
+                self.ctx.toast(night:toggle() and "Night mode on: quieter loud scenes, clearer dialogue"
+                               or "Night mode off")
+            end,
+        }
+    end
     if surround.available then
-        items[#items + 1] = {separator = true}
         items[#items + 1] = {
             label = "Headphone surround",
             value = function() return surround.enabled and "On" or "Off" end,
@@ -623,7 +745,10 @@ function M:info_lines()
     if at then add("Audio", media.track_label(at) .. " · " .. media.track_detail(at)) end
     add("Stream", self.ctx.plex and self.ctx.plex:describe(mp.get_property("path")))
     local ao = mp.get_property("current-ao")
-    if ao then add("Audio out", ao .. (self.ctx.surround.active and " · headphone surround" or "")) end
+    if ao then
+        add("Audio out", ao .. (self.ctx.night.active and " · night mode" or "")
+            .. (self.ctx.surround.active and " · headphone surround" or ""))
+    end
     for _, l in ipairs(self.ctx.keepawake:info_lines()) do add(l[1], l[2]) end
     local drop = mp.get_property_number("frame-drop-count", 0)
     local vo_drop = mp.get_property_number("vo-delayed-frame-count", 0)

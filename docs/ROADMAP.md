@@ -27,7 +27,7 @@ artwork.
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Headphone surround** | Released; on-device listening test pending (checklist 11) | 5.1/7.1 soundtracks rendered binaurally (FFmpeg `sofalizer` + MIT KEMAR HRTF). Toggle in the audio menu (Y) or `headphone_surround` in `config.ini`. Stereo sources unchanged. D27. |
+| **Headphone surround** | Released; on-device listening test pending (checklist 11) | 5.1/7.1 soundtracks rendered binaurally (FFmpeg `sofalizer` + MIT KEMAR HRTF, diffuse-field equalized in v0.4, D48). Toggle in the audio menu (Y) or `headphone_surround` in `config.ini`. Stereo sources unchanged. D27. |
 | **Online subtitles** | Released; live search verified with a real key, on-device download pending (checklist 12) | "Download subtitles…" in the subtitle menu (X). Searches OpenSubtitles.com by file hash and by name, downloads into the app's data folder, reloads on later plays. Each user sets their own free `[opensubtitles] api_key` (no built-in key, D29); optional account for more downloads. D28–D29. |
 
 Also in 0.2.0, from testing on a Deck OLED: refresh-rate matching through
@@ -65,20 +65,21 @@ stopping, recently played videos on the start screen (D42).
 The screen no longer dims and the Deck no longer sleeps while a video
 plays: a screensaver inhibition, held only while playing (D43).
 
+## v0.4.0 (in progress)
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Night mode** | Done | Compressor + limiter, audio menu (Y), any output (D46). |
+| **Skip intro / credits (Plex)** | Done | R2 prompt from Plex's markers; `skip_intro = auto` (D47). |
+| **Headphone surround tone and level** | Done | Diffuse-field equalized HRTF (fuller bass, no 2.5 kHz peak), dialogue as loud as without it, LFE included (D48). |
+| **Next episode from *Continue watching*** | To do | Finishing an episode started there should offer the next one. |
+
 ## Next, in this order
 
-1. **Night mode (volume leveling)**: compress the dynamic range so
-   dialogue is audible on the Deck's speakers and loud scenes don't blast.
-   An audio filter (FFmpeg `dynaudnorm`/`acompressor`, already in the
-   build) behind a toggle in the audio menu (Y) and a `config.ini` default.
-   Small.
-2. **Plex niceties**: a *Skip intro* button from the intro (and credits)
-   markers Plex already detects; the next episode in *Continue watching*
-   after finishing one. Uses data the Plex API already returns.
-3. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
+1. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
    and the asynchronous listing in the browser). A whole new source to
    maintain.
-4. **SMB/NFS network shares**: many people keep video on a NAS. Needs
+2. **SMB/NFS network shares**: many people keep video on a NAS. Needs
    mounting or a userspace client: FFmpeg reads `smb://` only when built
    with libsmbclient (GPLv3, which would move the bundle to GPLv3), or the
    share has to be mounted outside the sandbox.

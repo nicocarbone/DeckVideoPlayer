@@ -20,7 +20,7 @@ non-trivial.
 | Folder listing, sources, sorting | `…/dvp/library.lua` |
 | Plex (sign-in, servers, browse, playback, progress) | `…/dvp/plex.lua`, Plex parts of `…/dvp/browser.lua` and `…/main.lua`, `tools/plex-dev-account.py` |
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
-| Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` |
+| Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
 | Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
 | Flatpak build | `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`, `scripts/build-flatpak.sh` |
@@ -114,9 +114,12 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   default in `headless-run.sh` (never change the owner's watch history
   without `PLEX_WRITE=1`). Never let the account token reach mpv (logs):
   playback uses a transient token.
-- Planned: see `docs/ROADMAP.md`. Next, in order: night mode, Plex
-  niceties (skip intro, next episode), Jellyfin, SMB/NFS; Flathub
-  publication floating.
+- v0.4.0 in progress: night mode (D46, `dvp/nightmode.lua`), skip intro /
+  credits from Plex markers (D47, `dvp/markers.lua`, R2), headphone
+  surround with a diffuse-field equalized HRTF and dialogue-matched level
+  (D48); sixth audit (ISSUES.md Part VI) fixed in D49. Still to do: next episode from *Continue watching*.
+- Planned: see `docs/ROADMAP.md`. Next, in order: Jellyfin, SMB/NFS;
+  Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

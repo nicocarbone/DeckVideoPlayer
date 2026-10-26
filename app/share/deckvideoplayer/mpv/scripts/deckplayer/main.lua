@@ -23,6 +23,7 @@ local Menu = require "dvp.menu"
 local Browser = require "dvp.browser"
 local Player = require "dvp.player"
 local Surround = require "dvp.surround"
+local NightMode = require "dvp.nightmode"
 local KeepAwake = require "dvp.keepawake"
 local SubDownload = require "dvp.subdownload"
 local About = require "dvp.about"
@@ -93,7 +94,8 @@ apply_playback_options()
 -- The app's share directory (…/share/deckvideoplayer) is three levels above
 -- this script (mpv/scripts/deckplayer).
 local app_dir = script_dir and util.dirname(util.dirname(util.dirname(script_dir)))
-local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna.sofa"))
+local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna_dfeq.sofa"))
+local night = NightMode.new(cfg)
 
 local resume = Resume.new(opts.data_dir)
 local keepawake = KeepAwake.new(cfg, opts.data_dir)
@@ -107,6 +109,7 @@ local state = {
     from_ui = false,      -- set once the library has started any playback
     external = false,     -- launched with files (CLI / "Open with"): quit when done
     resumed_at = nil,     -- position restored automatically, announced on load
+    finished_path = nil,  -- file the user finished early (R2 Next episode)
 }
 
 local toast_layer = ui.layer(60)
@@ -143,6 +146,8 @@ local function save_progress(ending)
     local pos = mp.get_property_number("time-pos")
     if not pos then return end
     local duration = mp.get_property_number("duration")
+    -- Skipped the closing credits to the next episode: as if it had ended.
+    if ending and state.finished_path == path and duration then pos = duration end
     local item = plex:item_for(path)
     if item then
         if ending then
@@ -213,7 +218,7 @@ local function help()
             row("A", "Play / pause"),
             row("D-pad ← →", string.format("Seek −%ds / +%ds", cfg.playback.seek_short, cfg.playback.seek_short)),
             row("L1 / R1", string.format("Seek −%ds / +%ds", cfg.playback.seek_long, cfg.playback.seek_long)),
-            row("L2 / R2", "Previous / next chapter"),
+            row("L2 / R2", "Previous / next chapter (R2 skips an intro or credits)"),
             row("D-pad ↑ ↓", "Volume"),
             row("X / Y", "Subtitles / audio"),
             row("View", "Playback info"),
@@ -227,8 +232,9 @@ end
 local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
-    help = help, toast = toast, surround = surround, keepawake = keepawake,
+    help = help, toast = toast, surround = surround, night = night, keepawake = keepawake,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex,
+    finished = function() state.finished_path = state.current_path end,
 }
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
@@ -268,6 +274,8 @@ end)
 -- file is opened.
 mp.add_hook("on_load", 50, function()
     state.resumed_at = nil   -- may be left over from a file that failed to open
+    state.finished_path = nil
+    player:set_markers({})   -- the previous file's, while this one is prepared
     local path = mp.get_property("path")
     state.loading_path = path  -- known even if the file then fails to open
     if not path then return end
@@ -301,6 +309,7 @@ mp.add_hook("on_load", 50, function()
         end
         mp.set_property("file-local-options/force-media-title", item.title or "")
         state.plex_subs = prep.subs
+        player:set_markers(prep.markers)
         if start == nil and cfg.playback.resume and prep.pos
             and not Resume.is_finished(prep.pos, (item.duration or 0) / 1000) then
             start = prep.pos
@@ -357,12 +366,13 @@ mp.register_event("file-loaded", function()
     state.last_played = state.current_path
     local fps = mp.get_property_number("container-fps")
     display:match(fps, function() player:render() end)
-    player:on_file_loaded()
     keepawake:set_playing(not mp.get_property_native("pause"))
     if state.resumed_at then
         toast("Resumed at " .. util.format_time(state.resumed_at))
         state.resumed_at = nil
     end
+    -- After the toast above: "Skipped intro" (skip_intro = auto) replaces it.
+    player:on_file_loaded()
 end)
 
 mp.register_event("end-file", function(ev)
@@ -419,6 +429,7 @@ end)
 
 mp.observe_property("osd-dimensions", "native", function()
     if state.screen == "browser" then browser:render() else player:render() end
+    player:render_marker()
     player:render_info()
     menu:render()
 end)

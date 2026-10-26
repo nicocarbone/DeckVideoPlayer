@@ -27,16 +27,24 @@ static const char *status_file;
 static char portal_result[96] = "";
 static char screensaver_result[96] = "";
 static volatile sig_atomic_t stop;
+static pid_t parent;
+
+/* Told to stop (or orphaned) while a call was in flight: the app may have
+ * removed the status file already, and a new helper may be using it. */
+static int stopping(void)
+{
+    return stop || getppid() != parent;
+}
 
 static void write_status(void)
 {
-    if (!status_file) return;
+    if (!status_file || stopping()) return;
     char tmp[4096];
     int n = snprintf(tmp, sizeof tmp, "%s.tmp", status_file);
     if (n < 0 || (size_t)n >= sizeof tmp) return;
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "request: portal %s, screensaver %s\n", portal_result, screensaver_result);
+    fprintf(f, "request: screensaver %s, portal %s\n", screensaver_result, portal_result);
     if (fclose(f) == 0) rename(tmp, status_file);
 }
 
@@ -54,6 +62,8 @@ static const char *short_error(const sd_bus_error *e, int r)
             strcmp(e->name, SD_BUS_ERROR_UNKNOWN_INTERFACE) == 0 ||
             strcmp(e->name, SD_BUS_ERROR_UNKNOWN_OBJECT) == 0) return "not supported";
         if (strcmp(e->name, SD_BUS_ERROR_ACCESS_DENIED) == 0) return "access denied";
+        if (strcmp(e->name, SD_BUS_ERROR_TIMEOUT) == 0 ||
+            strcmp(e->name, SD_BUS_ERROR_NO_REPLY) == 0) return "timed out";
         return e->name;
     }
     return strerror(-r);
@@ -78,7 +88,29 @@ static void request_inhibit(sd_bus *bus)
     sd_bus_message *reply = NULL;
     int r;
 
-    /* Portal: subscribe to the predictable request path first. */
+    /* A service being started on demand can be slow: don't wait the D-Bus
+     * default of 25 s per call. */
+    sd_bus_set_method_call_timeout(bus, 5 * 1000000ULL);
+
+    /* The screensaver service first: what SteamOS game mode honours. The
+     * status is written after each call, so the info panel shows it at once. */
+    uint32_t cookie = 0;
+    snprintf(portal_result, sizeof portal_result, "pending");
+    r = sd_bus_call_method(bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver",
+                           "org.freedesktop.ScreenSaver", "Inhibit", &err, &reply,
+                           "ss", "Deck Video Player", "Playing a video");
+    if (r >= 0 && sd_bus_message_read(reply, "u", &cookie) >= 0)
+        snprintf(screensaver_result, sizeof screensaver_result, "accepted");
+    else
+        snprintf(screensaver_result, sizeof screensaver_result, "%s", short_error(&err, r));
+    sd_bus_error_free(&err);
+    sd_bus_message_unref(reply);
+    reply = NULL;
+    write_status();
+    if (stopping()) return;
+
+    /* Portal (desktop sessions): subscribe to the predictable request path
+     * first. */
     const char *unique = NULL;
     char sender[128] = "", path[256];
     if (sd_bus_get_unique_name(bus, &unique) >= 0 && unique && unique[0] == ':') {
@@ -95,20 +127,9 @@ static void request_inhibit(sd_bus *bus)
                            "sua{sv}", "", (uint32_t)(4 | 8), 2,
                            "handle_token", "s", "dvp_keep_awake",
                            "reason", "s", "Playing a video");
-    snprintf(portal_result, sizeof portal_result, "%s", r < 0 ? short_error(&err, r) : "requested");
-    sd_bus_error_free(&err);
-    sd_bus_message_unref(reply);
-    reply = NULL;
-
-    /* The screensaver service directly: what SteamOS game mode honours. */
-    uint32_t cookie = 0;
-    r = sd_bus_call_method(bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver",
-                           "org.freedesktop.ScreenSaver", "Inhibit", &err, &reply,
-                           "ss", "Deck Video Player", "Playing a video");
-    if (r >= 0 && sd_bus_message_read(reply, "u", &cookie) >= 0)
-        snprintf(screensaver_result, sizeof screensaver_result, "accepted");
-    else
-        snprintf(screensaver_result, sizeof screensaver_result, "%s", short_error(&err, r));
+    /* Unless the Response signal already arrived with the outcome. */
+    if (strcmp(portal_result, "pending") == 0)
+        snprintf(portal_result, sizeof portal_result, "%s", r < 0 ? short_error(&err, r) : "requested");
     sd_bus_error_free(&err);
     sd_bus_message_unref(reply);
     write_status();
@@ -126,7 +147,7 @@ int main(int argc, char **argv)
     /* Exit with the app: PDEATHSIG covers a crash; the parent check in the
      * loop covers the window before prctl and subreapers (Flatpak, systemd)
      * that adopt orphans under another PID than 1. */
-    pid_t parent = getppid();
+    parent = getppid();
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     if (getppid() != parent) return 0;
     struct sigaction sa;

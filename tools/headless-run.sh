@@ -15,6 +15,7 @@
 #   TIMEOUT=60         hard time limit in seconds
 #   KEEP=1             keep resume data (.dev/headless/data) from the previous run
 #   SURROUND=1         start with headphone_surround = yes
+#   NIGHT=1            start with night_mode = yes
 #   AWAKE=yes|no       keep_awake setting (default yes)
 #   XWAYLAND2=1        two Xwayland servers, app on the second one (like
 #                      SteamOS game mode, where Steam has the first)
@@ -70,6 +71,9 @@ if [ -n "${RATES:-}" ]; then
 fi
 if [ "${SURROUND:-0}" = 1 ]; then
     sed -i "s|^headphone_surround = .*|headphone_surround = yes|" "$CFG/config/config.ini"
+fi
+if [ "${NIGHT:-0}" = 1 ]; then
+    sed -i "s|^night_mode = .*|night_mode = yes|" "$CFG/config/config.ini"
 fi
 if [ -n "${AWAKE:-}" ]; then
     sed -i "s|^keep_awake = .*|keep_awake = $AWAKE|" "$CFG/config/config.ini"

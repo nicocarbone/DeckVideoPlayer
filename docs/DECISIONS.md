@@ -132,7 +132,7 @@ of deleting them.
 | D-pad ←→ | page | seek ±10 s | |
 | D-pad ↑↓ | move | volume ±5 | Steam Machine controllers have no volume keys |
 | L1/R1 | page | seek ±60 s | |
-| L2/R2 | first/last | chapters (±5 min fallback) | |
+| L2/R2 | first/last | chapters (±5 min fallback); R2 skips an intro/credits marker (D47) | R2 is already "forward"; the prompt names it |
 | View | — | info panel | lets users verify HW decode / HDR / Hz |
 | Menu | menu | playback menu | |
 
@@ -279,6 +279,8 @@ Recorded so they are not re-proposed without new evidence:
   ISSUES.md 2.4.
 
 ## D27. Headphone surround with sofalizer and the MIT KEMAR HRTF (v0.2)
+
+(HRTF equalization and levels revised in D48, v0.4.)
 
 - **Decision:** 5.1/7.1 audio can be rendered binaurally for headphones
   with FFmpeg's `sofalizer` filter (`dvp/surround.lua`). The filter is in
@@ -899,3 +901,133 @@ Each finding was checked against the code; fixed unless noted.
 - **Polish:** the metainfo feature list mentions Plex, recently played,
   black-bar cropping and keeping the screen awake.
 
+## D46. Night mode: compressor + limiter, before everything else
+
+- **What:** *Night mode* in the audio menu (Y), `[playback] night_mode`
+  (off by default): `acompressor` (threshold −30 dBFS, ratio 4:1, attack
+  10 ms, release 300 ms, soft knee, +5 dB make-up, `link=maximum` since
+  D49) then `alimiter`
+  (−1 dBFS, auto-level off), as one labelled `lavfi` graph added with
+  `af pre`.
+- **Why these numbers:** measured with pink noise rendered through mpv:
+  a passage at −43 dBFS RMS comes out 5 dB louder, one at −18 dBFS 8 dB
+  quieter (the 25 dB gap becomes 12 dB); at dialogue-like levels (−32 /
+  −22 dBFS, 5.1) +5 / −1 dB. Loud passages never come out louder than
+  without it, so turning it on doesn't jump the volume. A first try with
+  +10 dB make-up raised everything 10 dB: rejected for that reason.
+- **Any output:** it works per channel, so 5.1 to a TV or receiver (LPCM)
+  keeps its layout; with headphones it runs before headphone surround
+  (`af pre`). Not offered with `audio_passthrough` (compressed audio can't
+  be filtered). Session toggle, like surround.
+- **Alternatives:** `dynaudnorm` (smoother, but seconds of look-ahead and
+  more CPU), `loudnorm` (two-pass/real-time EBU R128, much heavier), a
+  centre-channel boost for 5.1 (only helps 5.1 sources, and only when
+  downmixing).
+
+## D47. Skip intro / credits from Plex markers
+
+- **Data:** Plex detects intros (Plex Pass) and credits on the server and
+  returns them as `Marker` entries when the item is fetched with
+  `includeMarkers=1`; the app already fetches the item in `on_load`
+  (`plex:prepare`), so no extra request. `final` marks the closing
+  credits. Verified on the owner's server: most episodes carry an intro
+  and a credits marker, films a credits marker.
+- **UI:** while a marker plays, a pill at the bottom right says *R2 Skip
+  intro*, *R2 Next episode* (closing credits with a next playlist entry;
+  *Next video* for films) or *R2 Skip credits*; it sits above the
+  controls when they show. R2 was "next chapter", the same direction; A
+  stays pause. Only the closing credits go to the next entry: credits in
+  the middle of a film may be followed by more of it.
+- **Options:** `[playback] skip_intro = ask | auto | off`, `skip_credits =
+  ask | off`. `auto` skips an intro once per file (seeking back into it
+  shows the prompt instead). Credits are never skipped automatically:
+  post-credits scenes exist.
+- **Cost:** a 1 s timer, only while a file with markers plays (not when
+  paused), plus a check after each seek (`playback-restart`).
+- **Local files:** not yet. Chapter names ("Opening", "Ending") could feed
+  the same `dvp/markers.lua`, but they are too inconsistent to act on
+  without the user asking.
+
+
+## D48. Headphone surround: diffuse-field equalized HRTF, dialogue-matched level
+
+Supersedes the HRTF file and gain of D27, after the owner found surround
+quieter and thinner than plain playback on a Deck.
+
+- **Cause (measured):** the MIT KEMAR responses are recorded at the dummy
+  head's eardrum with a small loudspeaker. Averaged over all directions
+  they have the ear canal resonance (+20 dB around 2.5 kHz, relative to
+  200–500 Hz) and the speaker's bass roll-off (−23 dB below 40 Hz).
+  Headphones already produce the ear canal response, so it was applied
+  twice. With pink noise on one channel against mpv's stereo downmix: 5.1
+  dialogue (centre) −6 dB, the same on 7.1 −12 dB, main-channel bass below
+  120 Hz −32 dB.
+- **HRTF:** `hrtf/mit_kemar_normal_pinna_dfeq.sofa`, made by
+  `tools/equalize-hrtf.py` from the original file: every response is
+  filtered with a fit of the inverse diffuse-field average (a low shelf
+  capped at +18 dB and five peaking filters), then rounded to 24-bit steps
+  so it compresses like the 16-bit original (1.8 MB). Only `Data.IR`
+  changes (edited in place with h5py), so libmysofa reads the file as
+  before; a copy with longer responses (1024 taps) was rejected by
+  libmysofa. Result: the average is flat within ±1.5 dB from 80 Hz to
+  12.5 kHz; the differences between directions (the 3D cues) are kept.
+  The 512-tap responses can't hold more bass: −3 dB at 63 Hz, −8 dB at
+  40 Hz (was −12.5 and −21). The LFE channel doesn't go through the HRTF,
+  so the deepest effects aren't affected.
+- **Level:** gain 12.5 dB for 5.1, 3 dB more per extra channel
+  (sofalizer subtracts 3 dB per input channel, so 7.1 is 18.5 dB):
+  centre-channel dialogue measures the same loudness as the downmix
+  (−34.6 LUFS both), so toggling surround doesn't change the volume; with
+  all channels playing it's 1.7 dB louder (surround channels to the side
+  are louder at the near ear, as with real speakers). The filter is
+  replaced when the next file has another channel count. Since D49 the
+  gain is a `volume` filter after sofalizer, followed by a limiter.
+- **LFE:** mpv's stereo downmix drops the LFE channel; sofalizer adds it to
+  both ears. `lfegain = 3` puts it level with the main channels' bass,
+  like FFmpeg's downmix with the LFE included. The cinema calibration
+  (+10 dB) was rejected: that much bass on top of a downmix-level
+  soundtrack would clip loud scenes.
+- **Rejected:** an EQ after sofalizer (simpler, but it boosts the LFE
+  along with the main channels' bass, and sofalizer's `lfegain` can't go
+  low enough to compensate); an extra bass shelf after it (+2 dB on the
+  main channels' bass, +5 dB on the LFE); another HRTF set (SADIE II
+  needs the same equalization and is 36 MB).
+
+## D49. Sixth audit (ISSUES.md Part VI, Gemini, v0.4.0 work) reviewed
+
+All findings checked against the code, FFmpeg 8 and measurements; fixed
+unless noted.
+
+- **1.1 Night mode on 5.1/7.1:** `acompressor` defaults to `link=average`,
+  so dialogue alone in the centre of 5.1 was measured 15 dB too low.
+  Measured: loud centre-only 5.1 came out 4 dB *louder* with night mode;
+  with `link=maximum` it is reduced like stereo (−6.4 dB on the same
+  test). One gain for all channels keeps the balance.
+- **1.2 Surround clipping:** confirmed but smaller than reported: with all
+  six channels near full scale, the old filter peaked at +2.7 dBFS (the
+  plain downmix at +2.2) and sofalizer logged 135 "samples clipped"
+  warnings in 10 s. Now `sofalizer` runs at gain 0, then `volume` and an
+  `alimiter` at −1 dBFS: peaks −1.0 dBFS, no warnings, dialogue loudness
+  unchanged (−34.6 LUFS).
+- **1.3 Night mode at start:** `af pre` while idle only stores the option,
+  so missing filters would have muted the first file. The filter is now
+  added once audio is open, where a failure is reported and rolled back.
+- **2.1 Next episode left the episode unfinished:** R2 on the closing
+  credits now counts the episode as ended (`ctx.finished()`; the final
+  report uses the duration as position), so Plex and `resume.json` mark
+  it watched.
+- **2.2 R2:** the triggers no longer auto-repeat (holding R2 on *Skip
+  intro* went on to the next chapter); R2 checks the marker at the
+  current position instead of the last 1 s check; the marker timer stops
+  during a skip and restarts on `playback-restart`. The reported prompt
+  flashing during an exact seek doesn't happen (mpv reports the seek
+  target as `time-pos` while seeking), but stopping the timer is cheap.
+- **2.3:** markers are cleared at the start of `on_load` (the previous
+  file's prompt could stay up while a Plex item is prepared); the marker
+  prompt is redrawn on resize; "Resumed at …" is shown before the
+  automatic intro skip, so "Skipped intro" replaces it. Declined: moving
+  the start position past an intro at 0:00 in `on_load`; the extra seek
+  happens before the first frame and costs one range request.
+- **3.1 Keep-awake helper:** after SIGTERM it no longer writes the status
+  file (which the app had removed and a new helper may be using) or makes
+  the second D-Bus call.

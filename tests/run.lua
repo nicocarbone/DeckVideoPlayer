@@ -202,8 +202,43 @@ eq("lang pt-br", media.language("pt-br"), "Portuguese (Brazil)")
 -- surround -----------------------------------------------------------------
 eq("lavfi escape", Surround.escape_lavfi("/a b:c,[d]'e\\f"), "/a b\\\\:c\\,\\[d\\]\\\\\\'e\\\\\\\\f")
 local fstr = Surround.filter_string("/x/h.sofa", 6)
-local graph = "sofalizer=sofa=/x/h.sofa:gain=6:type=freq"
+local graph = "sofalizer=sofa=/x/h.sofa:gain=0:lfegain=3:type=freq,volume=12.5dB,"
+    .. "alimiter=limit=0.891:attack=5:release=50:level=0"
 eq("surround filter", fstr, "@dvp-surround:lavfi=graph=%" .. #graph .. "%" .. graph)
+-- sofalizer takes 3 dB per input channel: same dialogue level for any layout
+eq("surround gain 7.1", Surround.gain(8), 18.5)
+eq("surround gain 4.0", Surround.gain(4), 6.5)
+
+-- intro / credits markers (D47) --------------------------------------------------
+local Markers = require "dvp.markers"
+local mks = Markers.from_plex({Marker = {
+    {type = "credits", startTimeOffset = 2580000, endTimeOffset = 2645000, final = true},
+    {type = "intro", startTimeOffset = 499000, endTimeOffset = 559000},
+    {type = "commercial", startTimeOffset = 1000000, endTimeOffset = 1060000},
+    {type = "intro", startTimeOffset = 10000, endTimeOffset = 10500},   -- too short
+}})
+eq("markers kept", #mks, 2)
+eq("markers sorted", mks[1].kind .. " " .. mks[2].kind, "intro credits")
+eq("marker seconds", mks[1].start .. "-" .. mks[1].stop, "499-559")
+eq("no markers", #Markers.from_plex({}), 0)
+eq("at intro", Markers.at(mks, 500), mks[1])
+eq("before intro", Markers.at(mks, 498.9), nil)
+eq("intro last second", Markers.at(mks, 558.5), nil)
+eq("at credits", Markers.at(mks, 2600), mks[2])
+eq("skip intro", Markers.action(mks[1], true, true).target, 559)
+eq("next episode", Markers.action(mks[2], true, true).label, "Next episode")
+eq("next video", Markers.action(mks[2], true, false).label, "Next video")
+eq("credits at the end", Markers.action(mks[2], false, true).label, "Skip credits")
+eq("mid-film credits", Markers.action({kind = "credits", start = 10, stop = 20, final = false}, true, true).label,
+    "Skip credits")
+
+-- night mode (D46) ---------------------------------------------------------------
+local NightMode = require "dvp.nightmode"
+eq("night filter", NightMode.filter_string("acompressor"), "@dvp-night:lavfi=graph=%11%acompressor")
+check("night graph", NightMode.GRAPH:match("^acompressor=.*,alimiter=.*level=0$") ~= nil)
+-- the detector follows the loudest channel, or centre-only dialogue in 5.1
+-- would be measured 15 dB low (ISSUES.md Part VI 1.1)
+check("night link max", NightMode.GRAPH:match("acompressor=[^,]*link=maximum") ~= nil)
 
 -- opensubtitles ---------------------------------------------------------------
 local function bytes(n, f)
@@ -446,8 +481,8 @@ check("qr encodes sign-in url", qok and #qm == 45, tostring(qok and #qm))
 -- keep awake (D43) -------------------------------------------------------------
 local KeepAwake = require "dvp.keepawake"
 eq("awake args", table.concat(KeepAwake.args("/s"), " "), "dvp-keep-awake --status /s")
-local ks = KeepAwake.parse_status("request: portal not supported, screensaver accepted\n")
-eq("awake status", ks.request, "portal not supported, screensaver accepted")
+local ks = KeepAwake.parse_status("request: screensaver accepted, portal not supported\n")
+eq("awake status", ks.request, "screensaver accepted, portal not supported")
 eq("awake status empty", next(KeepAwake.parse_status(nil)), nil)
 
 local cropdetect = require "dvp.cropdetect"

@@ -122,6 +122,17 @@ See the controls table in the [README](../README.md#controls). Notes:
   playback ends or you stop it (B with the controls hidden).
 - Inserted an SD card or USB drive while the app was open? It appears when
   you return to the library, or use *Menu → Reload library*.
+- **Night mode** (audio menu, Y): evens out loud and quiet passages, so
+  dialogue stays clear at low volume and explosions don't jump out. Works
+  on the Deck's speakers, headphones and TVs (5.1 keeps its channels).
+  The info panel shows `Audio out: … · night mode`. `night_mode = yes` in
+  `config.ini` starts with it on.
+- **Skip intro / credits (Plex):** while an intro or the end credits play,
+  *R2 Skip intro* or *R2 Next episode* appears at the bottom right; R2
+  does it. `skip_intro = auto` skips intros by themselves; `off` hides the
+  prompts (`skip_credits = off` for the credits). Plex detects intros on
+  the server (a Plex Pass feature) and credits; without markers nothing
+  appears.
 - **Headphone surround** (audio menu, Y): with headphones, 5.1 and 7.1
   soundtracks sound around you instead of being folded into plain stereo.
   Stereo videos are not changed. The info panel shows

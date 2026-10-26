@@ -34,6 +34,9 @@ in `dvp/config.lua`.
 | `audio_passthrough` | csv | empty | mpv `audio-spdif`, e.g. `ac3,eac3,dts-hd,truehd` for AV receivers. |
 | `hwdec` | string | `auto` | `auto` = `vaapi,vulkan,auto-safe`; `no`; or any mpv `--hwdec` value. |
 | `headphone_surround` | bool | `no` | Start with headphone surround on: 5.1/7.1 audio rendered binaurally for headphones (D27). Stereo sources are unchanged. Also toggled in the audio menu (Y). Ignored when `audio_passthrough` is set. |
+| `night_mode` | bool | `no` | Start with night mode on: a compressor and limiter even out loud and quiet passages (+5 dB for quiet ones, up to −8 dB for loud ones), for low volume or the Deck's speakers; any channel layout (D46). Also toggled in the audio menu (Y). Ignored when `audio_passthrough` is set. |
+| `skip_intro` | `ask` \| `auto` \| `off` | `ask` | Intro markers (Plex): show *R2 Skip intro* while an intro plays, skip it by itself, or nothing (D47). |
+| `skip_credits` | `ask` \| `off` | `ask` | Credits markers (Plex): show *R2 Next episode* / *Skip credits* during the credits, or nothing. |
 
 ## `[display]`
 

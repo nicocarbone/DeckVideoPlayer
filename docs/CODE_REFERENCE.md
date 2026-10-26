@@ -305,7 +305,7 @@ when not under gamescope. Built by `helper/build.sh OUTDIR` (wayland-scanner
 (what SteamOS game mode honours) and `org.freedesktop.portal.Inhibit.Inhibit`
 (flags idle + suspend; `handle_token` so the `Response` signal can be
 watched) over sd-bus, then waits: both inhibitions last while the process
-stays connected. Writes `request: portal …, screensaver …` to FILE
+stays connected. Writes `request: screensaver …, portal …` to FILE after each call (5 s call timeout; screensaver first, it is what SteamOS honours)
 (`accepted` / `requested` / `refused (n)` / `not running` / `not
 supported`). Exits on SIGTERM (handler without `SA_RESTART`; closing the
 bus drops the inhibitions), when its parent dies (`PR_SET_PDEATHSIG`, plus a
@@ -425,7 +425,8 @@ the server answered, D45), `list(loc, cb)` (loc = `{machine, key,
 kind}`; kinds `root`, `ondeck`, `items`, `shows`, `seasons`, `episodes`),
 `item_for(path)`, `describe(path)` (info panel), `fetch_range(path, from,
 to, file, cb)` (capped at the range size, needs HTTP 206), `prepare(item)` (blocking: resume point +
-external subtitles; `ok` false without metadata, `unreachable` when there
+external subtitles + `markers` (requested with `includeMarkers=1`, D47);
+`ok` false without metadata, `unreachable` when there
 is no connection or no answer: main.lua then clears the playlist and makes
 the file fail at once via `stream-open-filename`, D45),
 `media_token(item)` / `header_fields(item)` (transient token for mpv;
@@ -446,19 +447,45 @@ Constants: `REPO`, `LICENSE`, `DEVELOPER`, `COPYRIGHT`.
 [luaqrcode](https://github.com/speedata/luaqrcode), BSD-3-Clause, unchanged
 (D38). `qrcode(text)` → `ok, matrix` (`matrix[x][y] > 0` = dark).
 
+## `dvp/nightmode.lua`: night mode (D46)
+
+`GRAPH` (acompressor −30 dBFS, 4:1, +5 dB make-up, detector on the loudest
+channel; alimiter −1 dBFS), `filter_string(graph)`
+(`@dvp-night:lavfi=graph=%n%…`), `new(cfg)` (`available` unless
+`audio_passthrough`; `enabled` at start with `night_mode`), `set(on)`,
+`toggle()`. The filter is added with `af pre` (before surround and the
+downmix) once audio is open (`audio-params/channel-count` observer), so a
+missing filter turns the feature unavailable instead of muting the file.
+`enabled` / `active` for the menu and the info panel.
+
+## `dvp/markers.lua`: intro / credits markers (D47)
+
+Pure. `from_plex(md)` (Plex `Marker` list, ms → `{kind, start, stop,
+final}`, intros and credits ≥ 2 s, sorted), `at(list, pos)` (marker
+playing at `pos`, not in its last second), `action(mk, has_next, episode)`
+(`{label, target | next, done}`: intro → seek to its end; final credits
+with a next playlist entry → next episode/video; other credits → seek to
+their end).
+
 ## `dvp/surround.lua`: headphone surround
 
 D27. `Surround.new(cfg, sofa_path)`; fields `available` (HRTF file exists,
 no passthrough, filter works), `enabled` (user choice), `active` (filter
-currently in the chain), `channels` (decoder output channels).
+currently in the chain: the channel count it was added for, or false),
+`channels` (decoder output channels).
 
 - Observes `audio-params/channel-count`; `update()` adds the filter
-  (`af add`, label `@dvp-surround`) when `enabled` and channels > 2, and
-  removes it otherwise. A failed `af add` makes the feature unavailable.
+  (`af add`, label `@dvp-surround`) when `enabled` and channels > 2,
+  replaces it when the channel count changes, and removes it otherwise. A failed `af add` makes the feature unavailable.
 - `toggle()` → new `enabled` state.
 - Pure: `escape_lavfi(value)` (two-level FFmpeg escaping),
-  `filter_string(sofa_path, gain)` (the `af add` argument, `%len%`-quoted),
-  `GAIN = 6` (level match with mpv's downmix).
+  `filter_string(sofa_path, channels)` (the `af add` argument,
+  `%len%`-quoted: `sofalizer` at gain 0, then `volume` and `LIMITER`),
+  `gain(channels)` (`GAIN_51 = 12.5` dB plus 3 dB per channel above six:
+  dialogue level matches mpv's downmix, D48), `LFE_GAIN = 3`, `LIMITER`
+  (alimiter −1 dBFS, D49).
+- HRTF: `hrtf/mit_kemar_normal_pinna_dfeq.sofa`, made from the MIT file by
+  `tools/equalize-hrtf.py` (D48).
 
 ## `dvp/opensubtitles.lua`: OpenSubtitles API client
 

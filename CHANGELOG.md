@@ -5,6 +5,30 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Unreleased
+
+### New
+
+- **Night mode** (audio menu, Y): evens out loud and quiet passages, so
+  dialogue stays clear at low volume and explosions don't jump out. Works
+  on the Deck's speakers, headphones and TVs; `night_mode = yes` in
+  `config.ini` turns it on at start.
+- **Skip intro and credits on Plex:** while an intro or the end credits
+  play, *R2 Skip intro* / *R2 Next episode* appears; press R2.
+  `skip_intro = auto` skips intros by themselves. Uses the markers your
+  Plex server detects (intros need Plex Pass).
+
+### Fixed
+
+- **Headphone surround sounds fuller and as loud as normal playback.** It
+  was quieter (by 6 dB on 5.1 and 12 dB on 7.1) and thin: the dummy-head
+  data emphasized the upper mids and lacked bass. Voices and music now
+  keep their natural tone with the same 3D placement, and the
+  subwoofer (LFE) channel is included. Very loud scenes no longer clip.
+- The keep-awake status in the info panel appears right away even when a
+  system service is slow to answer.
+- Holding L2 or R2 during playback no longer skips several chapters.
+
 ## v0.3.6 (2026-10-25)
 
 Fixes from a fifth code audit: Plex auto-play, black-bar cropping,

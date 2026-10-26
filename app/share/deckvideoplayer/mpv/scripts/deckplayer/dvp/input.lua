@@ -29,7 +29,8 @@ M.KEYS = {
 -- Actions that fire repeatedly while the button is held.
 local REPEATABLE = {
     up = true, down = true, left = true, right = true,
-    lb = true, rb = true, lt = true, rt = true,
+    lb = true, rb = true,   -- not the triggers: holding R2 on "Skip intro"
+                            -- must not go on to the next chapter
 }
 
 function M.init(dispatch)

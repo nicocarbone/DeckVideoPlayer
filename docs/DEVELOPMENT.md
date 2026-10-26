@@ -28,7 +28,8 @@ app/                    exactly what gets installed under /app in the Flatpak
 helper/                 dvp-gamescope-refresh.c + gamescope-control.xml + build.sh (D31)
 packaging/              flatpak manifest, desktop/metainfo, icons, Steam artwork
 scripts/                build-flatpak, install-steamos, steam_shortcut.py, dev-run
-tools/                  test tooling: make-test-media, headless-run, mpv-ipc.py, mock-opensubtitles.py
+tools/                  test tooling: make-test-media, headless-run, mpv-ipc.py, mock-opensubtitles.py;
+                        equalize-hrtf.py makes the surround HRTF (D48)
 tests/                  unit tests (run inside mpv)
 docs/                   this documentation
 .dev/                   (git-ignored) dev config, resume data, test media, logs
@@ -306,7 +307,7 @@ DECISIONS.md or the README "Known limitations".
     works, `tv`/`deck` profile as expected.
 11. Headphone surround (v0.2): with headphones, a film with a 5.1 track.
     Toggle in the audio menu: dialogue stays centred, effects move around
-    and behind, loudness doesn't jump; the info panel says
+    and behind, loudness and tone (bass, voices) don't change; the info panel says
     `· headphone surround`. A stereo video sounds the same either way.
 12. Online subtitles (v0.2): over Wi-Fi in game mode, X → *Download
     subtitles…* on a real film. Results in your language, "Exact" on

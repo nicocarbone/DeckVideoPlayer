@@ -2,6 +2,175 @@
 
 ---
 
+# Part VI — v0.4.0 Audit: Night Mode, Plex Intro/Credits Markers & HRTF Surround (2026-10-25)
+
+All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diffuse-field equalized SOFA file matches the documented SHA-256 in `hrtf/README.md`. Below are the DSP/audio bugs, playback state bugs, race conditions, and edge cases identified in the v0.4.0 changes (`dvp/nightmode.lua`, `dvp/markers.lua`, `dvp/surround.lua`, `dvp/player.lua`, `dvp/plex.lua`, `main.lua`, `tools/equalize-hrtf.py`, and `helper/dvp-keep-awake.c`).
+
+---
+
+## 1. Audio DSP & Filter Chain Bugs (v0.4.0)
+
+### 1.1. `dvp/nightmode.lua`: `acompressor` uses default `link=average` instead of `link=maximum`, breaking compression on 5.1 and 7.1 tracks
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/nightmode.lua` (`M.GRAPH`, lines 14–17)
+* **Problem:**
+  ```lua
+  M.GRAPH = table.concat({
+      "acompressor=threshold=0.0316:ratio=4:attack=10:release=300:knee=4:makeup=1.78",
+      "alimiter=limit=0.891:attack=5:release=100:level=0",
+  }, ",")
+  ```
+  `@dvp-night` is inserted with `af pre`, so it runs on the multi-channel stream (e.g. 6 channels for 5.1, 8 channels for 7.1) before `@dvp-surround` and before mpv's stereo downmix.
+  FFmpeg's `acompressor` defaults to `link=average`, which computes the sidechain detector level as the **average across all channels** (`sum / nb_channels`) rather than the loudest channel (`link=maximum`).
+  * In 5.1 (`6` channels) and 7.1 (`8` channels) soundtracks, sounds concentrated in 1 or 2 channels—such as centre-channel dialogue/shouts, stereo music inside a 5.1 container, or single-channel gunshots while surround/LFE channels are silent—have their detected level divided by `6` (`-15.6 dB`) or `8` (`-18.1 dB`).
+  * This shifts the effective `-30 dBFS` compression threshold for a single-channel signal up to **`-14.4 dBFS` on 5.1** and **`-11.9 dBFS` on 7.1**.
+  * **Measured with FFmpeg:** A loud `-6 dBFS` (`0.5`, `-9.03 dBFS` RMS) signal in the centre channel is compressed to **`-21.62 dBFS` RMS** (`-12.6 dB` reduction) on stereo, but on 5.1 its RMS remains **`-9.98 dBFS`** (with a `+4.3 dB` attack peak jump to `-1.71 dBFS`), and on 7.1 `makeup=1.78` makes it **louder than without Night Mode** (**`-8.12 dBFS` RMS**, `-1.21 dBFS` peak).
+* **Suggested Fix:**
+  Add `:link=maximum` to `acompressor`:
+  ```lua
+  M.GRAPH = table.concat({
+      "acompressor=threshold=0.0316:ratio=4:attack=10:release=300:knee=4:makeup=1.78:link=maximum",
+      "alimiter=limit=0.891:attack=5:release=100:level=0",
+  }, ",")
+  ```
+  `link=maximum` still applies one shared gain reduction across all channels (preserving 5.1/7.1 spatial balance), while keying off the loudest channel so 5.1 and 7.1 compress identically to stereo (`-21.62 dBFS` RMS).
+
+---
+
+### 1.2. `dvp/surround.lua`: Boosting `sofalizer` `gain` to `12.5` / `18.5` dB without a limiter causes `+8..+10 dBFS` clipping and FFmpeg log spam on loud multi-channel scenes
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/surround.lua` (`GAIN_51`, `LFE_GAIN`, `gain`, `filter_string`, lines 16–43)
+* **Problem:**
+  ```lua
+  function M.filter_string(sofa_path, channels)
+      local g = string.format("sofalizer=sofa=%s:gain=%s:lfegain=%s:type=freq",
+          M.escape_lavfi(sofa_path), tostring(M.gain(channels)), tostring(M.LFE_GAIN))
+      return string.format("@dvp-surround:lavfi=graph=%%%d%%%s", #g, g)
+  end
+  ```
+  Setting `gain=12.5` (5.1) / `gain=18.5` (7.1) and `lfegain=3` inside `sofalizer` matches single-channel (centre dialogue) loudness to mpv's stereo downmix by undoing `sofalizer`'s internal `-3 * N` dB headroom.
+  However, when a 5.1 or 7.1 soundtrack has a loud multi-channel scene (an explosion or orchestral crescendo with `-6` to `-2 dBFS` across multiple channels simultaneously), the convolved stereo sum reaches **`+8` to `+10 dBFS` (`2.5x–3.1x` full scale)**:
+  1. When Night Mode is off, samples above `0 dBFS` are sent un-limited to the audio output and hard-clip at `0 dBFS` when volume is near 100%.
+  2. Inside `sofalizer`, FFmpeg checks `fabs(out[i]) > 1.0` after applying `gain` and logs an `AV_LOG_WARNING` (`[ffmpeg/audio] sofalizer: N of 2048 samples clipped. Please reduce gain.`) on **every 2048-sample FFT block (~21 times per second)** during loud scenes.
+* **Suggested Fix:**
+  Keep `sofalizer`'s internal `gain=0` (so convolution inside `sofalizer` stays below `1.0` and never triggers its per-frame clip warning), and apply the dialogue-matching gain + a protective limiter immediately after `sofalizer` in the same `@dvp-surround` lavfi graph:
+  ```lua
+  local g = string.format(
+      "sofalizer=sofa=%s:gain=0:lfegain=%s:type=freq,volume=%sdB,alimiter=limit=0.95:attack=5:release=50:level=0",
+      M.escape_lavfi(sofa_path), tostring(M.LFE_GAIN), tostring(M.gain(channels)))
+  ```
+  Dialogue level at `-20 dBFS` is identical to `0.001 dB`, multi-channel explosions are cleanly soft-limited below `0 dBFS`, and `sofalizer` emits zero clip warnings.
+
+---
+
+### 1.3. `dvp/nightmode.lua`: Enabling `night_mode = yes` in `config.ini` calls `af pre` while mpv is idle, bypassing filter validation and muting audio if unavailable
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/nightmode.lua` (`M.new`, `M:set`, lines 25–56)
+* **Problem:**
+  ```lua
+  function M.new(cfg)
+      ...
+      if pb.night_mode and self.available then self:set(true) end
+      return self
+  end
+  ```
+  `NightMode.new(cfg)` runs at script startup while mpv is **idle** (no audio stream open). While mpv is idle, `mp.commandv("af", "pre", ...)` only appends the filter string to mpv's `af` option list without instantiating `lavfi`, so `ok` is **always `true`** even if `acompressor` or `alimiter` is missing from FFmpeg.
+  Later, when a file is opened, mpv attempts to build the initial audio filter chain, fails (`[user_filter_wrapper] Creating filter 'lavfi' failed. Audio filter initialized failed! Audio: no audio`), and **disables audio completely** for the file while `NightMode` still thinks `self.available == true` and `self.active == true`.
+  (By contrast, when `mp.commandv("af", "pre", ...)` is called while an audio track is already active—as `Surround:update()` does from its `audio-params/channel-count` observer—mpv validates the filter immediately, rolls back the failed `af pre` without dropping audio playback, and returns `nil, "error running command"`.)
+* **Suggested Fix:**
+  Follow the same pattern as `dvp/surround.lua`: set `self.enabled = pb.night_mode and self.available` in `M.new(cfg)`, and observe `audio-params/channel-count` (or `current-ao`) to insert `@dvp-night` once an audio stream is active.
+
+---
+
+## 2. Plex Intro / Credits Markers & Playback Lifecycle Bugs (v0.4.0)
+
+### 2.1. `dvp/player.lua` & `main.lua`: Pressing `R2` on `"Next episode"` / `"Next video"` during final credits leaves the episode unwatched / in-progress when credits are longer than `END_MARGIN`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`skip_marker`, lines 194–205) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress`, lines 142–164)
+* **Problem:**
+  When `self.marker` is a final credits marker (`mk.kind == "credits" and mk.final`) and `has_next` is true, the prompt offers **`R2 Next episode`** (or **`R2 Next video`**). Pressing `R2` runs:
+  ```lua
+  if a.next then
+      mp.commandv("playlist-next")
+  ```
+  `mp.commandv("playlist-next")` immediately unloads the current episode while `time-pos` is still at the start of the credits (`mk.start`).
+  In `main.lua`, `on_unload` calls `save_progress(true)`:
+  ```lua
+  plex:report(item, "stopped", pos, duration, true)
+  if duration and duration > 0 and Resume.is_finished(pos, duration) and pos / duration < 0.9 then
+      plex:set_watched(item, true, nil, true)
+  end
+  ```
+  `Resume.is_finished(pos, duration)` only returns `true` within `max(60s, 5% of duration)` of the end (`72 s` on a 24-minute anime/sitcom episode; `135 s` on a 45-minute drama episode).
+  * Whenever end credits + post-credits/next-episode preview begin earlier than that margin (e.g. a standard 90 s anime ending + 30 s preview = `120 s` before EOF, or 3–5 minute drama credits = `180–300 s` before EOF where `pos / duration < 0.90`), `Resume.is_finished(pos, duration)` is **`false`**!
+  * `save_progress(true)` reports `stopped` at `mk.start` and **does not scrobble the episode**, so the episode the user just finished via `R2 Next episode` stays in Plex's *Continue watching* as partially watched at the start of the credits.
+* **Suggested Fix:**
+  When the user skips final credits (`mk.kind == "credits" and mk.final`), record in `state` (or pass via a callback/flag before `playlist-next`) that the current file was completed via final-credits skip so `save_progress(true)` treats it as finished and marks/scrobbles it as watched on Plex (and in `resume.json`).
+
+---
+
+### 2.2. `dvp/input.lua` & `dvp/player.lua`: `R2` (`rt`) key-repeat and 1-second marker polling race with `skip_marker()`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/input.lua` (`REPEATABLE`, lines 30–33) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`check_marker`, `skip_marker`, `handle`, lines 174–205, 307–309)
+* **Problems:**
+  1. **`R2` (`rt`) is marked `REPEATABLE = true`, causing a chapter jump (+5 min) if the trigger is held >200 ms:**
+     In `dvp/input.lua`, `rt` is in `REPEATABLE`. On the Steam Deck, `R2` is a long-travel analog trigger. If the user holds `R2` for 200 ms (`input-ar-delay`) when pressing `R2 Skip intro`, the initial press calls `self:skip_marker()` and sets `self.marker = nil`; the first auto-repeat event 200 ms later enters `player:handle("rt")`, sees `self.marker == nil`, and runs `else self:chapter(1)`—jumping to the next chapter (or seeking **+5 minutes forward** if the file has no chapters) and replacing `"Skipped intro"` with `"Next chapter"`.
+     (In `browser.lua`, `lt` and `rt` only jump to the first and last item in the list, which is idempotent and does not need `repeatable = true`.)
+  2. **`marker_timer` flashes the `"R2 Skip intro"` / `"R2 Next episode"` badge back on screen while an HTTP seek or `playlist-next` is in flight:**
+     `skip_marker()` sets `self.marker = nil` and clears `self.marker_layer`, then issues `mp.commandv("seek", tostring(a.target), "absolute+exact")` (or `mp.commandv("playlist-next")`), but leaves the 1-second `self.marker_timer` running.
+     When streaming over HTTP/HTTPS from Plex, an exact seek or playlist transition takes >100 ms before `time-pos` updates and `playback-restart` fires. If `self.marker_timer` ticks during that window, `check_marker()` reads the pre-seek `time-pos` (still inside `[mk.start, mk.stop - 1)`), sees `mk ~= self.marker` (`nil`), and **re-renders the marker prompt on screen** (even after `skip_intro = "auto"` auto-skipped it, because `self.auto_skipped[mk]` is now `true`).
+  3. **`self.marker` can be up to 1 second stale when `R2` is pressed:**
+     Because `self.marker` is only polled every 1.0 s, pressing `R2` during the first second of a marker (before `marker_timer` ticks) sees `self.marker == nil` and jumps to the next chapter (+5 min) instead of skipping the marker; conversely, pressing `R2` up to 1 s after leaving a marker still triggers `skip_marker()`.
+* **Suggested Fix:**
+  1. Remove `lt` and `rt` from `REPEATABLE` in `dvp/input.lua`.
+  2. In `player:skip_marker()`, call `self.marker_timer:kill()`, and in the `playback-restart` handler (`player.lua` line 50), call `self:update_marker_timer(); self:check_marker()`.
+  3. In `player:handle("rt")`, refresh `self.marker` against the live `time-pos` before branching (`self:check_marker(); if self.marker then ...`).
+
+---
+
+### 2.3. `main.lua` & `dvp/player.lua`: Previous file's markers are not cleared at the start of `on_load`, `skip_intro = "auto"` conflicts with `resumed_at` / `0:00` load, and `osd-dimensions` omits `render_marker()`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (lines 286–315, 358–369, 423–427) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (lines 73–79, 208–225)
+* **Problems:**
+  1. **Markers not cleared at the top of `on_load`:**
+     In `main.lua`, `player:set_markers(prep.markers)` is only called inside `if item then` *after* the blocking `plex:prepare(item)` call returns (and in `player:stop_screen()` when entering `idle-active`).
+     * During a playlist transition between two Plex episodes, `plex:prepare(item)` blocks for up to 5 s while the previous episode's `self.markers` and `marker_layer` stay on screen.
+     * If a non-Plex file is loaded without passing through `idle-active` (e.g. external/IPC `loadfile`), `player:set_markers({})` is never called, leaving the previous Plex item's markers active on the local file.
+  2. **`skip_intro = "auto"` toast is immediately overwritten by `"Resumed at …"`, and intros at `0:00` cause a double HTTP seek:**
+     * In `main.lua` (`file-loaded`, lines 363–368), `player:on_file_loaded()` runs *before* `if state.resumed_at then toast("Resumed at ...") end`. If a file resumes at a position inside an intro with `skip_intro == "auto"`, `on_file_loaded()` -> `check_marker()` auto-skips to `mk.stop` and shows `"Skipped intro"`, which is immediately overwritten on the next line by `"Resumed at <old_pos>"`.
+     * When `skip_intro == "auto"` and an episode's intro starts at `0:00` (`mk.start == 0`), `on_load` already has `prep.markers` and `start`, yet lets mpv open and buffer the HTTP stream at `0:00` only for `file-loaded` to immediately issue a second HTTP range seek to `mk.stop`.
+  3. **`osd-dimensions` observer does not re-render `marker_layer`:**
+     In `main.lua` (lines 423–427), the `osd-dimensions` observer calls `player:render()`, `player:render_info()`, and `menu:render()`, but neither it nor `player:render()` calls `player:render_marker()`. If the canvas size changes while a marker pill is visible (especially when `overlay_visible` is `false`, where `player:render()` returns on line 594), `marker_layer` remains at the old coordinates/resolution.
+* **Suggested Fix:**
+  * Call `player:set_markers({})` near the top of `on_load` (alongside `state.plex_subs = nil`).
+  * In `main.lua`'s `osd-dimensions` observer, also call `player:render_marker()`.
+  * In `file-loaded`, either check `state.resumed_at` before `player:on_file_loaded()` or clear `state.resumed_at` when `check_marker()` auto-skips (or apply `skip_intro == "auto"` directly to `start` in `on_load` when `start` falls inside an intro marker).
+
+---
+
+## 3. Native Helper Robustness (v0.4.0)
+
+### 3.1. `helper/dvp-keep-awake.c`: `request_inhibit` ignores `stop` (`SIGTERM`) between blocking D-Bus calls and recreates `status_file` after `keepawake:stop()` deletes it
+* **Location:** `helper/dvp-keep-awake.c` (`write_status`, `request_inhibit`, lines 31–41, 77–127) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/keepawake.lua` (`stop`, lines 65–72)
+* **Problem:**
+  In `helper/dvp-keep-awake.c`, `request_inhibit(bus)` runs two sequential synchronous D-Bus calls (`org.freedesktop.ScreenSaver.Inhibit` and `org.freedesktop.portal.Inhibit.Inhibit`, each with a 5 s timeout) and calls `write_status()` after each one, before `main()` enters `while (!stop && getppid() == parent)`.
+  If playback is paused or stopped while `request_inhibit(bus)` is in progress:
+  1. `keepawake:stop()` sends `SIGTERM` to the helper (`stop = 1`) and immediately calls `os.remove(self.status_file)`.
+  2. Because `write_status()` and `request_inhibit()` do not check `stop`, as soon as the in-flight `sd_bus_call_method` returns, the dying helper calls `write_status()`—recreating `self.status_file` on disk after `keepawake:stop()` deleted it—and even starts the second 5-second `sd_bus_call_method` before reaching the main loop and exiting.
+  3. If the user pauses and quickly unpauses within that window, the new `dvp-keep-awake` instance and the dying instance share the same `status_file` / `status_file.tmp` path and race on `write_status()`.
+* **Suggested Fix:**
+  Guard `write_status()` and the second D-Bus call in `request_inhibit()` with `if (stop || getppid() != parent) return;`.
+
+---
+
+## 4. v0.4.0 (Part VI) Summary Checklist
+
+Reviewed and fixed on 2026-10-25 (DECISIONS D49).
+
+- [x] **DSP (`dvp/nightmode.lua`):** `link=maximum` on `acompressor`. *(Measured: loud centre-only 5.1 was 4 dB louder with night mode; now −6.4 dB like stereo.)*
+- [x] **DSP (`dvp/surround.lua`):** `sofalizer` at gain 0, then `volume` and `alimiter` at −1 dBFS. *(Confirmed with a smaller margin than reported: +2.7 dBFS peaks and 135 warnings in 10 s with all channels near full scale; now −1.0 dBFS, no warnings, same dialogue loudness.)*
+- [x] **DSP (`dvp/nightmode.lua`):** Add the filter once audio is open, not while idle.
+- [x] **Bug (`dvp/player.lua`, `main.lua`):** *R2 Next episode* counts the episode as finished (`ctx.finished()`).
+- [x] **Bug (`dvp/input.lua`, `dvp/player.lua`):** No auto-repeat on the triggers; R2 checks the marker at the current position; marker timer stopped during a skip, restarted on `playback-restart`. *(The prompt flashing during an exact seek doesn't happen: mpv reports the seek target as `time-pos` while seeking.)*
+- [x] **Bug (`main.lua`):** Clear markers at the start of `on_load`, redraw the marker prompt on resize, show "Resumed at" before the automatic intro skip. *(Declined: skipping an intro at 0:00 in `on_load`; the extra seek happens before the first frame.)*
+- [x] **Helper (`helper/dvp-keep-awake.c`):** No status write and no portal call after SIGTERM or when orphaned.
+
+---
+
 # Part V — v0.3.5 Full Audit: Security, Bugs & Optimizations (2026-10-25)
 
 All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the security/robustness issues, functional bugs, optimization opportunities, and polish items identified across the v0.3.1–v0.3.5 additions (`helper/dvp-keep-awake.c`, `dvp/keepawake.lua`, `dvp/cropdetect.lua`, `dvp/browser.lua`, `dvp/player.lua`, `dvp/resume.lua`, `scripts/steam_shortcut.py`, `scripts/install-steamos.sh`) as well as the existing Plex and core modules.

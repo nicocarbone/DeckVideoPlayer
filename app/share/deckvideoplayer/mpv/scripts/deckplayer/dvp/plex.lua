@@ -30,6 +30,7 @@ local util = require "dvp.util"
 local http = require "dvp.http"
 local version = require "dvp.version"
 local Resume = require "dvp.resume"
+local Markers = require "dvp.markers"
 
 local M = {}
 M.__index = M
@@ -604,14 +605,17 @@ function M:prepare(item)
     local base = self.bases[item.machine]
     local server = self:server(item.machine)
     if not base or not server then return {subs = {}, unreachable = true} end
-    local code, body = http.request_sync({url = base.url .. item.key, headers = self:headers(server.token),
+    -- Intro and credits markers come with the item when asked for (D47).
+    local url = base.url .. item.key .. (item.key:find("?", 1, true) and "&" or "?") .. "includeMarkers=1"
+    local code, body = http.request_sync({url = url, headers = self:headers(server.token),
                                           tag = "plex", timeout = 5})
     if code == nil then return {subs = {}, unreachable = true} end
     local md = code == 200 and type(body) == "table" and body.MediaContainer
         and body.MediaContainer.Metadata and body.MediaContainer.Metadata[1]
     if not md then return {subs = {}} end
     local state = M.item_state(md)
-    return {ok = true, pos = state.pos, subs = M.external_subtitles(md, base.url)}
+    return {ok = true, pos = state.pos, subs = M.external_subtitles(md, base.url),
+            markers = Markers.from_plex(md)}
 end
 
 -- Reports playback state to the server (Plex's "Now playing", resume

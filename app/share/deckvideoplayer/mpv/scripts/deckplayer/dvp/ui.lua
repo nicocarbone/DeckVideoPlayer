@@ -479,6 +479,18 @@ function Ass:button(btn, x, cy, s, o)
 end
 
 -- hints: list of {button, label}. Draws right-aligned ending at x_right.
+-- Width Ass:hints() would use for these hints.
+function M.hints_width(hints, o)
+    o = o or {}
+    local s = o.size or 26
+    local fs = o.font_size or s * 0.82
+    local total = 0
+    for i, h in ipairs(hints) do
+        total = total + glyph_width(h[1], s) + s * 0.35 + M.text_width(h[2], fs) + (i > 1 and s * 0.95 or 0)
+    end
+    return total
+end
+
 function Ass:hints(hints, x_right, cy, o)
     o = o or {}
     local s = o.size or 26

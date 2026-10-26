@@ -29,7 +29,7 @@ Included in this repository:
 
 | File | Licence |
 |---|---|
-| `app/share/deckvideoplayer/hrtf/mit_kemar_normal_pinna.sofa` (MIT KEMAR HRTF, W. G. Gardner and K. D. Martin, 1995) | "Provided without any usage restrictions"; citation requested (see `hrtf/README.md`) |
+| `app/share/deckvideoplayer/hrtf/mit_kemar_normal_pinna_dfeq.sofa` (MIT KEMAR HRTF, W. G. Gardner and K. D. Martin, 1995; diffuse-field equalized by this project) | "Provided without any usage restrictions"; citation requested (see `hrtf/README.md`) |
 | `helper/gamescope-control.xml` (gamescope protocol definition) | MIT, © 2023 Valve Corporation (notice kept in the file) |
 | `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/qrencode.lua` ([luaqrcode](https://github.com/speedata/luaqrcode), QR codes for the Plex sign-in) | BSD-3-Clause, © 2012-2020 Patrick Gundlach and contributors (licence text kept in the file) |
 
