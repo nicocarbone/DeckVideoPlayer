@@ -226,13 +226,10 @@ function M:current_hz()
     return v and v > 0 and v or nil
 end
 
--- Apply mpv options for the chosen quality/HDR settings. Called once at
+-- Apply mpv options for the chosen quality settings (HDR: dvp/hdr.lua). Called once at
 -- startup, while idle.
 function M:apply_profile()
     mp.commandv("apply-profile", "dvp-quality-" .. self.quality)
-    if self.cfg.display.hdr == "off" then
-        mp.set_property("target-colorspace-hint", "no")
-    end
     if self.cfg.display.display_resample then
         mp.set_property("video-sync", "display-resample")
     end

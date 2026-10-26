@@ -48,6 +48,13 @@ function M.new(ctx)
     self.markers = {}
     self.marker_timer = mp.add_periodic_timer(1, function() self:check_marker() end)
     self.marker_timer:kill()
+    -- The output changes a frame after an HDR choice (also while paused,
+    -- when no timer runs): redraw the badges and the info panel then.
+    mp.observe_property("video-target-params/gamma", "string", function()
+        if not self.active then return end
+        if self.overlay_visible then self:render() end
+        if self.info_visible then self:render_info() end
+    end)
     mp.register_event("playback-restart", function()
         self:update_marker_timer()   -- stopped by skip_marker()
         self:check_marker()
@@ -70,7 +77,7 @@ function M:start()
         mp.set_property_bool("keepaspect", self.zoom_defaults.keepaspect)
         self.zoom_touched = false
     end
-    self.crop_bars = false   -- video-crop itself is file-local
+    self.crop_bars = false   -- true, "none" (none found) or false; video-crop itself is file-local
     self:show_overlay()
 end
 
@@ -456,9 +463,10 @@ function M:set_zoom(mode)
     mp.set_property_bool("keepaspect", mode ~= "stretch")
     self.zoom_touched = true
     if mode == "bars" then
-        -- Only shown as the mode when a crop was applied: after "no bars
-        -- found" the row says Fit, and the next press tries again.
-        self.crop_bars = self:crop_black_bars()
+        -- After "no bars found" the picture is Fit but the row stays on
+        -- this mode, so the next press moves on to Fill (or back to Fit);
+        -- coming back to it tries again.
+        self.crop_bars = self:crop_black_bars() or "none"
     elseif self.crop_bars then
         self.crop_bars = false
         mp.set_property("file-local-options/video-crop", "")
@@ -507,6 +515,91 @@ function M:toggle_refresh()
     self:render()
 end
 
+-- Short state for the main menu's Video row: picture mode and output.
+function M:video_summary()
+    local source, output_hdr = media.hdr_state(self.video_track)
+    local pic = self.crop_bars == "none" and ZOOM_LABELS.fit or ZOOM_LABELS[self:zoom_mode()]
+    if not source then return pic end
+    local out
+    if source == "SDR" then out = output_hdr and "SDR to HDR" or "SDR"
+    else out = output_hdr and "HDR" or "HDR to SDR" end
+    return pic .. " · " .. out
+end
+
+-- HDR choices (D52), only on screens that can show HDR.
+function M:hdr_items(items)
+    local hdr = self.ctx.hdr
+    if not hdr.menu then return end
+    items[#items + 1] = {separator = true}
+    if not hdr:show_menu() then
+        -- Seen from mpv's output: SteamOS has HDR off, or the TV can't.
+        items[#items + 1] = {label = "HDR", value = "Screen not in HDR mode", disabled = true}
+        return
+    end
+    items[#items + 1] = {label = "HDR",
+        value = function() return hdr.enabled and "On" or "Off" end,
+        adjust = function()
+            self.ctx.toast(hdr:toggle() and "HDR on" or "HDR off: tone-mapped to SDR")
+        end}
+    if not hdr.enabled or not hdr.gamma then return end
+    if hdr.is_hdr(hdr.gamma) then
+        items[#items + 1] = {label = "HDR mapping",
+            value = function() return hdr.LABELS[hdr.mapping] end,
+            adjust = function(d) hdr:set_mapping(d) end}
+        if hdr.mapping == "app" then
+            items[#items + 1] = {label = "Peak brightness",
+                value = function() return hdr.peak .. " nits" end,
+                adjust = function(d) hdr:set_peak(d) end}
+        end
+    else
+        items[#items + 1] = {label = "SDR to HDR",
+            value = function() return hdr.itm > 0 and (hdr.itm .. " nits") or "Off" end,
+            adjust = function(d) hdr:set_itm(d) end}
+    end
+end
+
+function M:video_items()
+    local items = {}
+    -- Video tracks only when there is a choice (cover art doesn't count).
+    local tracks = {}
+    for _, t in ipairs(media.tracks("video")) do
+        if not t.image and not t.albumart then tracks[#tracks + 1] = t end
+    end
+    if #tracks > 1 then
+        for _, t in ipairs(tracks) do
+            items[#items + 1] = {
+                label = media.track_label(t), value = media.track_detail(t), checked = t.selected,
+                action = function()
+                    mp.set_property_number("vid", t.id)
+                    self.ctx.toast("Video: " .. media.track_label(t))
+                end,
+            }
+        end
+        items[#items + 1] = {separator = true}
+    end
+    items[#items + 1] = {label = "Picture",
+        value = function()
+            if self.crop_bars == "none" then return "No black bars found" end
+            return ZOOM_LABELS[self:zoom_mode()]
+        end,
+        adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self:zoom_mode(), d)) end}
+    local display = self.ctx.display
+    if display.refresh_possible then
+        items[#items + 1] = {label = "Match refresh rate",
+            value = function() return display.refresh_on and "On" or "Off" end,
+            adjust = function() self:toggle_refresh() end}
+    end
+    self:hdr_items(items)
+    return items
+end
+
+function M:open_video_menu()
+    local items = self:video_items()
+    self.ctx.menu:open({title = "Video", style = "side", items = items, selected = selected_index(items),
+                        rebuild = function() return self:video_items() end})
+    self:show_overlay()
+end
+
 function M:main_menu_items()
     local function prop_num(name, default) return mp.get_property_number(name, default) end
     local items = {}
@@ -516,6 +609,8 @@ function M:main_menu_items()
                          action = function() self:open_audio_menu() end}
     items[#items + 1] = {label = "Subtitles", value = st and media.track_label(st) or "Off",
                          action = function() self:open_subtitle_menu() end}
+    items[#items + 1] = {label = "Video", value = self:video_summary(),
+                         action = function() self:open_video_menu() end}
     items[#items + 1] = {label = "Subtitle size",
         value = function() return string.format("%d%%", util.round(prop_num("sub-scale", 1) * 100)) end,
         adjust = function(d)
@@ -543,15 +638,6 @@ function M:main_menu_items()
         adjust = function(d)
             mp.set_property_number("speed", util.clamp(prop_num("speed", 1) + d * 0.25, 0.25, 3))
         end}
-    items[#items + 1] = {label = "Picture",
-        value = function() return ZOOM_LABELS[self:zoom_mode()] end,
-        adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self:zoom_mode(), d)) end}
-    local display = self.ctx.display
-    if display.refresh_possible then
-        items[#items + 1] = {label = "Match refresh rate",
-            value = function() return display.refresh_on and "On" or "Off" end,
-            adjust = function() self:toggle_refresh() end}
-    end
     local pl_pos = mp.get_property_number("playlist-pos", 0)
     local pl_count = mp.get_property_number("playlist-count", 1)
     if pl_pos + 1 < pl_count then
@@ -585,7 +671,9 @@ function M:badges()
     local source, output_hdr, vp = media.hdr_state(self.video_track)
     local res = media.resolution_badge(vp.w, vp.h)
     if res then out[#out + 1] = {text = res} end
-    if source and source ~= "SDR" then
+    if source == "SDR" and output_hdr then
+        out[#out + 1] = {text = "SDR → HDR", color = ui.theme.warn}
+    elseif source and source ~= "SDR" then
         if output_hdr then
             out[#out + 1] = {text = source, color = ui.theme.warn}
         else
@@ -624,7 +712,7 @@ function M:render()
     -- Leave room for an open side menu (it covers the right ~45%).
     local title_w = W - 2 * margin - 160
     local top = self.ctx.menu:top()
-    if top and top.style == "side" then title_w = W - Menu.side_width(W) - 2 * margin end
+    if top and top.style == "side" then title_w = W - Menu.side_width(W, top.wide) - 2 * margin end
     a:text(margin, 46, ui.fit_text(self:title(), 30, title_w, true), {size = 30, bold = true, outline = 1})
     local count = mp.get_property_number("playlist-count", 1)
     if count > 1 then
@@ -736,7 +824,13 @@ function M:info_lines()
         add("Source", s)
     end
     local out = target.gamma and (target.gamma .. " / " .. (target.primaries or "?")) or "?"
-    add("Output", (output_hdr and "HDR passthrough · " or "SDR · ") .. out)
+    local tuned = self.ctx.hdr:describe()
+    add("Output", (output_hdr and (tuned and "HDR · " or "HDR passthrough · ") or "SDR · ") .. out)
+    add("HDR", tuned)
+    if output_hdr and target["max-luma"] then
+        -- What the display is told the content peaks at.
+        add("Signalled peak", string.format("%d nits", util.round(target["max-luma"])))
+    end
     if vp["max-luma"] and vp["max-luma"] > 0 then
         add("Mastering", string.format("%d nits", util.round(vp["max-luma"])))
     end

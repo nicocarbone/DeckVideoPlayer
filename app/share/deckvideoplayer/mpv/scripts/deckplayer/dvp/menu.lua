@@ -15,6 +15,7 @@
 --     qr = matrix,      -- center dialogs: QR code (dvp/qrencode.lua) left of the
 --                       -- message lines and the code (message may hold "\n")
 --     on_cancel = fn,   -- called when dismissed with B (not when an item is chosen)
+--     wide = true,      -- side menus: a wider panel (long values, e.g. Video info)
 --   }
 -- Menus stack: opening a menu while another is open pushes it; B pops.
 
@@ -39,12 +40,14 @@ function M:top()
 end
 
 -- Width of a side menu on a canvas W units wide.
-function M.side_width(W)
+function M.side_width(W, wide)
+    if wide then return math.min(780, W * 0.62) end
     return math.min(500, W * 0.45)
 end
 
+-- Section headers are labels: the cursor skips them.
 local function selectable(item)
-    return item and not item.disabled and not item.separator
+    return item and not item.disabled and not item.separator and not item.header
 end
 
 local function first_selectable(items, from, dir)
@@ -227,7 +230,7 @@ function M:render()
             a:text(W / 2, list_top - code_h / 2 - 2, spaced, {size = 58, bold = true, align = 5, color = t.accent})
         end
     else
-        pw = M.side_width(W)
+        pw = M.side_width(W, spec.wide)
         px, py, ph = W - pw, 0, H
         a:rect(px - 60, 0, pw + 60, H, {color = t.black, opacity = 0.5, blur = 40})
         a:rect(px, py, pw, ph, {color = t.panel, opacity = 0.98})
@@ -245,7 +248,11 @@ function M:render()
 
     -- Keep the cursor visible.
     if spec.selected > spec.scroll + max_rows then spec.scroll = spec.selected - max_rows end
-    if spec.selected <= spec.scroll then spec.scroll = spec.selected - 1 end
+    if spec.selected <= spec.scroll then
+        spec.scroll = spec.selected - 1
+        -- Scrolling up onto a section's first row shows its header too.
+        if items[spec.selected - 1] and items[spec.selected - 1].header then spec.scroll = spec.scroll - 1 end
+    end
     spec.scroll = math.max(0, math.min(spec.scroll, #items - max_rows))
 
     local x0, x1 = px + 16, px + pw - 16

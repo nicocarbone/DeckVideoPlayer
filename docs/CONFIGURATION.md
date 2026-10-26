@@ -44,8 +44,11 @@ in `dvp/config.lua`.
 |---|---|---|---|
 | `device` | `auto` \| `deck-oled` \| `deck-lcd` \| `tv` | `auto` | Detected from DMI (`Galileo` = OLED, `Jupiter` = LCD, else `tv`). Affects the default quality. |
 | `quality` | `auto` \| `battery` \| `balanced` \| `high` | `auto` | Rendering profile; `auto` = `balanced` on Deck, `high` on tv. |
-| `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). |
-| `refresh_match` | `auto` \| `off` | `auto` | Refresh-rate matching in gamescope (Deck panels), D31. Default for the session; *Match refresh rate* in the playback menu toggles it. |
+| `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). *HDR* in the Video menu changes it for the session (D52). |
+| `hdr_mapping` | `static` \| `dynamic` \| `app` | `static` | Who fits HDR video to the screen: the display with the film's metadata (`static`), the display with per-scene metadata (`dynamic`), or the player, tone-mapping to `hdr_peak` (`app`). Video menu: *HDR mapping* (D52). |
+| `hdr_peak` | nits | `1000` | Peak brightness for `hdr_mapping = app` (300–2000, in steps of 100). |
+| `sdr_to_hdr` | `off` \| `300` \| `400` \| `600` \| `1000` | `off` | Shows SDR video in HDR with highlights up to this many nits. Only on a screen in HDR mode; switches itself off elsewhere. Video menu: *SDR to HDR*. |
+| `refresh_match` | `auto` \| `off` | `auto` | Refresh-rate matching in gamescope (Deck panels), D31. Default for the session; *Match refresh rate* in the Video menu toggles it. |
 | `refresh_rates` | `auto` \| range \| list | `auto` | `auto` = the rates gamescope reports for the active display; or e.g. `40-60`, `48,50,60,72,90`. |
 | `refresh_prefer` | `low` \| `high` | `low` | Lowest matching multiple (battery) or highest. |
 | `display_resample` | bool | `no` | Experimental: mpv `video-sync=display-resample`. |
@@ -86,7 +89,7 @@ plays. Delete a folder to forget its downloads.
 | `clean_names` | bool | `yes` | `The.Movie.2019.mkv` → `The Movie 2019`. |
 | `sort` | `name` \| `date` | `name` | Initial folder sort (Y toggles). |
 | `overlay_timeout` | seconds | `4` | Auto-hide delay of the playback controls. |
-| `recently_played` | number | `5` | Recently played local videos listed on the start screen, below the sources (`0` hides the list). Menu → *Remove from recently played* hides one. Plex keeps its own *Continue watching*. |
+| `recently_played` | number | `5` | Recently played videos (local and Plex) listed on the start screen, below the sources (`0` hides the list). Menu → *Remove from recently played* hides one. |
 | `accent_color` | `RRGGBB` | `1A9FFF` | Highlight color. |
 
 ## Raw mpv options

@@ -24,6 +24,7 @@ local Browser = require "dvp.browser"
 local Player = require "dvp.player"
 local Surround = require "dvp.surround"
 local NightMode = require "dvp.nightmode"
+local Hdr = require "dvp.hdr"
 local KeepAwake = require "dvp.keepawake"
 local SubDownload = require "dvp.subdownload"
 local About = require "dvp.about"
@@ -128,6 +129,14 @@ local function toast(text)
     toast_timer = mp.add_timeout(1.8, function() toast_layer:clear() end)
 end
 
+-- After apply_profile(): its option values are the ones restored. When it
+-- learns whether the screen is in HDR mode, an open Video menu is rebuilt
+-- (the badges follow mpv's output, see player.lua).
+local hdr = Hdr.new(cfg, display.device, function(text)
+    if text then toast(text) end
+    if menu:is_open() then menu:refresh() end
+end)
+
 local function track_id(kind)
     local id = mp.get_property_native("current-tracks/" .. kind .. "/id")
     return id and tostring(id) or "no"
@@ -161,6 +170,10 @@ local function save_progress(ending)
         else
             plex:report(item, mp.get_property_native("pause") and "paused" or "playing", pos, duration)
         end
+        -- A local copy for "Recently played" (D50); the server stays the
+        -- source of truth for the position.
+        local key = Plex.recent_key(item)
+        if key then resume:update(key, pos, duration, nil, nil, item.title) end
         return
     end
     resume:update(path, pos, duration, track_id("audio"), track_id("sub"))
@@ -213,6 +226,7 @@ local function help()
             row("X", "Play from start"),
             row("B", "Back"),
             row("Y", "Sort by name / date"),
+            row("View", "Video info"),
             row("L1 / R1", "Page up / down"),
             header("Playback"),
             row("A", "Play / pause"),
@@ -233,6 +247,7 @@ local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
     help = help, toast = toast, surround = surround, night = night, keepawake = keepawake,
+    hdr = hdr,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex,
     finished = function() state.finished_path = state.current_path end,
 }

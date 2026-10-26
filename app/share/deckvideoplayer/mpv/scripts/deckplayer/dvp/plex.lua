@@ -508,6 +508,10 @@ end
 ---------------------------------------------------------------------------
 
 local KIND_TITLES = {ondeck = "Continue watching"}
+-- "Continue watching" as Plex apps show it (the home hub: it honours
+-- "Remove from Continue watching"); servers without hubs have /library/onDeck.
+M.CONTINUE_KEY = "/hubs/continueWatching/items"
+local LEGACY_CONTINUE_KEY = "/library/onDeck"
 
 -- loc: {machine, key, kind}. cb(entries or nil, err).
 function M:list(loc, cb)
@@ -518,6 +522,9 @@ function M:list(loc, cb)
         http.request({url = base.url .. key, headers = self:headers(server.token), tag = "plex",
                       timeout = 20}, function(code, body)
             if code == 401 then return cb(nil, "Plex sign-in is no longer valid (sign in again)") end
+            if (code == 404 or code == 400) and key == M.CONTINUE_KEY then
+                return self:list({machine = loc.machine, key = LEGACY_CONTINUE_KEY, kind = loc.kind}, cb)
+            end
             if code ~= 200 or type(body) ~= "table" or type(body.MediaContainer) ~= "table" then
                 -- The connection may have gone away (e.g. left the house): retry next time.
                 self.bases[loc.machine] = nil
@@ -526,13 +533,89 @@ function M:list(loc, cb)
             local entries = M.entries_from(body.MediaContainer, base.url, loc.machine, loc.kind)
             if loc.kind == "root" then
                 table.insert(entries, 1, {label = KIND_TITLES.ondeck, name = KIND_TITLES.ondeck, is_dir = true,
-                    path = "plex://" .. loc.machine .. "/library/onDeck",
-                    plex = {machine = loc.machine, key = "/library/onDeck", kind = "ondeck"}})
+                    path = "plex://" .. loc.machine .. M.CONTINUE_KEY,
+                    plex = {machine = loc.machine, key = M.CONTINUE_KEY, kind = "ondeck"}})
             end
             for _, e in ipairs(entries) do
                 if not e.is_dir then self.items[e.path] = e.plex end
             end
             cb(entries)
+        end)
+    end)
+end
+
+-- Full metadata of an item (`key` = /library/metadata/<id>), for the
+-- Video info panel. cb(md or nil, err, server_name).
+function M:metadata(machine, key, cb)
+    if not M.safe_key(key) then return cb(nil, "Not a Plex item") end
+    self:connect(machine, function(base, err)
+        if not base then return cb(nil, err) end
+        local server = self:server(machine)
+        http.request({url = base.url .. key, headers = self:headers(server.token), tag = "plex",
+                      timeout = 15}, function(code, body)
+            local md = code == 200 and type(body) == "table" and type(body.MediaContainer) == "table"
+                and type(body.MediaContainer.Metadata) == "table" and body.MediaContainer.Metadata[1]
+            if type(md) ~= "table" then
+                return cb(nil, code and ("Plex error " .. code) or tostring(body))
+            end
+            cb(md, nil, server.name)
+        end)
+    end)
+end
+
+-- Hides an item from "Continue watching" (on every Plex app), keeping
+-- its progress and watched state. cb(ok).
+function M:remove_from_continue(item, cb)
+    self:connect(item.machine, function(base)
+        local server = self:server(item.machine)
+        if not base or not server then return cb(false) end
+        if self.readonly then
+            msg.info("plex (read-only): would remove from Continue watching")
+            return cb(true)
+        end
+        local url = base.url .. "/actions/removeFromContinueWatching?"
+            .. http.query_string({ratingKey = item.rating_key})
+        http.request({url = url, method = "PUT", headers = self:headers(server.token), tag = "plex",
+                      timeout = 10}, function(code) cb(code == 200) end)
+    end)
+end
+
+-- Pure: the key of a Plex item in "Recently played" (resume.json):
+-- "plex://<machine>/library/metadata/<id>". Stable, unlike the stream URL
+-- (which holds the address the server was reached at).
+function M.recent_key(item)
+    if not item or not item.machine or not M.safe_key(item.key) then return nil end
+    return "plex://" .. item.machine .. item.key
+end
+
+-- Pure: machine and key of a recent_key, or nil.
+function M.parse_recent_key(path)
+    local machine, key = tostring(path or ""):match("^plex://([%w%-]+)(/library/metadata/%d+)$")
+    if machine then return machine, key end
+    return nil
+end
+
+-- A Plex video in "Recently played" ready to play: fresh state from the
+-- server, and (`siblings`) the rest of its season after an episode, for
+-- auto-play. cb(entry, paths or nil, err); paths starts with entry.path.
+function M:resolve(machine, key, siblings, cb)
+    self:metadata(machine, key, function(md, err)
+        if not md then return cb(nil, nil, err) end
+        local base = self.bases[machine]
+        local entry = base and M.entries_from({Metadata = {md}}, base.url, machine, "ondeck")[1]
+        if not entry or entry.is_dir then return cb(nil, nil, "Not a video") end
+        self.items[entry.path] = entry.plex
+        local parent = md.type == "episode" and tostring(md.parentRatingKey or ""):match("^%d+$")
+        if not siblings or not parent then return cb(entry, {entry.path}) end
+        self:list({machine = machine, key = "/library/metadata/" .. parent .. "/children",
+                   kind = "episodes"}, function(entries)
+            local paths
+            for _, e in ipairs(entries or {}) do
+                if e.plex and e.plex.rating_key == entry.plex.rating_key then paths = {} end
+                if paths and not e.is_dir then paths[#paths + 1] = e.path end
+            end
+            if not paths or paths[1] ~= entry.path then paths = {entry.path} end
+            cb(entry, paths)
         end)
     end)
 end

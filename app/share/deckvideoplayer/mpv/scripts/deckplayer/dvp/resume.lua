@@ -49,7 +49,9 @@ function M.is_finished(pos, duration)
     return pos >= duration - margin
 end
 
-function M:update(path, pos, duration, aid, sid)
+-- `title` (optional): name to show in "Recently played" (Plex videos,
+-- whose key is no file name).
+function M:update(path, pos, duration, aid, sid, title)
     if not path or not pos then return end
     local e = self.entries[path] or {}
     if M.is_finished(pos, duration) then
@@ -62,9 +64,22 @@ function M:update(path, pos, duration, aid, sid)
     end
     e.duration = duration and math.floor(duration) or e.duration
     e.aid, e.sid = aid, sid
+    if title then e.title = title end
     e.t = os.time()
     e.played = e.t
     self.entries[path] = e
+    self.dirty = true
+end
+
+-- Progress learnt elsewhere (a Plex server: `state` = {pos, duration,
+-- watched}) for an entry that exists, keeping its play timestamps.
+function M:sync(path, state)
+    local e = self.entries[path]
+    if not e or not state then return end
+    local pos = state.pos and state.pos >= M.MIN_POSITION and math.floor(state.pos) or nil
+    if e.pos == pos and e.watched == (state.watched or nil) then return end
+    e.pos, e.watched = pos, state.watched or nil
+    e.duration = state.duration and math.floor(state.duration) or e.duration
     self.dirty = true
 end
 

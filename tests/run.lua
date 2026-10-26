@@ -533,6 +533,181 @@ check("menu update open", m:update(spec, {items = {{label = "a"}, {label = "b"}}
 eq("menu update items", #spec.items, 2)
 m:close_all()
 check("menu update closed", not m:update(spec, {items = {}}))
+-- Section headers are skipped by the cursor (also when wrapping).
+spec = {title = "T", style = "side", items = {{label = "A", header = true}, {label = "a"},
+                                              {label = "B", header = true}, {label = "b"}}}
+m:open(spec)
+m:update(spec, {items = spec.items})
+eq("menu header skipped", spec.selected, 2)
+m:handle("down")
+eq("menu header skipped down", spec.selected, 4)
+m:handle("down")
+eq("menu header skipped wrap", spec.selected, 2)
+m:close_all()
+
+-- video info (D50) -----------------------------------------------------------
+local VI = require "dvp.videoinfo"
+eq("fps ntsc", VI.format_fps("24000/1001"), "23.976 fps")
+eq("fps whole", VI.format_fps("24/1"), "24 fps")
+eq("fps number", VI.format_fps(59.94), "59.94 fps")
+eq("fps unknown", VI.format_fps("0/0"), nil)
+eq("bitrate mb", VI.format_bitrate(24500000), "24.5 Mb/s")
+eq("bitrate kb", VI.format_bitrate(640000), "640 kb/s")
+eq("size gb", VI.format_size(15234000000), "15.23 GB")
+eq("size mb", VI.format_size(734000000), "734 MB")
+eq("hdr10", VI.hdr_label({transfer = "smpte2084"}), "HDR10")
+eq("hdr10+", VI.hdr_label({transfer = "smpte2084", hdr10plus = true}), "HDR10+")
+eq("dv8 hdr10", VI.hdr_label({transfer = "smpte2084", dv_profile = 8}), "Dolby Vision 8 · HDR10")
+eq("dv5 only", VI.hdr_label({transfer = "smpte2084", dv_profile = 5}), "Dolby Vision 5")
+eq("hlg", VI.hdr_label({transfer = "arib-std-b67"}), "HLG")
+eq("sdr", VI.hdr_label({transfer = "bt709"}), "SDR")
+local probe = {
+    format = {filename = "/v/Film.mkv", format_long_name = "Matroska / WebM", size = "15234000000",
+              duration = "7260.0", bit_rate = "16800000"},
+    streams = {
+        {codec_type = "video", codec_name = "hevc", profile = "Main 10", width = 3840, height = 2160,
+         pix_fmt = "yuv420p10le", avg_frame_rate = "24000/1001", color_transfer = "smpte2084",
+         color_primaries = "bt2020", tags = {BPS = "15000000"},
+         side_data_list = {{side_data_type = "DOVI configuration record", dv_profile = 8}}},
+        {codec_type = "audio", codec_name = "truehd", profile = "Dolby TrueHD + Dolby Atmos",
+         channel_layout = "7.1", channels = 8, tags = {language = "eng"}, disposition = {default = 1}},
+        {codec_type = "audio", codec_name = "ac3", channel_layout = "stereo", channels = 2,
+         tags = {language = "eng", title = "Commentary"}, disposition = {default = 0}},
+        {codec_type = "subtitle", codec_name = "hdmv_pgs_subtitle", tags = {language = "spa"},
+         disposition = {forced = 1}},
+        {codec_type = "video", codec_name = "mjpeg", disposition = {attached_pic = 1}},
+    },
+}
+local frame = {frames = {{side_data_list = {
+    {side_data_type = "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"},
+    {side_data_type = "Mastering display metadata", max_luminance = "10000000/10000"},
+    {side_data_type = "Content light level metadata", max_content = 1000, max_average = 400}}}}}
+local function rows_of(sections)
+    local out = {}
+    for _, sec in ipairs(sections) do
+        for _, r in ipairs(sec.rows) do out[sec.title .. "/" .. r.label] = r.value end
+    end
+    return out
+end
+local lr = rows_of(VI.sections(VI.from_ffprobe(probe, frame, "/v/Film.mkv")))
+eq("local name", lr["File/Name"], "Film.mkv")
+eq("local folder", lr["File/Folder"], "/v")
+eq("local container", lr["File/Container"], "MKV")
+eq("local duration", lr["File/Duration"], "2:01:00")
+eq("local bitrate", lr["File/Bitrate"], "16.8 Mb/s")
+eq("local codec", lr["Video/Codec"], "HEVC Main 10")
+eq("local resolution", lr["Video/Resolution"], "3840 × 2160 (4K)")
+eq("local depth", lr["Video/Bit depth"], "10-bit")
+eq("local hdr", lr["Video/HDR"], "Dolby Vision 8 · HDR10+")
+eq("local mastering", lr["Video/Mastering peak"], "1000 nits")
+eq("local maxcll", lr["Video/MaxCLL / MaxFALL"], "1000 / 400 nits")
+eq("local video bitrate", lr["Video/Video bitrate"], "15.0 Mb/s")
+eq("local atmos", lr["Audio (2 tracks)/English"], "AC-3 · Stereo · Commentary")
+local secs = VI.sections(VI.from_ffprobe(probe, nil, "/v/Film.mkv"))
+eq("local audio 1", secs[3].rows[1].value, "TrueHD Atmos · 7.1 · Default")
+eq("local sub", secs[4].rows[1].label .. ": " .. secs[4].rows[1].value, "Spanish: PGS · Forced")
+eq("local no frame hdr", rows_of(secs)["Video/HDR"], "Dolby Vision 8 · HDR10")
+-- FFmpeg 9: stream colours "unknown" until a frame is decoded.
+local p9 = {format = {}, streams = {{codec_type = "video", codec_name = "hevc", color_transfer = "unknown",
+                                       width = 1920, height = 1080}}}
+local f9 = {frames = {{color_transfer = "smpte2084", color_primaries = "bt2020"}}}
+local r9 = rows_of(VI.sections(VI.from_ffprobe(p9, f9, "/v/a.mkv")))
+eq("frame colours", r9["Video/HDR"] .. " " .. r9["Video/Colors"], "HDR10 BT.2020")
+eq("unknown transfer", rows_of(VI.sections(VI.from_ffprobe(p9, nil, "/v/a.mkv")))["Video/HDR"], "SDR")
+eq("menu items", VI.items(secs)[1].header, true)
+local md = {title = "Film", duration = 7260000, Media = {{container = "mkv", bitrate = 16800,
+    width = 3840, height = 2160, Part = {{file = "/data/movies/Film/Film.mkv", size = 15234000000, Stream = {
+        {streamType = 1, codec = "hevc", profile = "main 10", bitDepth = 10, frameRate = 23.976,
+         colorTrc = "smpte2084", colorPrimaries = "bt2020", DOVIPresent = true, DOVIProfile = 8,
+         width = 3840, height = 2160, bitrate = 15000},
+        {streamType = 2, codec = "dca", profile = "ma", channels = 6, audioChannelLayout = "5.1(side)",
+         languageTag = "en", default = true},
+        {streamType = 3, codec = "srt", languageTag = "es", key = "/library/streams/9"},
+    }}}}}}
+local pr = rows_of(VI.sections(VI.from_plex(md, "Home server")))
+eq("plex server", pr["File/Server"], "Home server")
+eq("plex folder", pr["File/Folder"], "/data/movies/Film")
+eq("plex codec", pr["Video/Codec"], "HEVC Main 10")
+eq("plex hdr", pr["Video/HDR"], "Dolby Vision 8 · HDR10")
+eq("plex fps", pr["Video/Frame rate"], "23.976 fps")
+eq("plex bitrate", pr["File/Bitrate"], "16.8 Mb/s")
+eq("plex audio", pr["Audio/English"], "DTS-HD MA · 5.1 · Default")
+eq("plex sub external", pr["Subtitles (1)/Spanish"], "External")
+local atm = VI.from_plex({Media = {{Part = {{Stream = {{streamType = 2, codec = "eac3", channels = 6,
+    profile = "dolby digital plus + dolby atmos", languageTag = "en"}}}}}}})
+eq("plex atmos", VI.sections(atm)[2].rows[1].value, "E-AC-3 Atmos · 5.1")
+local upper = VI.from_plex({Media = {{Part = {{Stream = {{streamType = 1, codec = "hevc",
+    colorTrc = "SMPTE2084", colorPrimaries = "BT2020"}}}}}}})
+eq("plex colour case", upper.video.transfer .. " " .. upper.video.primaries, "smpte2084 bt2020")
+
+-- Plex in "Recently played" (D50) ---------------------------------------------
+eq("recent key", Plex.recent_key({machine = "abc123", key = "/library/metadata/42"}), "plex://abc123/library/metadata/42")
+eq("recent key unsafe", Plex.recent_key({machine = "abc", key = "//evil"}), nil)
+local rm, rk = Plex.parse_recent_key("plex://abc123/library/metadata/42")
+check("parse recent key", rm == "abc123" and rk == "/library/metadata/42")
+eq("parse not plex", Plex.parse_recent_key("/videos/a.mkv"), nil)
+eq("parse other plex", Plex.parse_recent_key("plex://abc/library/sections/1/all"), nil)
+local pres = Resume.new(nil)
+pres:update("plex://abc/library/metadata/42", 300, 3600, nil, nil, "Show · S01E02 · Title")
+eq("plex recent title", pres:get("plex://abc/library/metadata/42").title, "Show · S01E02 · Title")
+eq("plex recent listed", pres:recent(5)[1], "plex://abc/library/metadata/42")
+local played = pres:get("plex://abc/library/metadata/42").played
+pres:sync("plex://abc/library/metadata/42", {pos = 1200, duration = 3600})
+eq("sync pos", pres:get("plex://abc/library/metadata/42").pos, 1200)
+pres:sync("plex://abc/library/metadata/42", {watched = true, duration = 3600})
+local se = pres:get("plex://abc/library/metadata/42")
+check("sync watched", se.watched == true and se.pos == nil and se.played == played)
+pres:sync("plex://abc/library/metadata/99", {pos = 1200})
+eq("sync unknown entry", pres:get("plex://abc/library/metadata/99"), nil)
+
+-- HDR choices (D52) ----------------------------------------------------------------
+local Hdr = require "dvp.hdr"
+local hd = {["target-colorspace-hint"] = "yes", ["target-colorspace-hint-mode"] = "target",
+            ["target-peak"] = "auto", ["target-trc"] = "auto", ["target-prim"] = "auto",
+            ["inverse-tone-mapping"] = "no", ["hdr-compute-peak"] = "no"}
+local function hs(t)
+    local s = {enabled = true, mapping = "static", peak = 1000, itm = 0}
+    for k, v in pairs(t) do s[k] = v end
+    return s
+end
+local o = Hdr.options(hs{gamma = "pq", itm = 400}, hd)
+check("hdr static = defaults", o["target-peak"] == "auto" and o["target-colorspace-hint-mode"] == "target"
+    and o["inverse-tone-mapping"] == "no" and o["target-colorspace-hint"] == "yes")
+eq("hdr dynamic", Hdr.options(hs{gamma = "pq", mapping = "dynamic"}, hd)["target-colorspace-hint-mode"],
+   "source-dynamic")
+o = Hdr.options(hs{gamma = "hlg", mapping = "app", peak = 800}, hd)
+check("hdr app", o["target-peak"] == "800" and o["hdr-compute-peak"] == "yes")
+o = Hdr.options(hs{gamma = "bt.1886", mapping = "app", peak = 800, itm = 400}, hd)
+check("sdr to hdr", o["inverse-tone-mapping"] == "yes" and o["target-trc"] == "pq" and o["target-peak"] == "400")
+check("sdr to hdr off", Hdr.options(hs{gamma = "bt.1886", mapping = "app"}, hd)["target-peak"] == "auto")
+check("unknown gamma", Hdr.options(hs{mapping = "app", itm = 400}, hd)["target-peak"] == "auto")
+o = Hdr.options(hs{gamma = "pq", enabled = false, mapping = "app", itm = 400}, hd)
+check("hdr off", o["target-colorspace-hint"] == "no" and o["target-peak"] == "auto")
+eq("hdr off before a file", Hdr.options(hs{enabled = false}, hd)["target-colorspace-hint"], "no")
+-- A screen known not to be in HDR mode drops app mapping and SDR to HDR.
+check("no hdr screen: app", Hdr.options(hs{gamma = "pq", mapping = "app", screen = false}, hd)["target-peak"] == "auto")
+check("no hdr screen: itm", Hdr.options(hs{gamma = "bt.1886", itm = 600, screen = false}, hd)["inverse-tone-mapping"] == "no")
+eq("no hdr screen: dynamic dropped",
+   Hdr.options(hs{gamma = "pq", mapping = "dynamic", screen = false}, hd)["target-colorspace-hint-mode"], "target")
+eq("no hdr screen: nothing effective", Hdr.effective(hs{gamma = "pq", mapping = "dynamic", screen = false}), nil)
+check("defaults untouched", hd["target-peak"] == "auto")
+check("expects hdr", Hdr.expects_hdr(hs{gamma = "pq"}) and Hdr.expects_hdr(hs{gamma = "bt.1886", itm = 300})
+    and not Hdr.expects_hdr(hs{gamma = "bt.1886"}) and not Hdr.expects_hdr(hs{gamma = "pq", enabled = false})
+    and not Hdr.expects_hdr(hs{}))
+eq("effective static", Hdr.effective(hs{gamma = "pq"}), nil)
+eq("effective itm", Hdr.effective(hs{gamma = "bt.1886", itm = 300}).itm, 300)
+eq("step clamps", Hdr.step(Hdr.MAPPINGS, "app", 1), "app")
+eq("step back", Hdr.step(Hdr.ITM_LEVELS, 300, -1), 0)
+eq("peak clamp high", Hdr.clamp_peak(5000), 2000)
+eq("peak round", Hdr.clamp_peak(640), 600)
+eq("peak bad", Hdr.clamp_peak("x"), 1000)
+eq("itm off", Hdr.parse_itm("off"), 0)
+eq("itm nits", Hdr.parse_itm("600"), 600)
+local hcfg = config.from_text("[display]\nhdr_mapping = Dynamic\nhdr_peak = 800\nsdr_to_hdr = 400\n")
+check("hdr config", hcfg.display.hdr_mapping == "dynamic" and hcfg.display.hdr_peak == 800
+    and hcfg.display.sdr_to_hdr == "400")
+check("hdr config defaults", config.defaults().display.hdr_mapping == "static"
+    and config.defaults().display.sdr_to_hdr == "off")
 
 print(string.format("%d checks, %d failures", count, failures))
 mp.commandv("quit", failures == 0 and "0" or "1")

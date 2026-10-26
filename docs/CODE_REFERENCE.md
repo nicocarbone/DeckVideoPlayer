@@ -97,6 +97,7 @@ Responsibilities:
   | `cfg` | parsed config |
   | `resume`, `menu`, `display` | service instances |
   | `surround` | headphone surround (`dvp/surround.lua`) |
+  | `hdr` | HDR choices (`dvp/hdr.lua`, D52) |
   | `subtitles` | online subtitle search/download (`dvp/subdownload.lua`) |
   | `play(list, start)` | load `list[1]` (replace) with start position `start` (nil: the saved position, if any), append the rest |
   | `stop()` | `stop` → idle → browser (progress is saved by on_unload) |
@@ -118,7 +119,8 @@ Responsibilities:
     files (`plex:prepare`), sets the transient-token header and the media
     title file-locally; `save_progress(ending)` reports to the server
     instead of resume.json (blocking `stopped` + scrobble when the file
-    closes).
+    closes), and keeps a local copy under `Plex.recent_key(item)` with the
+    label for *Recently played* (D50).
   - `on_preloaded` hook: `subtitles:load_stored(path)` adds subtitles
     downloaded earlier for this video before track selection (D28).
   - `on_unload` hook: `save_progress()` + flush. Properties are still
@@ -244,7 +246,8 @@ key.
 
 `new(data_dir)` (nil dir = in-memory, used by tests), `get(path)`,
 `position(path)` (≥ 30 s or nil), `is_watched`, `is_finished(pos, dur)`
-(static), `update(path, pos, dur, aid, sid)` (decides pos / watched),
+(static), `update(path, pos, dur, aid, sid, title?)` (decides pos /
+watched; `title` names Plex entries, whose key is no file name, D50),
 `mark_watched`, `mark_unwatched` (keeps a played file in the recent list), `flush()` (writes only when dirty, prunes to 1000
 entries). Thresholds are `M.MIN_POSITION`, `M.END_MARGIN_MIN` and
 `M.END_MARGIN_FRAC`.
@@ -256,6 +259,8 @@ playback); `mark_watched()` on a never-played file sets `played = false`;
 (entries from before v0.3.1 have no `played` and use `t`; marking one
 migrates `t` to `played` first, so it keeps its place, D45).
 `mark_unwatched(path)` keeps a played entry (timestamps) and drops others.
+`sync(path, state)` copies a Plex server's progress into an existing entry,
+keeping its timestamps (D53).
 
 ## `dvp/cropdetect.lua`: black bars encoded in the video
 
@@ -279,7 +284,7 @@ picture, D45), rounded down to even sizes. `from_screenshot(shot)` reads a `scre
   (unset) or `nil` (error).
 - Instance (D31): `new(cfg)` resolves device and quality; fields
   `requested_hz`, `actual_hz` (confirmed by gamescope), `original_hz`.
-  `apply_profile()` applies `dvp-quality-*`, HDR off, display-resample.
+  `apply_profile()` applies `dvp-quality-*` and display-resample (HDR off: `dvp/hdr.lua`).
   `match(fps, on_result)` runs `dvp-gamescope-refresh info`, chooses a rate,
   sends `set HZ` and schedules `verify()` (2 s) which reads
   `GAMESCOPE_DISPLAY_REFRESH_RATE_FEEDBACK` and calls `on_result`.
@@ -345,13 +350,14 @@ menu:open({
   items = {
     {label = "English", value = "AAC · Stereo", checked = true, action = fn},
     {label = "Subtitle size", value = fn_returning_text, adjust = function(dir) end},
-    {label = "Library", header = true},  -- section title
+    {label = "Library", header = true},  -- section title, skipped by the cursor (D53)
     {label = "…", disabled = true},       -- skipped by the cursor
     {separator = true, disabled = true},
   },
   selected = 1,
   rebuild = fn,          -- regenerate items after an action/adjust (live values)
   close_action = "y",    -- extra action that closes it (toggle behaviour)
+  wide = true,           -- side style: wider panel (Video info, D50)
   on_cancel = fn,        -- called on B / close_all, not when an item is chosen
 })
 ```
@@ -366,7 +372,7 @@ selectable item ("Searching…") shows no cursor.
 Long text (D32): `Menu.split_row(avail, label_need, value_need, extra,
 gap)` shares a row between label and value (pure); the selected row's cut
 text scrolls through a `ui.marquee`; title and subtitle are shortened.
-`Menu.side_width(W)` is the side panel width (also used by the player to
+`Menu.side_width(W, wide)` is the side panel width (also used by the player to
 keep its title clear of the panel).
 
 Center dialogs also take `code` (a big, letter-spaced code to type
@@ -431,8 +437,49 @@ is no connection or no answer: main.lua then clears the playlist and makes
 the file fail at once via `stream-open-filename`, D45),
 `media_token(item)` / `header_fields(item)` (transient token for mpv;
 never falls back to the account token), `report(item, state, time, duration, sync)`,
-`set_watched(item, watched, cb, sync)`. `readonly` (development) turns
-reports into log lines.
+`set_watched(item, watched, cb, sync)`, `metadata(machine, key, cb)` (full
+metadata for Video info: `cb(md, err, server_name)`),
+`remove_from_continue(item, cb)` (`PUT /actions/removeFromContinueWatching`,
+D50), `resolve(machine, key, siblings, cb)` (a *Recently played* entry →
+fresh browser entry and, with `siblings`, the paths of the rest of its
+season). Pure: `recent_key(item)` / `parse_recent_key(path)`
+(`plex://<machine>/library/metadata/<id>`). `CONTINUE_KEY` is the
+*Continue watching* hub; `list()` falls back to `/library/onDeck` on
+400/404. `readonly` (development) turns reports, marks and removals into
+log lines.
+
+## `dvp/hdr.lua`: HDR choices (D52)
+
+`Hdr.new(cfg, device, notify)`: state `enabled` (`hdr`), `mapping`
+(`hdr_mapping`: static / dynamic / app), `peak` (`hdr_peak`), `itm`
+(`sdr_to_hdr`, 0 = off), `screen` (nil until mpv's output shows whether
+the screen is in HDR mode; a known HDR screen is reset with each file);
+`menu` is false on a Deck LCD. Captures the start values of `PROPS`,
+observes `video-params/gamma` and `video-target-params/gamma` (HDR output
+proves an HDR screen). `notify(text)` (text may be nil) when `screen`
+changes. `toggle()`,
+`set_mapping(dir)`, `set_peak(dir)`, `set_itm(dir)`, `apply()` (sets only
+changed options; schedules `check()` while `screen` is unknown and HDR
+output is expected), `check()` (reads `video-target-params/gamma`; on an
+SDR output drops every choice and calls `notify`),
+`show_menu()`, `describe()` (info panel line). Pure (unit-tested):
+`options(state, defaults)`, `effective(state)`, `expects_hdr(state)`,
+`step`, `clamp_peak`, `parse_itm`, `is_hdr`. The rows are built in
+`player:hdr_items()`.
+
+## `dvp/videoinfo.lua`: Video info panel (D50)
+
+Pure (unit-tested): `format_fps`, `format_bitrate` (bits/s), `format_size`,
+`hdr_label{dv_profile, transfer, hdr10plus}` ("Dolby Vision 8 · HDR10+";
+profile 5 without HDR10), `from_ffprobe(probe, frame, path)` and
+`from_plex(md, server_name)` → a normalized description `{file, video,
+audio, subs}`, `sections(d)` → `{title, rows = {label, value}}`,
+`items(sections)` → menu items (headers + rows).
+`probe_local(path, cb)` runs ffprobe asynchronously (streams and format,
+then the first video frame: colours when the stream says "unknown",
+HDR10+, brightness).
+`open(ctx, entry)` opens the wide side panel ("Reading…") and fills it
+from ffprobe or `plex:metadata` (entries with `plex` or `plex_recent`).
 
 ## `dvp/about.lua`: About panel
 
@@ -536,27 +583,35 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `sort`.
 
 - `refresh_sources()`: re-reads `library.sources()` and the recently
-  played files (`resume:recent`, `[interface] recently_played`, D42);
+  played videos (`resume:recent`, `[interface] recently_played`, D42;
+  Plex keys count while the account has their server, D50);
   clears `is_root` on the top folder when the setup is no longer
   single-source (D23). Called by `show()`, `reload()` and when listing the
   root.
 - `load()`: root (`root_entries()`: sources, then a "Recently played"
-  header entry and the recent files, `recent = true`) or folder listing.
+  header entry and the recent videos, `recent = true`; Plex ones carry
+  `plex_recent = {machine, key, rating_key}`) or folder listing.
   With exactly one source and nothing recently played (`single_source()`)
   the root is skipped and that folder becomes the top level (`is_root`).
 - Header entries (`header = true`) are never selected: up/down skip them,
   `selectable(i, dir)` moves page/first/last jumps off them.
 - `reload()`: refresh sources + listing, keeping the cursor. `at_start()`:
   true at the top level.
-- Navigation: `enter`, `go_back` (top level → quit dialog), `select_path`.
-- Playback: `open_file(index, from_start)` shows the resume dialog when
-  there is a position; `playlist_from(index)` returns the folder's files
-  from the chosen one (if `autoplay_next`); for a recent file,
-  `recent_playlist(path)` lists its own folder.
+- Navigation: `enter`, `go_back` (top level → quit dialog), `select_path`
+  (a Plex stream URL also matches its *Recently played* key).
+- Playback: `open_file(index, from_start)` → `start(entry, list,
+  from_start)`, which shows the resume dialog when there is a position;
+  `playlist_from(index)` returns the folder's files from the chosen one
+  (if `autoplay_next`); for a recent file, `recent_playlist(path)` lists
+  its own folder; a Plex recent goes through `open_plex_recent()`
+  (`plex:resolve`, D50).
 - `open_menu()`: sort (only where `sortable()`), reload, go to library
   start (whenever not `at_start()`), mark watched / unwatched (both for a
-  partly watched video; `mark(entry, watched)` goes to Plex or
-  resume.json), remove from recently played, controls, quit.
+  partly watched video; `mark(entry, watched)` goes to Plex, updating a
+  *Recently played* copy, or resume.json), remove from Continue watching
+  (`remove_from_continue(entry)`, Plex *Continue watching* only), remove
+  from recently played, video info (`video_info(entry)`, also on View),
+  controls, quit.
 - Plex (D37): `load_plex(loc)` (async listing, `loading` state, drops late
   answers, `after_load` callback, e.g. to restore the cursor),
   `entry_state(e)` / `resume_position(e)` (Plex state or resume.json),
@@ -582,7 +637,9 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   restores `zoom_defaults` captured at script start. *Crop black bars*
   (`crop_bars`, D42): `crop_black_bars()` takes one `screenshot-raw`
   frame, runs `cropdetect.from_screenshot` and sets the file-local
-  `video-crop` (Fit for the rest); other modes clear it.
+  `video-crop` (Fit for the rest); other modes clear it. `crop_bars` is
+  true, `"none"` (nothing found: the row stays on this mode, shown as "No
+  black bars found", so left/right move on, D50) or false.
 - Lifecycle: `start()` (on start-file), `on_file_loaded()`, `stop_screen()`, `show_overlay()`
   (auto-hides after `overlay_timeout`; stays while paused or while a menu is
   open; while paused the hide timeout isn't re-armed, unpausing does it),
@@ -600,11 +657,13 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   when `ctx.surround.available`; `toggle_surround()` toasts the result),
   `open_subtitle_menu` (with "Off", then *Download subtitles…* when
   `ctx.subtitles:available(path)`),
-  `open_main_menu` (live values through `rebuild`): tracks, subtitle
-  size/position/delay, audio delay, volume, speed, picture (fit / fill =
-  `panscan 1` / stretch = `keepaspect no`), match refresh rate
-  (`toggle_refresh()`, shown when `display.refresh_possible`), next video,
-  info, stats, stop, quit.
+  `open_video_menu` (D52: video tracks when there is more than one,
+  picture (fit / fill = `panscan 1` / stretch = `keepaspect no`), match
+  refresh rate (`toggle_refresh()`, shown when `display.refresh_possible`),
+  then `hdr_items()` from `ctx.hdr`),
+  `open_main_menu` (live values through `rebuild`): tracks, *Video*
+  (`video_summary()`), subtitle size/position/delay, audio delay, volume,
+  speed, next video, info, stats, stop, quit.
 - `render()`: blurred top/bottom gradients, title, badges (resolution, HDR
   state, HW, matched Hz), pause icon, progress bar with buffered range and
   chapter ticks, elapsed / remaining / "Ends at" / chapter title, hint bar

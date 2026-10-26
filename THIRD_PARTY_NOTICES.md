@@ -16,7 +16,7 @@ as `DeckVideoPlayer-<version>-sources.tar.gz`
 | Component | Version | Licence | Notes |
 |---|---|---|---|
 | [mpv](https://mpv.io) | 0.41.0 | GPL-2.0-or-later | playback engine |
-| [FFmpeg](https://ffmpeg.org) | n9.0.1 | **GPL-3.0-or-later** (built with `--enable-gpl --enable-version3`) | decoders, demuxers, filters; with libmysofa from the runtime |
+| [FFmpeg](https://ffmpeg.org) | n9.0.1 | **GPL-3.0-or-later** (built with `--enable-gpl --enable-version3`) | decoders, demuxers, filters, `ffprobe` (Video info); with libmysofa from the runtime |
 | [libplacebo](https://code.videolan.org/videolan/libplacebo) | 7.360.1 | LGPL-2.1-or-later | GPU rendering; its bundled submodules (Vulkan-Headers, glad, fast_float, jinja, markupsafe) keep their own permissive licences |
 | [libass](https://github.com/libass/libass) | 0.17.5 | ISC | subtitle and UI rendering |
 | [LuaJIT](https://github.com/openresty/luajit2) (OpenResty branch) | 2.1-20260724 | MIT | scripting |

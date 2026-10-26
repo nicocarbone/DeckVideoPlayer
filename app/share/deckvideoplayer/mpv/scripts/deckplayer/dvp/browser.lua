@@ -5,6 +5,8 @@ local util = require "dvp.util"
 local library = require "dvp.library"
 local Resume = require "dvp.resume"
 local qrencode = require "dvp.qrencode"
+local Plex = require "dvp.plex"
+local VideoInfo = require "dvp.videoinfo"
 
 local M = {}
 M.__index = M
@@ -43,11 +45,17 @@ end
 
 -- Re-reads the configured folders and mounted drives, so an SD card or USB
 -- drive inserted while the app runs shows up. Cheap (reads mountinfo).
--- Also picks the "Recently played" files (skipping ones that are gone or
--- on a drive that isn't inserted: one stat per listed file).
+-- Also picks the "Recently played" videos (skipping files that are gone or
+-- on a drive that isn't inserted: one stat per listed file; Plex videos
+-- while signed in to their server's account).
 function M:refresh_sources()
     self.sources = library.sources(self.cfg, self.ctx.plex and self.ctx.plex:sources())
-    self.recents = self.ctx.resume:recent(self.cfg.interface.recently_played, util.file_exists)
+    local plex = self.ctx.plex
+    self.recents = self.ctx.resume:recent(self.cfg.interface.recently_played, function(path)
+        local machine = Plex.parse_recent_key(path)
+        if machine then return plex ~= nil and plex:signed_in() and plex:server(machine) ~= nil end
+        return util.file_exists(path)
+    end)
     local top = self.stack[1]
     if top and top.is_root and not self:single_source() then
         -- No longer single-source: the folder becomes a normal level, so B
@@ -72,11 +80,21 @@ function M:root_entries()
     if #self.recents > 0 then
         entries[#entries + 1] = {header = true, label = "Recently played"}
         for _, path in ipairs(self.recents) do
-            local name = util.basename(path)
-            entries[#entries + 1] = {
-                label = library.display_name(name, false, self.cfg.interface.clean_names),
-                name = name, path = path, is_dir = false, recent = true,
-            }
+            local machine, key = Plex.parse_recent_key(path)
+            if machine then
+                -- Played from Plex: opened through the server (D50).
+                local label = (self.ctx.resume:get(path) or {}).title or "Plex video"
+                entries[#entries + 1] = {
+                    label = label, name = label, path = path, is_dir = false, recent = true,
+                    plex_recent = {machine = machine, key = key, rating_key = key:match("(%d+)$")},
+                }
+            else
+                local name = util.basename(path)
+                entries[#entries + 1] = {
+                    label = library.display_name(name, false, self.cfg.interface.clean_names),
+                    name = name, path = path, is_dir = false, recent = true,
+                }
+            end
         end
     end
     return entries
@@ -216,10 +234,13 @@ function M:hide()
     self.layer:clear()
 end
 
--- Move the cursor to `path` if it is in the current listing.
+-- Move the cursor to `path` if it is in the current listing (a Plex
+-- stream URL also finds its "Recently played" entry).
 function M:select_path(path)
+    local plex = self.ctx.plex
+    local alt = plex and Plex.recent_key(plex:item_for(path))
     for i, e in ipairs(self.entries) do
-        if e.path == path then
+        if e.path == path or (alt and e.path == alt) then
             self.selected = i
             self.cursor[loc_key(self:location())] = i
             return
@@ -295,7 +316,39 @@ end
 function M:open_file(index, from_start)
     local entry = self.entries[index]
     self.cursor[loc_key(self:location())] = index
-    local list = self:playlist_from(index)
+    if entry.plex_recent then return self:open_plex_recent(entry, from_start) end
+    self:start(entry, self:playlist_from(index), from_start)
+end
+
+-- A Plex video from "Recently played": asks its server for the current
+-- state (and the rest of the season), then plays as from its listing.
+function M:open_plex_recent(entry, from_start)
+    if self.opening then return end
+    self.opening = true
+    local r = entry.plex_recent
+    -- The first request may have to find the server: say something is happening.
+    self.ctx.toast("Opening from Plex…")
+    self.ctx.plex:resolve(r.machine, r.key, self.cfg.playback.autoplay_next, function(fresh, list, err)
+        self.opening = false
+        -- The server's progress (maybe from another device) for the row.
+        if fresh then
+            self.ctx.resume:sync(entry.path, fresh.state)
+            if self.active and not self:location() then self:render() end
+        end
+        -- Only if the user is still on this row of the start screen, with
+        -- nothing else opened meanwhile.
+        local cur = self.entries[self.selected]
+        if not self.active or self:location() or self.ctx.menu:is_open()
+            or not (cur and cur.path == entry.path) then return end
+        if not fresh then
+            self.ctx.toast(err or "Can't open this video")
+            return
+        end
+        self:start(fresh, list, from_start)
+    end)
+end
+
+function M:start(entry, list, from_start)
     local pos = self.cfg.playback.resume and self:resume_position(entry)
     if pos and not from_start then
         self.ctx.menu:open({
@@ -338,12 +391,25 @@ end
 -- Marks a video watched (no position) or unwatched (no mark, no position):
 -- on the Plex server for Plex videos, in resume.json for local files.
 function M:mark(entry, watched)
-    if entry.plex then
+    local resume = self.ctx.resume
+    -- The copy shown in "Recently played" follows.
+    local function mark_recent(key)
+        if not key or not resume:get(key) then return end
+        if watched then resume:mark_watched(key) else resume:mark_unwatched(key) end
+        resume:flush()
+    end
+    if entry.plex or entry.plex_recent then
+        local item = entry.plex or entry.plex_recent
         local duration = (entry.state or {}).duration
-        self.ctx.plex:set_watched(entry.plex, watched, function(ok)
-            if not ok then self.ctx.toast("Plex didn't accept the change") return end
-            entry.state = {duration = duration, watched = watched or nil}
-            self:render()
+        local plex = self.ctx.plex
+        plex:connect(item.machine, function(base, err)
+            if not base then self.ctx.toast(err or "Can't reach the Plex server") return end
+            plex:set_watched(item, watched, function(ok)
+                if not ok then self.ctx.toast("Plex didn't accept the change") return end
+                if entry.plex then entry.state = {duration = duration, watched = watched or nil} end
+                mark_recent(Plex.recent_key(item))
+                self:render()
+            end)
         end)
         return
     end
@@ -354,6 +420,29 @@ function M:mark(entry, watched)
     end
     self.ctx.resume:flush()
     self:render()
+end
+
+-- Hides a Plex item from "Continue watching" (also in other Plex apps),
+-- keeping its progress.
+function M:remove_from_continue(entry)
+    local loc = self:location()
+    self.ctx.plex:remove_from_continue(entry.plex, function(ok)
+        if not ok then self.ctx.toast("Plex didn't accept the change") return end
+        self.ctx.toast("Removed from Continue watching")
+        if self:location() ~= loc then return end
+        for i, e in ipairs(self.entries) do
+            if e == entry then
+                table.remove(self.entries, i)
+                self.selected = util.clamp(self.selected, 1, math.max(1, #self.entries))
+                break
+            end
+        end
+        self:render()
+    end)
+end
+
+function M:video_info(entry)
+    VideoInfo.open(self.ctx, entry)
 end
 
 function M:open_menu()
@@ -383,14 +472,21 @@ function M:open_menu()
             table.insert(items, {label = "Mark as unwatched", action = function() self:mark(cur, false) end})
         end
     end
-    if cur and not cur.is_dir and not cur.plex then
-        if cur.recent then
-            table.insert(items, {label = "Remove from recently played", action = function()
-                self.ctx.resume:hide_recent(cur.path)
-                self.ctx.resume:flush()
-                self:reload()
-            end})
-        end
+    local loc = self:location()
+    if cur and cur.plex and not cur.is_dir and loc and loc.plex and loc.plex.kind == "ondeck" then
+        table.insert(items, {label = "Remove from Continue watching", action = function()
+            self:remove_from_continue(cur)
+        end})
+    end
+    if cur and cur.recent then
+        table.insert(items, {label = "Remove from recently played", action = function()
+            self.ctx.resume:hide_recent(cur.path)
+            self.ctx.resume:flush()
+            self:reload()
+        end})
+    end
+    if cur and not cur.is_dir then
+        table.insert(items, {label = "Video info", action = function() self:video_info(cur) end})
     end
     local plex = self.ctx.plex
     if plex and plex:signed_in() then
@@ -531,6 +627,8 @@ function M:handle(action)
         if entry and not entry.is_dir then self:open_file(self.selected, true) end
     elseif action == "y" then
         if self:sortable() then self:toggle_sort() end
+    elseif action == "view" then
+        if entry and not entry.is_dir then self:video_info(entry) end
     elseif action == "back" then
         self:go_back()
     elseif action == "menu" then
@@ -714,6 +812,7 @@ function M:render()
     end
     hints[#hints + 1] = {"B", (loc and not (loc.is_root and #self.stack == 1)) and "Back" or "Quit"}
     if self:sortable() then hints[#hints + 1] = {"Y", "Sort"} end
+    if cur and not cur.is_dir then hints[#hints + 1] = {"VIEW", "Info"} end
     hints[#hints + 1] = {"MENU", "Menu"}
     a:hints(hints, W - margin, H - FOOTER_H / 2, {size = 28})
 

@@ -2,6 +2,120 @@
 
 ---
 
+# Part VII — v0.4.1 Audit: HDR Overhaul, Video Info Panel & Plex Recently Played / Continue Watching (2026-10-26)
+
+All 325 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the v0.4.1 HDR option mappings (`dvp/hdr.lua`, `mpv/mpv.conf`, `dvp/player.lua`) were verified in headless gamescope (`HDR=1` and `HDR=0`) against `mpv 0.41.0` (`vo=gpu-next`, `libplacebo v7.360.0`):
+* **`hdr_mapping = static | dynamic | app`:** The mpv/libplacebo options in `Hdr.options` are correct. `static` passes PQ frames untouched with whole-film `VkHdrMetadataEXT` (`target-colorspace-hint=yes`, `target-colorspace-hint-mode=target`); `dynamic` sets `target-colorspace-hint-mode=source-dynamic` to forward per-frame Dolby Vision RPU / HDR10+ dynamic metadata into `VkHdrMetadataEXT`; `app` sets `target-peak=<peak>` and `hdr-compute-peak=yes` so libplacebo tone-maps peaks above `<peak>` nits and signals `max-luma = <peak>` / `max-cll = <peak>` on the swapchain.
+* **`sdr_to_hdr = 300 | 400 | 600 | 1000`:** Setting `inverse-tone-mapping=yes`, `target-trc=pq`, `target-prim=bt.2020`, and `target-peak=<itm>` correctly switches the Gamescope WSI swapchain to `VK_COLOR_SPACE_HDR10_ST2084_EXT` on HDR displays and expands SDR diffuse white (`203 nits`) up to `<itm>` nits PQ, while `--target-colorspace-hint-strict=yes` prevents `pq` on an SDR swapchain so `Hdr:check()` can detect non-HDR displays.
+* **`hdr = off`:** Setting `target-colorspace-hint=no` keeps the swapchain in `VK_COLOR_SPACE_SRGB_NONLINEAR_KHR` and tone-maps HDR sources to SDR.
+
+Below are the bugs and edge cases found in the HDR state machine/UI synchronization and the other v0.4.1 additions (`dvp/hdr.lua`, `dvp/player.lua`, `dvp/menu.lua`, `dvp/videoinfo.lua`, `dvp/browser.lua`, and `main.lua`).
+
+---
+
+## 1. HDR Overhaul Bugs & Edge Cases (v0.4.1)
+
+### 1.1. `dvp/player.lua` & `main.lua`: Overlay HDR badge (`[HDR10]`, `[HDR10 → SDR]`, `[SDR → HDR]`) and Info panel do not update when toggling HDR options while paused (and lag behind when playing)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`Hdr.new` callback lines 134–137, `dispatch` lines 290–295) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`render` lines 622–627, `render_info` lines 770–790)
+* **Problem (*verified in headless gamescope*):**
+  1. When the user changes `HDR` (`On`/`Off`), `HDR mapping`, `Peak brightness`, or `SDR to HDR` in the Video menu, `dispatch()` calls `player:render()` synchronously in the same Lua tick right after `mp.set_property(...)`.
+  2. However, `video-target-params` (`gamma`, `primaries`, `max-luma`) only updates **asynchronously** after mpv's VO thread renders a frame with the new swapchain/shader state.
+  3. When the video is **paused** (where `player.timer` and `player.info_timer` are stopped to save battery, D45), nothing triggers `player:render()` or `player:render_info()` once `video-target-params` updates. For example, enabling `SDR to HDR = 300 nits` while paused switches the swapchain to `VK_COLOR_SPACE_HDR10_ST2084_EXT` (`video-target-params/gamma = "pq"`), but the top-left overlay badge stays `[360p] [HW]` without `[SDR → HDR]`; conversely, turning `HDR` to `Off` while paused leaves the `[HDR10]` badge instead of `[HDR10 → SDR]`.
+  4. In `main.lua` (lines 134–137), the `Hdr.new` `notify` callback only calls `toast(text)` and `if menu:is_open() then menu:refresh() end`, omitting `player:render()` and `player:render_info()`.
+* **Suggested Fix:**
+  * Observe `video-target-params/gamma` and `video-target-params/max-luma` in `dvp/player.lua` (or in `main.lua`) to call `player:render()` and `player:render_info()` when the overlay or info panel is visible.
+  * In `main.lua`'s `Hdr.new` callback, also update `player:render()` and `player:render_info()` when `state.screen == "player"`.
+
+---
+
+### 1.2. `dvp/hdr.lua`: Non-HDR display detection (`Hdr:check` / `Hdr.effective`) leaves `mapping == "dynamic"` active and fails to refresh an open Video menu when `mapping` is `"static"` or `"dynamic"`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/hdr.lua` (`Hdr.effective` lines 57–66, `Hdr:check` lines 147–169)
+* **Problems:**
+  ```lua
+  function M.effective(s)
+      if not s.enabled or not s.gamma then return nil end
+      if is_hdr(s.gamma) then
+          if s.mapping == "app" and s.screen == false then return nil end
+          if s.mapping == "static" then return nil end
+          return {mapping = s.mapping}
+      end
+      if s.itm > 0 and s.screen ~= false then return {itm = s.itm} end
+      return nil
+  end
+  ```
+  1. **`mapping == "dynamic"` is not guarded by `s.screen ~= false` in `Hdr.effective(s)`:**
+     When `s.screen == false` (an SDR display or SteamOS with HDR disabled), mpv tone-maps HDR videos to SDR (`HDR10 → SDR (tone-mapped)`), and `hdr:show_menu()` hides the HDR settings behind `HDR: Screen not in HDR mode`. However, if `s.mapping == "dynamic"` (via `config.ini` or selected before `check()` ran), `Hdr.effective(s)` still returns `{mapping = "dynamic"}`. In `player:render_info()` (`dvp/player.lua` line 778), this appends `DESCRIPTIONS.dynamic` to the SDR tone-mapped line, displaying the contradictory string:
+     **`HDR: HDR10 → SDR (tone-mapped) · Display maps, per-scene metadata`**.
+  2. **Open Video menu is not refreshed when `self.screen` becomes `false` under `mapping == "static"` or `"dynamic"`:**
+     In `Hdr:check()` (lines 161–168), `self.notify(...)` (which triggers `menu:refresh()`) is only called when `before and (before.itm or before.mapping == "app")`. If the user starts an HDR video on an SDR screen (with default `mapping == "static"`) and opens the **Video** menu within the first 1.5 s, `self.screen` transitions from `nil` to `false` without refreshing the open Video menu—leaving interactive `HDR` and `HDR mapping` rows on screen that only disappear (jumping the cursor) if the user tries to adjust one.
+* **Suggested Fix:**
+  * In `Hdr.effective(s)`, return `nil` whenever `s.screen == false` (`if not s.enabled or not s.gamma or s.screen == false then return nil end`).
+  * In `Hdr:check()`, refresh the open Video menu whenever `self.screen` transitions to `false` (even if no toast is needed because `before` was `nil`).
+
+---
+
+### 1.3. `dvp/hdr.lua`: `self.screen` (`true` / `false`) is cached for the entire process lifetime and never re-evaluated on dock/undock or SteamOS HDR toggle
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/hdr.lua` (`Hdr.new` line 117, `Hdr:apply` line 140, `Hdr:check` lines 157–162)
+* **Problem:**
+  Once `Hdr:check()` sets `self.screen = true` or `self.screen = false`, `if self.screen == nil and M.expects_hdr(self)` never runs again for the rest of the app session:
+  1. If a user starts a video while HDR is turned off in Steam's Quick Access Menu (`•••`) or while docked to an SDR display (`self.screen = false`), and then turns HDR on in `•••` or undocks the Steam Deck OLED, the Video menu remains stuck at `HDR: Screen not in HDR mode` and refuses to enable `SDR to HDR` or `App` tone mapping until the app is restarted.
+  2. Conversely, if a user starts a video on the Steam Deck OLED (`self.screen = true`) with `SDR to HDR` or `App` mapping enabled and then docks to an SDR display (or turns HDR off in `•••`), `Hdr:check()` never runs again, leaving `inverse-tone-mapping=yes, target-trc=pq` or `target-peak=1000` active on the SDR display (dimming and washing out the picture).
+* **Suggested Fix:**
+  Reset `self.screen = nil` when `video-params/gamma` changes for a new file (and/or when `osd-dimensions` changes on dock/undock) so `Hdr:check()` re-verifies the output once per file/display change without adding any idle timers.
+
+---
+
+## 2. Video Info Panel, Menu & Plex Recently Played Bugs (v0.4.1)
+
+### 2.1. `dvp/menu.lua` & `dvp/videoinfo.lua`: Section headers (`header = true`) are treated as selectable rows in `Menu`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/menu.lua` (`selectable` lines 48–50, `render` lines 244–247) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`VideoInfo.open` lines 345–348)
+* **Problems:**
+  1. In `dvp/menu.lua`, `local function selectable(item) return item and not item.disabled and not item.separator end` does not exclude `item.header`.
+  2. However, `Menu:render()` (line 244) renders `item.header` rows without a selection highlight box. When navigating through **Video info** (or **Controls**) with `Up`/`Down` or `L1`/`R1` to scroll or marquee-scroll long values, the cursor lands on the uppercase section header rows (`FILE`, `VIDEO`, `AUDIO`, `SUBTITLES`), causing the blue selection highlight to disappear for one press at every section boundary.
+  3. In `VideoInfo.open` (lines 345–348), because `items[1]` (`{label = "File", header = true}`) is treated as selectable, `ctx.menu:update(spec, {items = items})` selects row 1 and renders the menu once, and then lines 346–347 manually set `spec.selected = 2` and call `ctx.menu:render()` a second time.
+* **Suggested Fix:**
+  Change `selectable(item)` in `dvp/menu.lua` to:
+  ```lua
+  local function selectable(item)
+      return item and not item.disabled and not item.separator and not item.header
+  end
+  ```
+  and remove the manual `spec.selected = 2; ctx.menu:render()` workaround in `VideoInfo.open`.
+
+---
+
+### 2.2. `dvp/videoinfo.lua`: `VideoInfo.from_plex` does not normalize `colorPrimaries` / `colorTrc` case
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`hdr_label` lines 53–64, `PRIMARIES` lines 66–67, `from_plex` lines 273–281)
+* **Problem:**
+  `from_plex` passes `primaries = s.colorPrimaries` and `transfer = s.colorTrc` verbatim into `PRIMARIES[v.primaries or ""]` and `M.hdr_label(v)`. If a Plex server reports uppercase/mixed-case strings (e.g. `"BT709"` or `"SMPTE2084"`), `PRIMARIES` returns `nil` and `hdr_label` falls back to `"SDR"`. Normalizing `s.colorPrimaries` and `s.colorTrc` with `:lower()` makes Plex metadata handling resilient.
+
+---
+
+### 2.3. `dvp/browser.lua`: Opening a Plex item from *Recently played* (`open_plex_recent`) has no loading feedback, does not guard `open_file` on local entries while in flight, and leaves stale `resume.json` progress if the Resume prompt is canceled
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`open_file` lines 316–321, `open_plex_recent` lines 325–339, `start` lines 341–363)
+* **Problems:**
+  1. **No visual feedback during `plex:resolve` (up to 4–10 s on first connect):** When pressing **A** or **X** on a Plex item in *Recently played* right after launching the app, `plex:resolve` has to probe/connect to the Plex server, fetch `/library/metadata/<id>`, and (for TV episodes) fetch `/library/metadata/<parent>/children` before anything happens on screen. During those seconds, no toast or loading indicator is shown.
+  2. **`self.opening` only guards `open_plex_recent`, not `open_file`:** If the user presses **A** on a Plex recent entry, sees nothing happen while `resolve` is connecting, moves the cursor to a local file with a resume position, opens `"Resume playback?"`, and presses **B** to cancel just before `resolve` finishes, `resolve`'s callback sees `self.active and not self:location() and not self.ctx.menu:is_open()` and unexpectedly opens the Plex video's resume prompt or starts playback.
+  3. **Stale progress bar on the Start screen if the video was watched/updated on another device:** `open_plex_recent` fetches `fresh` (`fresh.state`) from the Plex server, but does not sync `fresh.state` back into `self.ctx.resume` (`resume.json`). If the user watched the video further (or finished it) on another device and cancels the `"Resume playback?"` prompt with **B**, the Start screen row continues showing the old progress bar from `resume.json`.
+* **Suggested Fix:**
+  * Check `if self.opening then return end` at the top of `Browser:open_file`, and cancel/ignore the in-flight `open_plex_recent` if the user moves or interacts with another entry (or show a `"Loading…"` toast/state while `self.opening` is true).
+  * When `fresh` arrives in `open_plex_recent`, update the local `resume.json` entry (`plex://<machine>/library/metadata/<id>`) with `fresh.state` (`pos` / `watched` / `duration`) while preserving its `played` timestamp, and call `self:render()`.
+
+---
+
+## 3. v0.4.1 (Part VII) Summary Checklist
+
+Reviewed and fixed on 2026-10-26 (DECISIONS D53).
+
+- [x] **HDR (`dvp/player.lua`):** Redraw badges / info panel when `video-target-params/gamma` changes (also while paused).
+- [x] **HDR (`dvp/hdr.lua`, `main.lua`):** No choice is effective on a screen not in HDR mode; an open Video menu is rebuilt whenever the screen is found to be SDR.
+- [x] **HDR (`dvp/hdr.lua`):** A known HDR screen is checked again with each file; a known SDR screen is promoted when mpv outputs HDR. *(Not re-checked every file: that would flash every SDR file on an SDR TV with SDR to HDR set. A change in the middle of a file takes the next file.)*
+- [x] **Menu (`dvp/menu.lua`, `dvp/videoinfo.lua`):** Section headers are not selectable; scrolling up shows a section's header; Video info workaround removed. *(The highlight didn't disappear on headers; the cursor stopped on them.)*
+- [x] **Plex (`dvp/videoinfo.lua`):** Lowercase `colorPrimaries` / `colorTrc`.
+- [x] **Plex (`dvp/browser.lua`, `dvp/resume.lua`):** "Opening from Plex…" toast; open only if the cursor is still on that row and nothing else opened; server progress synced into `resume.json` (`resume:sync`).
+
+---
+
 # Part VI — v0.4.0 Audit: Night Mode, Plex Intro/Credits Markers & HRTF Surround (2026-10-25)
 
 All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diffuse-field equalized SOFA file matches the documented SHA-256 in `hrtf/README.md`. Below are the DSP/audio bugs, playback state bugs, race conditions, and edge cases identified in the v0.4.0 changes (`dvp/nightmode.lua`, `dvp/markers.lua`, `dvp/surround.lua`, `dvp/player.lua`, `dvp/plex.lua`, `main.lua`, `tools/equalize-hrtf.py`, and `helper/dvp-keep-awake.c`).

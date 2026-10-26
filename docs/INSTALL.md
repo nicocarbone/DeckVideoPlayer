@@ -98,17 +98,23 @@ See the controls table in the [README](../README.md#controls). Notes:
 
 - The library opens directly into your folder when only one source exists
   and you haven't played anything yet. Otherwise you start at a list of
-  sources, followed by **Recently played** (the last 5 local videos;
+  sources, followed by **Recently played** (the last 5 videos, local or
+  Plex;
   `recently_played` in `config.ini`, *Menu → Remove from recently played*
   hides one). The
   microSD card shows as **SD Card** (or "SD Card (Label)" if you gave it a
   name) and USB drives by their label or as **USB drive**.
 - Names too long for the screen scroll when you select them.
+- **View** on a video (or *Menu → Video info*) shows what it is: size,
+  bitrate, codec, resolution, frame rate, HDR type, audio and subtitle
+  tracks, and where the file is.
 - **A** on a partly watched file asks *Resume from …* or *Start from the
   beginning*. **X** starts from the beginning directly.
 - Videos after the chosen one in the same folder play automatically
   (`autoplay_next`).
-- **Picture** (Fit / Crop black bars / Fill / Stretch) in the playback menu
+- **Video menu** (*Menu → Video*) holds *Picture*, *Match refresh rate*
+  and, on HDR screens, the HDR settings below.
+- **Picture** (Fit / Crop black bars / Fill / Stretch) in the Video menu
   applies to the current video only; the next one starts with your normal
   setting. **Crop black bars** is for bars that are part of the video file
   (a 4:3 show stored as 16:9, a widescreen film with bars above and below):
@@ -142,10 +148,19 @@ See the controls table in the [README](../README.md#controls). Notes:
   OpenSubtitles results in your `subtitle_languages`; "Exact" marks
   subtitles made for this very file. A downloads and selects one, and it
   loads automatically next time. See [Online subtitles](#online-subtitles-opensubtitles).
-- **Match refresh rate** (playback menu, Menu button): on by default; the
+- **Match refresh rate** (Video menu): on by default; the
   screen switches to a multiple of the video's frame rate (48 Hz for films)
   to avoid judder. Steam's Quick Access Menu keeps showing its own rate
   (e.g. 90 Hz); the performance overlay shows the real one.
+- **HDR settings** (Video menu, on a Deck OLED or an HDR TV with HDR on
+  in SteamOS): *HDR* off shows HDR videos in SDR. *HDR mapping* for HDR
+  videos: *Display* (default: the screen fits the picture to its
+  brightness), *Display, per scene* (it also gets the scene-by-scene
+  information of Dolby Vision / HDR10+ videos), *App* (the player does it
+  for the *Peak brightness* you pick). *SDR to HDR* shows SDR videos in
+  HDR. Which looks best is a matter of taste; menu changes last until the
+  app closes, `config.ini` sets your defaults (`hdr_mapping`, `hdr_peak`,
+  `sdr_to_hdr`, `hdr`).
 - **About** (library menu or playback menu): version, build date, project
   page, licence and credits. Please include the version and build line in
   bug reports.
@@ -200,7 +215,9 @@ Media Server.
    by itself and your servers appear in the library, next to your folders.
 3. Open a server: **Continue watching**, then your movie and TV libraries.
    Progress bars and checkmarks come from Plex, and what you watch here
-   updates Plex for your other devices.
+   updates Plex for your other devices. In *Continue watching*, *Menu →
+   Remove from Continue watching* hides a video there (in every Plex
+   app) without changing its progress.
 
 Notes:
 - Videos play in their original quality (direct play), so HDR and the

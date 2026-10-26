@@ -22,6 +22,8 @@ non-trivial.
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
+| HDR choices (Video menu) | `…/dvp/hdr.lua` (D52), rows in `player:hdr_items()` |
+| Video info panel (library) | `…/dvp/videoinfo.lua` (ffprobe / Plex metadata, D50) |
 | Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
 | Flatpak build | `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`, `scripts/build-flatpak.sh` |
 | Steam integration | `scripts/install-steamos.sh`, `scripts/steam_shortcut.py`, `packaging/steam/` |
@@ -119,6 +121,13 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   verified read-only), headphone surround with a diffuse-field equalized
   HRTF and dialogue-matched level (D48, liked by the owner on a Deck);
   sixth audit (ISSUES.md Part VI) fixed in D49.
+- v0.4.1 work (D50, unreleased): Video info in the library (View),
+  Plex videos in *Recently played*, *Remove from Continue watching*,
+  Picture-mode fix after "No black bars found". HDR test build (D51)
+  judged a matter of taste by the owner, so the choices ship as settings
+  (D52, `dvp/hdr.lua`): a Video menu with Picture, refresh matching, HDR
+  on/off, HDR mapping and SDR to HDR; defaults as in v0.4.0.
+  Seventh audit (ISSUES.md Part VII) fixed in D53.
 - Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
   *Continue watching*, Jellyfin, SMB/NFS;
   Flathub publication floating.

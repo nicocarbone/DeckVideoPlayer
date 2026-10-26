@@ -104,13 +104,15 @@ modules:
   # FFmpeg trimmed to what a player needs: every decoder/demuxer, hardware
   # decoding through VA-API and Vulkan, no encoders besides screenshot ones.
   # libmysofa (from the runtime) enables the sofalizer filter used for
-  # headphone surround.
+  # headphone surround. ffprobe (the only program built) reads the
+  # library's Video info panel.
   - name: ffmpeg
     config-opts:
       - --disable-debug
       - --disable-doc
       - --disable-static
       - --disable-programs
+      - --enable-ffprobe
       - --enable-shared
       - --enable-gpl
       - --enable-version3

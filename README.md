@@ -192,8 +192,8 @@ Uninstall with `./scripts/install-steamos.sh --uninstall`.
 | **D-pad ← →** | Page | Seek ±10 s |
 | **L1 / R1** | Page | Seek ±60 s |
 | **L2 / R2** | First / last item | Previous / next chapter; during a Plex intro or credits, R2 skips it (or goes to the next episode) |
-| **View** | — | Playback info (decoder, HDR, refresh) |
-| **Menu** | Library menu | Playback menu (tracks, subtitle size and delay, audio delay, speed, zoom…) |
+| **View** | Video info (codec, bitrate, HDR, tracks, path) | Playback info (decoder, HDR, refresh) |
+| **Menu** | Library menu | Playback menu (tracks, video and HDR settings, subtitle size and delay, audio delay, speed…) |
 
 A keyboard also works (arrows, Enter, Esc/Backspace, `x`, `y`, `m`, `i`,
 PgUp/PgDn, Home/End).

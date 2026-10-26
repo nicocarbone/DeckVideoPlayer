@@ -133,7 +133,7 @@ of deleting them.
 | D-pad ↑↓ | move | volume ±5 | Steam Machine controllers have no volume keys |
 | L1/R1 | page | seek ±60 s | |
 | L2/R2 | first/last | chapters (±5 min fallback); R2 skips an intro/credits marker (D47) | R2 is already "forward"; the prompt names it |
-| View | — | info panel | lets users verify HW decode / HDR / Hz |
+| View | video info (D50) | info panel | lets users verify HW decode / HDR / Hz; in the library, what a file is before playing it |
 | Menu | menu | playback menu | |
 
 The Steam and "…" buttons stay with Steam. Mouse/trackpad clicks are
@@ -423,7 +423,7 @@ Recorded so they are not re-proposed without new evidence:
   Menu's refresh slider keeps showing Steam's own value (90 Hz); that is
   expected, Steam doesn't know about our request. Moving the slider makes
   Steam's value win until the next file or unpause.
-- **Toggle:** "Match refresh rate" in the playback menu switches matching
+- **Toggle:** "Match refresh rate" in the Video menu (D52) switches matching
   on/off for the session (`set_matching`); `refresh_match` in config.ini is
   the default. Off restores the previous rate immediately.
 
@@ -574,7 +574,8 @@ reproduced) before fixing:
   refreshes the list or signs out.
 - **Sources:** each server is a library source (`library.sources(cfg,
   plex:sources())`), so it appears next to folders and drives with a
-  server icon. Server page: *Continue watching* (`/library/onDeck`) and
+  server icon. Server page: *Continue watching* (`/library/onDeck`; the
+  `/hubs/continueWatching/items` hub since D50) and
   the movie/show libraries (music/photos skipped). Shows → seasons →
   episodes; a one-season show opens straight into its episodes
   (`/allLeaves`). Listings load asynchronously (`browser:load_plex`,
@@ -802,6 +803,7 @@ From the owner's tests on a Deck OLED.
     per listed file).
   - Local files only: Plex already has *Continue watching* on its server
     page, and a Plex entry would need the server to be reachable to show.
+    (Changed in D50: Plex videos are listed too.)
   - With one source, the start screen used to be skipped; now it is only
     skipped while nothing has been played, so the list is reachable for
     everyone (B from the folder goes back to it).
@@ -881,7 +883,8 @@ Each finding was checked against the code; fixed unless noted.
   blocked on it until it exits.
 - **Crop black bars:** opposite sides are paired (bars are symmetric), so
   a dark sky or a shadow on one side is no longer cropped; a failed
-  detection leaves the mode at Fit so the next press retries. *Not
+  detection leaves the mode at Fit so the next press retries (changed in
+  D50: that kept right presses from ever leaving the mode). *Not
   applicable:* the still-cropped screenshot after clearing `video-crop`;
   detection never runs while a crop is active.
 - **Smaller fixes:** recently played episodes continue in name order; pre-
@@ -1031,3 +1034,178 @@ unless noted.
 - **3.1 Keep-awake helper:** after SIGTERM it no longer writes the status
   file (which the app had removed and a new helper may be using) or makes
   the second D-Bus call.
+
+## D50. v0.4.1: video info, Plex in Recently played, Remove from Continue watching
+
+Requests from the owner after v0.4.0.
+
+- **Video info** in the library (View, or *Menu → Video info*;
+  `dvp/videoinfo.lua`): file, size, duration, container, bitrate; video
+  codec/profile, resolution, frame rate, bit depth, HDR type, colour
+  primaries, mastering peak, MaxCLL/MaxFALL, video bitrate; one row per
+  audio and subtitle track. A wide side panel (`wide = true`) so paths
+  fit; the selected row scrolls what still doesn't.
+  - **Local files: ffprobe**, now built from the FFmpeg already in the
+    bundle (`--enable-ffprobe`, the only program). mpv can't describe a
+    file without loading it as playback (resume, keep-awake, refresh
+    matching would all react), and its `track-list` lacks the Dolby Vision
+    configuration and HDR10+. Run in the background, only when asked: one
+    run for container and streams, a second one that decodes the first
+    video frame (`-read_intervals %+#1 -show_frames`), where HDR10+ and
+    the brightness metadata are. The frame is needed for the colours too:
+    FFmpeg 9's ffprobe left the HDR10 test file's transfer and primaries
+    "unknown" at stream level (FFmpeg 8 filled them). Measured: 40 ms for
+    the 1080p HDR10 test file.
+  - **Plex: the item's metadata** (`/library/metadata/<id>`: Media, Part,
+    Stream), not ffprobe over the network, which would need the token in
+    the URL (argv). Plex gives `colorTrc`/`colorPrimaries` and the
+    `DOVIPresent`/`DOVIProfile` fields, but no brightness metadata;
+    HDR10+ only when its display title says so. The folder is the file's
+    path on the server.
+  - A video that signals no transfer function is shown as SDR (what
+    players assume); Dolby Vision profile 5 has no HDR10 base layer, so
+    it isn't labelled HDR10.
+- **Plex videos in *Recently played*** (reverses D42's local-only rule).
+  `save_progress()` also writes the item to `resume.json` under
+  `plex://<machine>/library/metadata/<id>` (stable, unlike the stream URL
+  that holds the server's address) with its label. The entry is drawn
+  from that local copy, without contacting the server (no network work
+  until the user acts), and listed while the account still has that
+  server. A opens it through `plex:resolve()`: fresh metadata (the server
+  stays the source of truth for the position) and, for an episode with
+  `autoplay_next`, the rest of its season. Mark watched/unwatched there
+  goes to the server and updates the local copy.
+- **Remove from Continue watching** (Plex, library menu inside *Continue
+  watching*): most entries there are "next up" episodes not yet started,
+  which only offered *Mark as watched*; *Mark as unwatched* would change
+  nothing for them. Plex's own action is
+  `PUT /actions/removeFromContinueWatching?ratingKey=` (Plex Web,
+  python-plexapi), which keeps progress and applies to every Plex app.
+  *Continue watching* is now read from the `/hubs/continueWatching/items`
+  hub, the list Plex apps show (same items as `/library/onDeck` on the
+  owner's server), with `/library/onDeck` as a fallback when a server
+  answers 400/404. Checked read-only: the server answers 400 for the
+  action without an item and 404 for unknown actions; the removal itself
+  is still to be confirmed on a real account. Partly watched items keep
+  both *Mark as watched* and *Mark as unwatched* (D42).
+- **Picture mode after "No black bars found"** (bug): D45 left the mode at
+  Fit so the next press would retry, but the next mode to the right of
+  Fit is *Crop black bars* again, so pressing right never left it.
+  `crop_bars = "none"` now keeps the row on that mode (shown as "No black
+  bars found", picture at Fit): right goes on to Fill, left back to Fit,
+  and coming back to the mode retries.
+
+## D51. HDR experiment: who tone-maps, and SDR to HDR (test build)
+
+Status: **done, outcome in D52**: the owner found the difference a
+matter of taste, so all choices ship as settings, defaulting to the
+shipped behaviour.
+
+- **Question 1: who fits HDR to the display.** Shipped behaviour: mpv
+  sends HDR10 with the source's static metadata (`target-colorspace-hint`,
+  hint mode `target` with `target-peak=auto` = the source's values);
+  gamescope or the TV does the rest. libplacebo can do better with
+  information the display never gets: Dolby Vision and HDR10+ per-scene
+  metadata, or measured peaks. Three choices in the playback menu
+  (`dvp/hdrtest.lua`, *HDR mapping (test)*), session only:
+  - *Display*: shipped behaviour.
+  - *Per scene*: `target-colorspace-hint-mode=source-dynamic`, which sends
+    the per-scene metadata to the display as it changes (measured on a
+    Dolby Vision 8.1 film: 112 nits signalled in a dark scene instead of
+    the 1000-nit master).
+  - *App*: `target-peak=<App peak>` (300–2000 nits, default 1000, the
+    Deck OLED's HDR peak) and `hdr-compute-peak=yes`: mpv tone-maps and
+    tells the display the content peaks there, so gamescope or the TV
+    should have nothing left to compress. Risk to check by eye: a second
+    mapping by gamescope.
+- **Question 2: SDR to HDR.** mpv's `inverse-tone-mapping` with PQ /
+  BT.2020 output and highlights up to 300–1000 nits (*SDR to HDR (test)*,
+  off by default). Measured: gamescope's swapchain switches to
+  `HDR10_ST2084` and back when turned off. Expected trade-offs:
+  invented highlights, banding in 8-bit sources, extra GPU
+  work and brighter OLED pixels (battery); TVs switch picture mode for
+  every SDR file.
+- Not offered on the Deck LCD (SDR panel) or with `hdr = off`. Options are
+  set only when a file's transfer function becomes known or a choice
+  changes; the values at start (from mpv.conf and the quality profile)
+  are restored when a choice goes back to the shipped one.
+- The info panel shows *HDR test* (what is applied) and *Signalled peak*
+  (what the display is told), and says "HDR" instead of "HDR passthrough"
+  while a test choice is active.
+- Verified in headless gamescope (HDR on, Deck OLED profile, installed
+  Flatpak): all three mappings and SDR to HDR change
+  `video-target-params` as expected, hardware decoding and 0 dropped
+  frames throughout.
+
+## D52. HDR choices ship as settings, in a Video menu
+
+The D51 test build showed that which HDR mapping looks best is
+subjective (owner, Deck OLED and TV). So every choice ships, with the
+v0.4.0 behaviour as the default:
+
+- **Video menu** (*Menu → Video*, `player:open_video_menu()`), shaped like
+  the audio and subtitle menus: video tracks (only when there is a choice;
+  cover art doesn't count), *Picture* and *Match refresh rate* (moved from
+  the playback menu, which now has a *Video* row showing e.g.
+  "Fit · HDR"), then the HDR rows. No button of its own: the face buttons
+  are taken, and it is used less often than audio or subtitles.
+- **HDR rows** (`dvp/hdr.lua`, which replaces `dvp/hdrtest.lua`): *HDR*
+  on/off; for HDR sources *HDR mapping* (Display / Display, per scene /
+  App) and, for App, *Peak brightness*; for SDR sources *SDR to HDR*.
+  Contextual, so a file only shows what applies to it. Not on a Deck LCD.
+- **HDR off at runtime:** `target-colorspace-hint=no` mid-file makes
+  gamescope's swapchain go back to sRGB and mpv tone-map to SDR; on again
+  returns to HDR10 (measured in headless gamescope). Before, `hdr = off`
+  was applied once at startup by `display.lua`; now `dvp/hdr.lua` owns it.
+- **Persistence:** like night mode, the menu changes the session and
+  `config.ini` holds the defaults (`hdr`, `hdr_mapping`, `hdr_peak`,
+  `sdr_to_hdr`). The app never writes config.ini.
+- **Screens not in HDR mode** (SteamOS HDR off, an SDR TV): *SDR to HDR*
+  and *App* would make the picture dim and washed out (measured: mpv falls
+  back to an SDR target but keeps the 600-nit inverse mapping). mpv's
+  output tells whether the screen is in HDR mode, so after a change that
+  should give HDR output, a one-shot check (1.5 s) reads
+  `video-target-params/gamma`: PQ/HLG means an HDR screen; anything else
+  turns those two choices off for the session with a toast, and the menu
+  then shows "Screen not in HDR mode". At most one short glitch per
+  session, and no work while idle. All choices are dropped there (D53).
+  A known HDR screen is checked again with each file (docked to an SDR
+  TV); a known SDR screen becomes HDR again as soon as mpv outputs HDR
+  (`video-target-params/gamma` observed), not by retrying every file,
+  which would flash every SDR file on an SDR TV with SDR to HDR set.
+- **Info panel:** an *HDR* row says what is applied ("App maps to 1000
+  nits", "Off (tone-mapped to SDR)"…); the badge shows "SDR → HDR" while
+  SDR to HDR is active.
+
+## D53. Seventh audit (ISSUES.md Part VII, Gemini, v0.4.1 work) reviewed
+
+All findings checked against the code and in headless gamescope; all
+fixed.
+
+- **1.1 Badges and info panel after an HDR choice while paused:** the
+  output changes a frame later, and no timer runs while paused. The
+  player now observes `video-target-params/gamma` (fires on change only)
+  and redraws the overlay / info panel if shown. Verified: HDR off while
+  paused shows "HDR10 → SDR" at once.
+- **1.2 Screen not in HDR mode:** `effective()` now drops every choice
+  there (*Display, per scene* was still described in the info panel
+  although the output was SDR), and `check()` always rebuilds an open
+  Video menu when it learns the screen is SDR, not only when it turned
+  something off. Verified with the menu opened before the check.
+- **1.3 Screen state cached for the session:** a known HDR screen is
+  checked again with each file; a known SDR one is promoted as soon as
+  mpv outputs HDR (see D52 for why not every file). Changing the dock or
+  SteamOS's HDR setting in the middle of a file still takes the next file.
+- **2.1 Section headers took the cursor** (Video info, Controls, About):
+  `selectable()` skips them; scrolling up onto a section's first row
+  shows its header; the Video info workaround (`selected = 2`) is gone.
+  The highlight did not disappear on headers as reported; the cursor
+  just stopped on rows that do nothing.
+- **2.2 Plex colour names** are lowercased before lookup (servers report
+  lowercase today; cheap hardening).
+- **2.3 Plex item from *Recently played*:** a toast ("Opening from
+  Plex…") while the server is asked; the answer only opens the video if
+  the cursor is still on that row with nothing else opened (a dialog
+  opened and cancelled meanwhile no longer leads to a surprise start);
+  the server's progress is copied into the row (`resume:sync`, play time
+  kept).

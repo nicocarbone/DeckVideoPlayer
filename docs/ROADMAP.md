@@ -71,6 +71,13 @@ Night mode for any output (D46), R2 to skip intros and credits or go to
 the next episode on Plex (D47), headphone surround with a diffuse-field
 equalized HRTF and dialogue-matched level (D48), sixth audit (D49).
 
+## v0.4.1: video info, Plex in Recently played (in progress)
+
+Video info for local and Plex videos (View in the library), Plex videos in
+*Recently played*, *Remove from Continue watching*, and a Picture-mode fix
+(D50). A Video menu with HDR choices: HDR off, who maps HDR to the screen,
+SDR to HDR (D51 test, D52).
+
 ## Next, in this order
 
 1. **Next episode from *Continue watching*** (Plex): finishing an episode

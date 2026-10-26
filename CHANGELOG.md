@@ -5,6 +5,45 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.4.1 (unreleased)
+
+### New
+
+- **Video info** in the library: select a video and press **View** (or
+  *Menu → Video info*) to see its file name and folder, size, duration,
+  bitrate, video codec, resolution, frame rate, bit depth, HDR type
+  (HDR10, HDR10+, Dolby Vision, HLG), mastering brightness, and the audio
+  and subtitle tracks. Works for local files and Plex videos (for Plex,
+  the path is the file's location on the server).
+- **Plex videos in *Recently played*** on the start screen, next to
+  local ones. Opening one checks the server for the latest position, and
+  an episode continues with the rest of its season.
+- **Remove from Continue watching** (Plex) in the library menu: hides a
+  video from *Continue watching*, also in other Plex apps, without
+  changing its progress. Useful for "next up" episodes of shows you
+  stopped watching.
+- **Video menu** (*Menu → Video*): *Picture* and *Match refresh rate*
+  moved here, next to new HDR settings for HDR screens (Deck OLED, HDR
+  TVs). HDR looks are a matter of taste, so you can now choose:
+  - **HDR**: on, or off to show HDR videos in SDR even on an HDR screen.
+  - **HDR mapping** (HDR videos): *Display* (the screen fits the picture
+    to its brightness, as before), *Display, per scene* (the screen also
+    gets Dolby Vision / HDR10+ scene-by-scene information), or *App* (the
+    player does it, for a chosen peak brightness).
+  - **SDR to HDR** (SDR videos): shows normal videos in HDR, with
+    highlights up to 300–1000 nits.
+
+  The defaults are the same as in v0.4.0. Menu changes last until you
+  close the app; to keep a choice, set `hdr`, `hdr_mapping`, `hdr_peak`
+  or `sdr_to_hdr` in `config.ini`. On a screen that isn't in HDR mode,
+  *SDR to HDR* and *App* switch themselves off.
+
+### Fixed
+
+- **Picture → Crop black bars:** when no bars were found, pressing right
+  went back to *Crop black bars* again and never reached *Fill* and
+  *Stretch*. The setting now shows "No black bars found" and moves on.
+
 ## v0.4.0 (2026-10-25)
 
 Better sound: night mode and fuller headphone surround. Plex skips intros
