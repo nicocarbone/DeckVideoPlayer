@@ -5,6 +5,41 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.5.0 (2026-10-27)
+
+### New
+
+- **Jellyfin**: *Menu → Add a Jellyfin server…* finds the Jellyfin
+  servers on your home network (servers it can't find can be listed in
+  `config.ini`). Sign in with Quick Connect: approve the code shown (or
+  scan the QR code) in Jellyfin on your phone or PC. Then browse
+  *Continue watching*, *Next up* and your libraries, and play the original
+  files with HDR, hardware decoding and refresh-rate matching. Progress
+  and watched marks stay in sync with your other Jellyfin apps; subtitle
+  files from the server, *Download subtitles…*, *Recently played*, Video
+  info and *Skip intro* / *Skip credits* (with a server plugin that
+  detects them) work as with Plex.
+- Plex and Jellyfin servers are labelled on the start screen.
+- *Recently played* shows where each video is (Local, SD Card, USB, Plex,
+  Jellyfin), so the same film played from two places is easy to tell
+  apart; each keeps its own progress.
+- Video info starts with a *Source* row: the folder or drive, or the
+  service, server and connection (local network or remote).
+- **Subtitle brightness** in the playback menu (30–100 %), for subtitles
+  that glare in dark scenes, above all on HDR screens. Picture-based
+  subtitles (Blu-ray PGS, DVD) dim on HDR screens only.
+
+### Fixed
+
+- Signing in to Plex when the app had opened straight into your only
+  folder now shows the start screen with the new server.
+
+### Changed
+
+- Headphone surround: the surround channels of 5.1 audio now sound behind
+  you (at 120°, as in a 5.1 room) instead of beside your ears, for a
+  clearer front/back separation.
+
 ## v0.4.2 (2026-10-26)
 
 A smaller HDR menu for videos without scene-by-scene information.

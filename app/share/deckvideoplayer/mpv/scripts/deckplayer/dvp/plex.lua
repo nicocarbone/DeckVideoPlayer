@@ -31,10 +31,13 @@ local http = require "dvp.http"
 local version = require "dvp.version"
 local Resume = require "dvp.resume"
 local Markers = require "dvp.markers"
+local VideoInfo = require "dvp.videoinfo"
 
 local M = {}
 M.__index = M
 
+-- Backend id and name (dvp/servers.lua, D55).
+M.ID, M.NAME = "plex", "Plex"
 M.PRODUCT = "Deck Video Player"
 M.PLEX_TV = "https://plex.tv"
 M.LINK_URL = "plex.tv/link"
@@ -184,7 +187,7 @@ function M.entries_from(container, base, machine, kind)
         if (d.type == "movie" or d.type == "show") and M.safe_key(key) then
             out[#out + 1] = {label = d.title, name = d.title, is_dir = true,
                 path = "plex://" .. machine .. key,
-                plex = {machine = machine, key = key, kind = d.type == "show" and "shows" or "items"}}
+                server = {backend = M.ID, machine = machine, key = key, kind = d.type == "show" and "shows" or "items"}}
         end
     end
     for _, md in ipairs(container.Metadata or {}) do
@@ -201,7 +204,7 @@ function M.entries_from(container, base, machine, kind)
             end
             e.is_dir = true
             e.path = "plex://" .. machine .. key
-            e.plex = {machine = machine, key = key, kind = child_kind}
+            e.server = {backend = M.ID, machine = machine, key = key, kind = child_kind}
             if md.leafCount and md.viewedLeafCount and md.leafCount > 0 and md.viewedLeafCount >= md.leafCount then
                 e.state = {watched = true}
             end
@@ -213,7 +216,7 @@ function M.entries_from(container, base, machine, kind)
                 e.is_dir = false
                 e.path = base .. part.key
                 e.state = M.item_state(md)
-                e.plex = {machine = machine, rating_key = md.ratingKey, key = md.key,
+                e.server = {backend = M.ID, machine = machine, rating_key = md.ratingKey, key = md.key,
                           duration = md.duration, kind = md.type,
                           -- Full title for the player ("Show · S01E02 · Title").
                           title = M.item_label(md, "ondeck"),
@@ -326,7 +329,7 @@ function M:sources()
     if not self:signed_in() then return out end
     for _, s in ipairs(self.account.servers or {}) do
         out[#out + 1] = {name = s.name, path = "plex://" .. s.machine .. "/", kind = "plex",
-                         plex = {machine = s.machine, key = "/", kind = "root"}}
+                         server = {backend = M.ID, machine = s.machine, key = "/", kind = "root"}}
     end
     return out
 end
@@ -534,10 +537,10 @@ function M:list(loc, cb)
             if loc.kind == "root" then
                 table.insert(entries, 1, {label = KIND_TITLES.ondeck, name = KIND_TITLES.ondeck, is_dir = true,
                     path = "plex://" .. loc.machine .. M.CONTINUE_KEY,
-                    plex = {machine = loc.machine, key = M.CONTINUE_KEY, kind = "ondeck"}})
+                    server = {backend = M.ID, machine = loc.machine, key = M.CONTINUE_KEY, kind = "ondeck"}})
             end
             for _, e in ipairs(entries) do
-                if not e.is_dir then self.items[e.path] = e.plex end
+                if not e.is_dir then self.items[e.path] = e.server end
             end
             cb(entries)
         end)
@@ -560,6 +563,16 @@ function M:metadata(machine, key, cb)
             end
             cb(md, nil, server.name)
         end)
+    end)
+end
+
+-- The Video info panel's description of an item (`ref` = {machine, key}).
+-- cb(description or nil, err).
+function M:video_info(ref, cb)
+    self:metadata(ref.machine, ref.key, function(md, err, server_name)
+        if not md then return cb(nil, err) end
+        local base = self.bases[ref.machine]
+        cb(VideoInfo.from_plex(md, VideoInfo.server_source(M.NAME, server_name, base and base.kind)))
     end)
 end
 
@@ -595,6 +608,11 @@ function M.parse_recent_key(path)
     return nil
 end
 
+-- Pure: the `server_recent` reference of a "Recently played" entry.
+function M.recent_ref(machine, key)
+    return {backend = M.ID, machine = machine, key = key, rating_key = key:match("(%d+)$")}
+end
+
 -- A Plex video in "Recently played" ready to play: fresh state from the
 -- server, and (`siblings`) the rest of its season after an episode, for
 -- auto-play. cb(entry, paths or nil, err); paths starts with entry.path.
@@ -604,14 +622,14 @@ function M:resolve(machine, key, siblings, cb)
         local base = self.bases[machine]
         local entry = base and M.entries_from({Metadata = {md}}, base.url, machine, "ondeck")[1]
         if not entry or entry.is_dir then return cb(nil, nil, "Not a video") end
-        self.items[entry.path] = entry.plex
+        self.items[entry.path] = entry.server
         local parent = md.type == "episode" and tostring(md.parentRatingKey or ""):match("^%d+$")
         if not siblings or not parent then return cb(entry, {entry.path}) end
         self:list({machine = machine, key = "/library/metadata/" .. parent .. "/children",
                    kind = "episodes"}, function(entries)
             local paths
             for _, e in ipairs(entries or {}) do
-                if e.plex and e.plex.rating_key == entry.plex.rating_key then paths = {} end
+                if e.server and e.server.rating_key == entry.server.rating_key then paths = {} end
                 if paths and not e.is_dir then paths[#paths + 1] = e.path end
             end
             if not paths or paths[1] ~= entry.path then paths = {entry.path} end

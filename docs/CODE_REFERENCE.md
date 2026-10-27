@@ -29,7 +29,7 @@ Runs inside the Flatpak (`/app/bin`) and from the source tree.
 2. Config dir `$DVP_CONFIG_DIR` (default `~/.config/deckvideoplayer`) and data
    dir `$DVP_DATA_DIR` (default `$XDG_DATA_HOME/deckvideoplayer`). Copies the
    default `config.ini` on first run. The launcher sets umask 077, so
-   everything the app creates (config, `plex.json`, `resume.json`,
+   everything the app creates (config, `plex.json`, `jellyfin.json`, `resume.json`,
    subtitles) is owner-only from creation (D39, D40).
 3. `ini_get section key` is a tiny awk INI reader, used only for
    `[display] gpu_context`.
@@ -115,12 +115,14 @@ Responsibilities:
     external launches; remembered in `state.resumed_at` and announced with a
     toast on `file-loaded`); restores `aid`/`sid` from the resume entry (as
     `file-local-options`).
-  - Plex videos (D37): on_load fetches the resume point and subtitle
-    files (`plex:prepare`), sets the transient-token header and the media
-    title file-locally; `save_progress(ending)` reports to the server
-    instead of resume.json (blocking `stopped` + scrobble when the file
-    closes), and keeps a local copy under `Plex.recent_key(item)` with the
-    label for *Recently played* (D50).
+  - Server videos (Plex D37, Jellyfin D55; `servers:item_for(path)`):
+    on_load fetches the resume point and subtitle files
+    (`backend:prepare`), sets the header (Plex: transient token;
+    Jellyfin: usually none) and the media title file-locally;
+    `save_progress(ending)` reports to the server instead of resume.json
+    (blocking `stopped` + watched mark when the file closes below the
+    server's own 90 % threshold), and keeps a local copy under
+    `backend.recent_key(item)` with the label for *Recently played* (D50).
   - `on_preloaded` hook: `subtitles:load_stored(path)` adds subtitles
     downloaded earlier for this video before track selection (D28).
   - `on_unload` hook: `save_progress()` + flush. Properties are still
@@ -224,8 +226,8 @@ key.
 
 - `sources(cfg, extra)` → `{name, path, kind}`: configured folders that exist
   (`kind = "folder"`), plus removable media mount points when enabled
-  (`kind = "sdcard" | "usb" | "removable"`, D33), then `extra` (Plex
-  servers, `kind = "plex"`).
+  (`kind = "sdcard" | "usb" | "removable"`, D33), then `extra` (media
+  servers, `kind = "plex"` / `"jellyfin"`).
 - `sort_entries(entries, mode)`: folders first, natural name order or
   newest first (`mode = "date"`); uses `sort_name`, else `name`, else
   `label`, and `mtime`. Shared by folder listings and Plex.
@@ -235,6 +237,10 @@ key.
   `/dev/mmcblk0p1`.
 - `removable_info(path, source)` → `kind, name` ("SD Card", "SD Card
   (Label)", "USB drive", a real label, or the folder name).
+- `source_for(sources, path)` → the local source holding a file (longest
+  path prefix) or nil; `source_tag(source)` → "Local" / "SD Card" /
+  "USB" / "Drive" (*Recently played* tags), `source_label(source)` →
+  "Local · Videos", "USB drive · Label"… (Video info Source row, D56).
 - `list(path, cfg, sort_mode)` → entries `{name, label, key, path, is_dir,
   mtime, size}`. Hidden files are skipped unless `show_hidden`; files are
   filtered by extension; folders come first; sorted by `natural_key` or by
@@ -336,8 +342,9 @@ Language names (ISO 639-1/2), codec display names (DTS profile aware),
 Default"; external subtitle files show "External" instead of the codec), `tracks(kind)`, `selected_track(kind)`,
 `hdr_state(video_track?)` (pass a cached video track to avoid re-reading
 `track-list`) → `source, output_hdr, video_params, target_params` (source:
-`HDR10`/`HLG`/`Dolby Vision`/`SDR`; output from `video-target-params`), and
-`resolution_badge(w, h)`.
+`HDR10`/`HLG`/`Dolby Vision`/`SDR`; output from `video-target-params`),
+`resolution_badge(w, h)`, and `sub_brightness(level, peak)` → `sub-color`
+grey and `image-subs-hdr-peak` nits (D58).
 
 ## `dvp/menu.lua`: modal menus
 
@@ -412,8 +419,11 @@ leading `/`, URL-path characters only; entries failing it are dropped);
 30 s, near the end = watched); `entries_from(container, base, machine, kind)`
 → browser entries (sections, shows → `/allLeaves` for one season, kind
 `seasons`/`episodes` for their listings, which keep the server's order;
-movies/episodes with `path` = direct-play URL and `plex = {machine,
-rating_key, key, duration, kind, title}`); `external_subtitles(md, base)`.
+movies/episodes with `path` = direct-play URL and `server = {backend =
+"plex", machine, rating_key, key, duration, kind, title}`);
+`external_subtitles(md, base)`. Backend of `dvp/servers.lua` (D55):
+`ID = "plex"`, `NAME = "Plex"`, `video_info(ref, cb)`, `recent_ref(machine,
+key)`.
 
 Instance `Plex.new(data_dir, {allow_insecure})` (account in `plex.json`,
 written with `util.write_private`):
@@ -448,6 +458,60 @@ season). Pure: `recent_key(item)` / `parse_recent_key(path)`
 400/404. `readonly` (development) turns reports, marks and removals into
 log lines.
 
+## `dvp/servers.lua`: media servers behind one interface (D55)
+
+`Servers.new({plex, jellyfin})`: `get(id)`, `for_ref(ref)` (the backend of
+an entry's `server` / `server_recent` table, by its `backend` field),
+`sources()` (every backend's), `item_for(path)` → item, backend (nil for
+local files), `parse_recent_key(path)` → backend, server id, key,
+`recent_key(item)`, `recent_available(path)` (nil for local paths). The
+backends share the method set listed at the top of the file.
+
+## `dvp/jellyfin.lua`: Jellyfin (D55)
+
+Pure (unit-tested): `safe_id(id)`, `private_host(host)`,
+`normalize_url(url)` (http only for home network addresses; optional path
+prefix), `auth_header(device, device_id, token)`, `parse_discovery(text)`
+(dvp-discover output → `{id, name, url}`, checked, one per id and address,
+at most `MAX_ANSWERS` = 16),
+`item_state(it)` (ticks → `{pos, duration, watched}`, rules as Plex),
+`date_key(iso)`, `item_label(it, kind)`, `stream_url(base, id)`,
+`entries_from(items, base, server_id, kind)` (libraries, folders, series →
+`seasons` or `series_episodes` for one season, seasons → `episodes`;
+videos with `server = {backend = "jellyfin", machine, key, rating_key,
+duration (ms), kind, title, …}`), `listing_path(loc, user)` (kinds `root`,
+`ondeck`, `nextup`, `items`, `seasons`, `episodes`, `series_episodes`),
+`external_subtitles(it, base)` (text formats only),
+`recent_key(item)` / `parse_recent_key(path)`
+(`jellyfin://<server>/<item>`), `recent_ref(id, key)`.
+
+Instance `Jellyfin.new(data_dir, {urls})` (servers in `jellyfin.json`,
+owner-only; `urls` from `[jellyfin] server`): `signed_in()`, `servers()`,
+`server(id)`, `sources()`, `probe(url, cb)`, `discover(cb)` (dvp-discover
++ config URLs, each probed; a broadcast answer counts only if its address
+answers with the same id; config URLs win, D59), `start_quick_connect(server, cb(code))` /
+`poll_quick_connect(cb(done, err))` / `cancel_quick_connect()`,
+`sign_out(id)` (revokes the token, best effort) / `forget_server(id)`,
+`connect(id, cb)` (the saved address must answer with the server's id,
+else the LAN is searched), `list(loc, cb)`, `metadata(id, item, cb)`,
+`video_info(ref, cb)`, `resolve(id, item, siblings, cb)`, `item_for(path)`,
+`prepare(item)` (blocking: resume point, size, external subtitles, media
+segments → markers; checks once per connection whether streams need a
+token, `streams_anonymously`, with a 1-byte range request to `/dev/null`;
+resets the item's "playing" report state), `header_fields(item)` (empty unless the
+server needs the token), `report(item, state, time, duration, sync)`
+(`/Sessions/Playing`, `…/Progress`, `…/Stopped`), `set_watched(item,
+watched, cb, sync)` (`/UserPlayedItems`), `describe(path)`,
+`fetch_range(…)`, `forget_session(id)`, `forget_token(id)`. `readonly`
+(development) turns reports and marks into log lines.
+
+## `helper/dvp-discover.c` (D55)
+
+`dvp-discover [TIMEOUT_MS]`: sends Jellyfin's discovery broadcast (UDP
+7359) on every IPv4 interface and to 255.255.255.255, prints each answer
+on its own line (control characters replaced) until the time is up, at
+most 64 answers.
+
 ## `dvp/hdr.lua`: HDR choices (D52)
 
 `Hdr.new(cfg, device, notify)`: state `enabled` (`hdr`), `mapping`
@@ -475,14 +539,16 @@ file). The rows are built in
 Pure (unit-tested): `format_fps`, `format_bitrate` (bits/s), `format_size`,
 `hdr_label{dv_profile, transfer, hdr10plus}` ("Dolby Vision 8 · HDR10+";
 profile 5 without HDR10), `from_ffprobe(probe, frame, path)` and
-`from_plex(md, server_name)` → a normalized description `{file, video,
-audio, subs}`, `sections(d)` → `{title, rows = {label, value}}`,
+`from_plex(md, source)`, `from_jellyfin(it, source)` → a normalized description `{file, video,
+audio, subs}`, `server_source(service, server_name, connection)` →
+"Plex · Home · local network" (the Source row, D56),
+`sections(d)` → `{title, rows = {label, value}}` (File starts with Source),
 `items(sections)` → menu items (headers + rows).
 `probe_local(path, cb)` runs ffprobe asynchronously (streams and format,
 then the first video frame: colours when the stream says "unknown",
 HDR10+, brightness).
-`open(ctx, entry)` opens the wide side panel ("Reading…") and fills it
-from ffprobe or `plex:metadata` (entries with `plex` or `plex_recent`).
+`open(ctx, entry, source)` opens the wide side panel ("Reading…") and fills it
+from ffprobe or the server's `video_info(ref, cb)` (entries with `server` or `server_recent`, D55).
 
 ## `dvp/about.lua`: About panel
 
@@ -521,16 +587,17 @@ their end).
 
 D27. `Surround.new(cfg, sofa_path)`; fields `available` (HRTF file exists,
 no passthrough, filter works), `enabled` (user choice), `active` (filter
-currently in the chain: the channel count it was added for, or false),
-`channels` (decoder output channels).
+currently in the chain: "<channels> <layout>" it was added for, or false),
+`channels`, `layout` (decoder output channel count and layout name).
 
-- Observes `audio-params/channel-count`; `update()` adds the filter
+- Observes `audio-params` (one observer for count and layout); `update()` adds the filter
   (`af add`, label `@dvp-surround`) when `enabled` and channels > 2,
-  replaces it when the channel count changes, and removes it otherwise. A failed `af add` makes the feature unavailable.
+  replaces it when the count or layout changes, and removes it otherwise. A failed `af add` makes the feature unavailable.
 - `toggle()` → new `enabled` state.
 - Pure: `escape_lavfi(value)` (two-level FFmpeg escaping),
-  `filter_string(sofa_path, channels)` (the `af add` argument,
-  `%len%`-quoted: `sofalizer` at gain 0, then `volume` and `LIMITER`),
+  `filter_string(sofa_path, channels, layout)` (the `af add` argument,
+  `%len%`-quoted: `sofalizer` at gain 0 with `SPEAKERS[layout]`, then `volume` and `LIMITER`),
+  `SPEAKERS` (5.1 / 5.1(side): surrounds at 120° / 240°, by layout index, D57),
   `gain(channels)` (`GAIN_51 = 12.5` dB plus 3 dB per channel above six:
   dialogue level matches mpv's downmix, D48), `LFE_GAIN = 3`, `LIMITER`
   (alimiter −1 dBFS, D49).
@@ -572,9 +639,10 @@ D28. `SubDownload.new(ctx, data_dir, api_url)`.
   it (or selects the stored file if that upload was downloaded before).
 - `stored(path)` / `load_stored(path)`: downloaded files of a video, added
   with `sub-add … auto <title> <lang>` from the `on_preloaded` hook.
-- Plex videos (D38): `key` is `plex_key(item)` (no network), search terms
-  `plex_info(item)` (both pure), `hash_for(path, cb)` fetches the first
-  and last 64 KiB from the server for the exact-match hash.
+- Server videos (Plex D38, Jellyfin D55): `key` is `server_key(item)`
+  (`plex-…` / `jellyfin-…`, no network), search terms `server_info(item)`
+  (both pure), `hash_for(path, cb)` fetches the first and last 64 KiB from
+  the server (`fetch_range`) for the exact-match hash.
 - Pure: `safe_lang(lang)` (letters and `-`, else `und`), `file_name(release, lang, file_id)`, `parse_file_name(name)` (→
   `{title, lang, file_id}`),
   `video_key(path)` (moviehash, or `small-<size>` for tiny files).
@@ -592,35 +660,44 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
   single-source (D23). Called by `show()`, `reload()` and when listing the
   root.
 - `load()`: root (`root_entries()`: sources, then a "Recently played"
-  header entry and the recent videos, `recent = true`; Plex ones carry
-  `plex_recent = {machine, key, rating_key}`) or folder listing.
+  header entry and the recent videos, `recent = true`; server ones carry
+  `server_recent = backend.recent_ref(id, key)`; every recent has a `tag`
+  from `recent_tag(path, backend, id)`, drawn as a pill on the right,
+  D56) or folder listing.
   With exactly one source and nothing recently played (`single_source()`)
   the root is skipped and that folder becomes the top level (`is_root`).
 - Header entries (`header = true`) are never selected: up/down skip them,
   `selectable(i, dir)` moves page/first/last jumps off them.
 - `reload()`: refresh sources + listing, keeping the cursor. `at_start()`:
   true at the top level.
+- `reload_to_start()`: after a server sign-in, leaves the only folder
+  (start screen skipped) for the start screen, then reloads (D59).
 - Navigation: `enter`, `go_back` (top level → quit dialog), `select_path`
-  (a Plex stream URL also matches its *Recently played* key).
+  (a server stream URL also matches its *Recently played* key).
 - Playback: `open_file(index, from_start)` → `start(entry, list,
   from_start)`, which shows the resume dialog when there is a position;
   `playlist_from(index)` returns the folder's files from the chosen one
   (if `autoplay_next`); for a recent file, `recent_playlist(path)` lists
-  its own folder; a Plex recent goes through `open_plex_recent()`
-  (`plex:resolve`, D50).
+  its own folder; a server recent goes through `open_server_recent()`
+  (`backend:resolve`, D50, D55).
 - `open_menu()`: sort (only where `sortable()`), reload, go to library
   start (whenever not `at_start()`), mark watched / unwatched (both for a
-  partly watched video; `mark(entry, watched)` goes to Plex, updating a
+  partly watched video; `mark(entry, watched)` goes to the server, updating a
   *Recently played* copy, or resume.json), remove from Continue watching
   (`remove_from_continue(entry)`, Plex *Continue watching* only), remove
   from recently played, video info (`video_info(entry)`, also on View),
   controls, quit.
-- Plex (D37): `load_plex(loc)` (async listing, `loading` state, drops late
-  answers, `after_load` callback, e.g. to restore the cursor),
-  `entry_state(e)` / `resume_position(e)` (Plex state or resume.json),
-  `sortable()`, `plex_sign_in()` (code dialog, polls only while open),
-  `plex_account_menu()`; `show(select)` puts the cursor on a path once
-  the listing is there.
+- Media servers (D37, D55): `load_server(loc)` (async listing through the
+  backend, `loading` state, drops late answers, `after_load` callback,
+  e.g. to restore the cursor), `entry_state(e)` / `resume_position(e)`
+  (server state or resume.json), `sortable()` (not the server page, its
+  two lists, seasons or episodes), `plex_sign_in()` (code dialog, polls
+  only while open), `plex_account_menu()`, `jellyfin_add()` (servers found
+  on the LAN and in config.ini), `jellyfin_sign_in(server)` (Quick Connect
+  code + QR, polls every 3 s only while open), `jellyfin_menu()` /
+  `jellyfin_server_menu(s)` (sign out); `show(select)` puts the cursor on
+  a path once the listing is there. Server sources show "Plex" /
+  "Jellyfin" before the chevron.
 - `render()`: background, header (title, breadcrumb, counts), rows
   (`draw_row()`; header entries as a small caption with a rule) (icon:
   folder / server / SD card / drive / video, label, status: chevron / ✓ / progress
@@ -665,7 +742,8 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   refresh rate (`toggle_refresh()`, shown when `display.refresh_possible`),
   then `hdr_items()` from `ctx.hdr`),
   `open_main_menu` (live values through `rebuild`): tracks, *Video*
-  (`video_summary()`), subtitle size/position/delay, audio delay, volume,
+  (`video_summary()`), subtitle size/brightness/position/delay
+  (`set_sub_brightness(level)`, 30–100 %, D58), audio delay, volume,
   speed, next video, info, stats, stop, quit.
 - `render()`: blurred top/bottom gradients, title, badges (resolution, HDR
   state, HW, matched Hz), pause icon, progress bar with buffered range and
@@ -698,13 +776,14 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `scripts/steam_shortcut.py add\|artwork\|remove\|repair\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). `repair` (also done by `add`) removes a `--branch=…` from the app's own shortcut (D44); `status` reports a pinned branch. Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `PLEX_WRITE=1` allows progress reports to Plex (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `PLEX_WRITE=1` / `JELLYFIN_WRITE=1` allow progress reports to Plex / Jellyfin (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
-| `helper/build.sh [OUTDIR]` | Builds the refresh-rate helper (D31). |
+| `helper/build.sh [OUTDIR]` | Builds the native helpers: refresh rate (D31), keep awake (D43), Jellyfin discovery (D55). |
 | `scripts/make-source-archive.py OUT [--manifest M]` | GPL corresponding-source archive of a release from the manifest's pinned sources (D36). |
 | `scripts/build-info.sh OUTFILE` | Writes `date=` and `commit=` for the About panel; run by the Flatpak manifest (D34). |
 | `scripts/release-notes.sh [vX.Y.Z]` | Prints the `CHANGELOG.md` section of a release (default: `dvp/version.lua`) for the GitHub release text; exits 1 if missing (D41). |
 | `tools/plex-dev-account.py DATA_DIR` | Writes a signed-in `plex.json` for tests from `.dev/plex/` (D37). |
+| `tools/jellyfin-dev-account.py login [URL]` / `DATA_DIR` | Quick Connect sign-in for tests (token in `.dev/jellyfin/`), then writes a signed-in `jellyfin.json` (D55). |
 | `tools/mock-opensubtitles.py [PORT]` | Fake OpenSubtitles API for tests (D30); used by `OSMOCK=1 tools/headless-run.sh`. |
 | `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
 | `.github/workflows/build.yml` | CI: unit tests, Flatpak bundle; on `v*` tags a GitHub release with the bundle and an installer tarball. |

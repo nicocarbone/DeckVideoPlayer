@@ -117,6 +117,40 @@ function M.sources(cfg, extra)
     return out
 end
 
+-- The local source (folder or drive) a file is in: the one with the
+-- longest matching path, or nil. Pure.
+function M.source_for(sources, path)
+    local best
+    for _, s in ipairs(sources) do
+        local p = s.path
+        if p and p:sub(1, 1) == "/" and (#p > (best and #best.path or 0)) then
+            local prefix = p:sub(-1) == "/" and p or (p .. "/")
+            if path == p or path:sub(1, #prefix) == prefix then best = s end
+        end
+    end
+    return best
+end
+
+-- Where a local file is, short (a tag on "Recently played" rows) and long
+-- (Video info): "Local" / "Local · Videos", "SD Card" / "SD Card (Label)",
+-- "USB" / "USB drive · Label". `source`: from source_for (nil: "Local"). Pure.
+function M.source_tag(source)
+    local kind = source and source.kind
+    if kind == "sdcard" then return "SD Card" end
+    if kind == "usb" then return "USB" end
+    if kind == "removable" then return "Drive" end
+    return "Local"
+end
+
+function M.source_label(source)
+    if not source then return "Local" end
+    local kind, name = source.kind, source.name
+    if kind == "sdcard" then return name end
+    if kind == "usb" then return name == "USB drive" and name or ("USB drive · " .. name) end
+    if kind == "removable" then return "Drive · " .. name end
+    return "Local · " .. name
+end
+
 -- Sorts entries in place: folders first, then files; by natural name
 -- order, or by date (newest first) when mode == "date". The name used is
 -- `sort_name`, else `name`, else `label`; dates come from `mtime`.

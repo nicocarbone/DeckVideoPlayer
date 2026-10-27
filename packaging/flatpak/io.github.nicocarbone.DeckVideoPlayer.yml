@@ -212,7 +212,8 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm755 app/bin/deckvideoplayer ${FLATPAK_DEST}/bin/deckvideoplayer
-      # Refresh-rate helper (gamescope_control client, D31).
+      # Native helpers: refresh rate (gamescope_control client, D31), keep
+      # awake (D43), Jellyfin discovery (D55).
       - helper/build.sh ${FLATPAK_DEST}/bin
       - mkdir -p ${FLATPAK_DEST}/share/deckvideoplayer
       - cp -r app/share/deckvideoplayer/. ${FLATPAK_DEST}/share/deckvideoplayer/

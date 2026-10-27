@@ -18,7 +18,7 @@ it first; then [CODE_REFERENCE.md](CODE_REFERENCE.md) for per-module detail,
 | vii | Subtitle and audio track selection | `dvp/player.lua` menus (X / Y buttons) |
 | viii | Steam Machines, 4K HDR VRR | `tv` device profile, `high` quality, UI scales by aspect, VRR handled by gamescope |
 
-User-chosen scope for v1: local folders (Plex added in v0.3, network shares later),
+User-chosen scope for v1: local folders (Plex added in v0.3, Jellyfin in v0.5, network shares later),
 resume playback, refresh-rate matching, English UI.
 
 ## 2. Big picture
@@ -227,6 +227,7 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `~/.config/deckvideoplayer/mpv.conf` | Optional raw mpv overrides (`--include`d last) | user |
 | `$XDG_DATA_HOME/deckvideoplayer/resume.json` (Flatpak: `~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/`) | Resume positions, watched flags, chosen audio/sub track per file | `dvp/resume.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/plex.json` | Plex sign-in: client id, account token, servers and their addresses (mode 600) | `dvp/plex.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/jellyfin.json` | Jellyfin: device id, servers (address, user) and their device tokens (mode 600) | `dvp/jellyfin.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
 | `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
 
@@ -289,13 +290,25 @@ fetches the resume point and subtitle files (blocking, 5 s max) and gives
 mpv a transient token in an HTTP header. Progress goes back to the server
 every 30 s, on pause and when the file closes.
 
+## 11b. Jellyfin (v0.5)
+
+Jellyfin servers are a second media server backend (D55), behind the same
+interface as Plex (`dvp/servers.lua`): the browser, the playback hooks,
+subtitles and video info ask the router which backend an item belongs to.
+Servers are found with a UDP broadcast (helper `dvp-discover`) or listed
+in config.ini; sign-in is Quick Connect. Playback is direct play; mpv
+normally gets no token (Jellyfin streams the file without one). Progress
+goes back with `/Sessions/Playing` reports, like Plex's timeline.
+
 ## 12. Extension points
 
-- **New library source kinds** (Jellyfin, SMB, …): Plex shows the shape
-  (D37): roots via `library.sources(cfg, extra)`, an asynchronous lister
-  dispatched from `browser:load()`, entries with a playable URL `path` and
-  a `state` for progress, and an item registry the playback hooks use. See
-  DEVELOPMENT.md "Recipes".
+- **New media server kinds** (Emby, …): a module with the method set of
+  `dvp/plex.lua` / `dvp/jellyfin.lua`, registered in `dvp/servers.lua`
+  from main.lua (D55). Entries refer to their items with `server = {backend,
+  machine, key, kind, …}`. Other library sources (SMB, …): roots via
+  `library.sources(cfg, extra)`, an asynchronous lister dispatched from
+  `browser:load()`, entries with a playable `path` and a `state` for
+  progress. See DEVELOPMENT.md "Recipes".
 - **New actions/buttons**: add keys in `input.lua`, then handle the action in
   `browser:handle` / `player:handle`.
 - **New menu entries**: add items to `player:main_menu_items()` or

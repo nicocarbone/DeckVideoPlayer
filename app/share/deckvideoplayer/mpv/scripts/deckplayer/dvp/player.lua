@@ -70,7 +70,7 @@ function M:start()
     self.active = true
     self.video_track = nil
     local name = util.basename(mp.get_property("path") or "")
-    local item = self.ctx.plex and self.ctx.plex:item_for(mp.get_property("path"))
+    local item = self.ctx.servers:item_for(mp.get_property("path"))
     self.title_text = item and item.title or library.display_name(name, false, self.cfg.interface.clean_names)
     if self.zoom_touched then
         mp.set_property_number("panscan", self.zoom_defaults.panscan)
@@ -200,7 +200,7 @@ end
 function M:marker_action()
     local count = mp.get_property_number("playlist-count", 1)
     local has_next = mp.get_property_number("playlist-pos", 0) + 1 < count
-    local item = self.ctx.plex and self.ctx.plex:item_for(mp.get_property("path"))
+    local item = self.ctx.servers:item_for(mp.get_property("path"))
     return Markers.action(self.marker, has_next, item and item.kind == "episode")
 end
 
@@ -601,6 +601,21 @@ function M:open_video_menu()
     self:show_overlay()
 end
 
+-- Subtitle brightness, 30-100 % (D58). Session-wide like the size.
+function M:sub_brightness()
+    return self.sub_level or 1
+end
+
+function M:set_sub_brightness(level)
+    level = util.clamp(util.round(level * 10) / 10, 0.3, 1)
+    -- The configured peak (mpv.conf), read before the first change.
+    self.sub_peak = self.sub_peak or tonumber(mp.get_property("image-subs-hdr-peak")) or 203
+    self.sub_level = level
+    local color, peak = media.sub_brightness(level, self.sub_peak)
+    mp.set_property("sub-color", color)
+    mp.set_property_number("image-subs-hdr-peak", peak)
+end
+
 function M:main_menu_items()
     local function prop_num(name, default) return mp.get_property_number(name, default) end
     local items = {}
@@ -617,6 +632,9 @@ function M:main_menu_items()
         adjust = function(d)
             mp.set_property_number("sub-scale", util.clamp(prop_num("sub-scale", 1) + d * 0.1, 0.5, 2.5))
         end}
+    items[#items + 1] = {label = "Subtitle brightness",
+        value = function() return string.format("%d%%", util.round(self:sub_brightness() * 100)) end,
+        adjust = function(d) self:set_sub_brightness(self:sub_brightness() + d * 0.1) end}
     items[#items + 1] = {label = "Subtitle position",
         value = function() return tostring(prop_num("sub-pos", 100)) end,
         adjust = function(d)
@@ -838,7 +856,9 @@ function M:info_lines()
     add("Display", self:refresh_text())
     local at = media.selected_track("audio")
     if at then add("Audio", media.track_label(at) .. " · " .. media.track_detail(at)) end
-    add("Stream", self.ctx.plex and self.ctx.plex:describe(mp.get_property("path")))
+    local path = mp.get_property("path")
+    local _, backend = self.ctx.servers:item_for(path)
+    add("Stream", backend and backend:describe(path))
     local ao = mp.get_property("current-ao")
     if ao then
         add("Audio out", ao .. (self.ctx.night.active and " · night mode" or "")

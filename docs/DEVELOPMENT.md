@@ -275,6 +275,25 @@ watched movie). To test the remote path, drop the local connections from
 logs: `MPV_EXTRA=--msg-level=all=v LOG=/tmp/v.log …`, then
 `grep -c -F "$(cat .dev/plex/token)" /tmp/v.log` must print 0.
 
+### Jellyfin (against a real server)
+
+Sign in once with Quick Connect (approve the printed code in Jellyfin:
+profile → Quick Connect); the token stays in git-ignored `.dev/jellyfin/`
+(D55). Then give the headless test data a signed-in server:
+
+```sh
+tools/jellyfin-dev-account.py login            # finds the server on the LAN
+tools/jellyfin-dev-account.py .dev/headless/data
+# Sources → the Jellyfin server → Continue watching / Next up / libraries
+KEEP=1 tools/headless-run.sh -- key:DOWN key:DOWN key:ENTER sleep:3 gshot:/tmp/jf.png
+```
+
+Read-only by default (`jellyfin (read-only): would report …`);
+`JELLYFIN_WRITE=1` sends progress and watched changes. To check that the
+token doesn't reach mpv's log, play a video with
+`MPV_EXTRA=--msg-level=all=v LOG=/tmp/v.log` and search the log for the
+`token` value of `.dev/jellyfin/account.json`: it must not appear.
+
 ## 8. On-device test checklist (Steam Deck OLED)
 
 Things that can only be confirmed on hardware. Record the results in
@@ -318,6 +337,11 @@ DECISIONS.md or the README "Known limitations".
     movie and an episode; stop halfway and check another Plex app resumes
     at the same point; from outside the home network (phone hotspot), the
     info panel says `remote` and playback holds up for a 1080p file.
+14. Jellyfin (v0.5): *Menu → Add a Jellyfin server…* finds the server;
+    approve the code (or scan the QR code) and the server appears as a
+    source; play a movie and an episode; stop halfway and check the
+    Jellyfin web app resumes at the same point; mark watched / unwatched;
+    with an intro plugin on the server, *Skip intro* appears.
 
 ## 9. Recipes for common changes
 
@@ -332,17 +356,22 @@ DECISIONS.md or the README "Known limitations".
 `value = function() … end` for live values and `adjust = function(dir)` for
 ◀ ▶ settings. The menu uses `rebuild`, so values refresh after each change.
 
-**Add a library source kind (e.g. Jellyfin, SMB)** — Plex is the model (D37)
-1. Return roots from the new module and pass them to
-   `library.sources(cfg, extra)` (see `plex:sources()`); give them a
-   `kind` and a table describing the location (Plex uses `entry.plex`).
-2. In `browser:load()`, dispatch such locations to an asynchronous lister
-   (like `load_plex`): entries with `label`, `name`/`sort_name`, `mtime`,
-   `is_dir`, a playable `path` (URL), and `state = {pos, duration,
-   watched}` for progress. Use `dvp/http.lua` for requests.
-3. Register playable paths so main.lua's hooks can find the item (headers,
-   resume point, progress reports): see `plex:item_for(path)`.
-4. Add an icon in `ui.lua` and use it in `browser:render` for the new kind.
+**Add a media server kind (e.g. Emby)** — Plex and Jellyfin are the models (D37, D55)
+1. Write a module with their method set (listed at the top of
+   `dvp/servers.lua`): `ID`, `NAME`, `sources()` (roots with
+   `kind = ID` and `server = {backend = ID, machine, key, kind = "root"}`),
+   `list(loc, cb)` returning entries with `label`, `name`, `mtime`,
+   `is_dir`, a playable `path` (URL), `state = {pos, duration, watched}`
+   and `server = {backend = ID, …}`, and the playback methods (`prepare`,
+   `header_fields`, `report`, `set_watched`, …). Use `dvp/http.lua`.
+2. Create it in main.lua and add it to `Servers.new({...})`; the browser,
+   the playback hooks, subtitles and video info then use it through the
+   router. Add its sign-in to `browser:open_menu()`.
+3. `browser:draw_row` shows the server icon and the backend's `NAME` for
+   its sources.
+
+**Add another library source kind (e.g. SMB)**: roots through
+`library.sources(cfg, extra)` and a lister dispatched from `browser:load()`.
 
 **Change the look**: colors in `ui.theme` (accent is configurable),
 layout constants at the top of `browser.lua` / `menu.lua` and in

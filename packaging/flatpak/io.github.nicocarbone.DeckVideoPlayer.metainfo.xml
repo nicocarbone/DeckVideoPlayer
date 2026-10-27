@@ -25,9 +25,9 @@
       <li>Audio and subtitle track selection, resume playback</li>
       <li>Headphone surround: 5.1/7.1 soundtracks as 3D sound on headphones</li>
       <li>Subtitle downloads from OpenSubtitles.com (free personal API key)</li>
-      <li>Plex Media Server streaming with progress sync (sign in with a QR code)</li>
+      <li>Plex and Jellyfin streaming with progress sync (sign in with a QR code)</li>
       <li>Recently played list, black-bar cropping, screen kept awake while playing</li>
-      <li>Night mode, and intro/credits skipping for Plex</li>
+      <li>Night mode, and intro/credits skipping for Plex and Jellyfin</li>
       <li>Video info for every file, and HDR settings (HDR off, tone mapping, SDR to HDR)</li>
     </ul>
   </description>
@@ -56,6 +56,18 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.5.0" date="2026-10-27">
+      <description>
+        <p>Jellyfin, and where each video comes from.</p>
+        <ul>
+          <li>Jellyfin servers: found on the home network, Quick Connect sign-in with a QR code, Continue watching, Next up, libraries, direct play with progress and watched sync</li>
+          <li>Recently played and Video info show where each video is: local folder, SD card, USB drive, Plex or Jellyfin</li>
+          <li>Subtitle brightness in the playback menu</li>
+          <li>Headphone surround places the 5.1 surround channels behind the listener</li>
+          <li>Signing in to a server from the only folder shows the start screen</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.2" date="2026-10-26">
       <description>
         <p>HDR mapping per scene only where it applies.</p>

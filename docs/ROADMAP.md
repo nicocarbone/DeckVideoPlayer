@@ -83,15 +83,22 @@ SDR to HDR (D51 test, D52).
 *Display, per scene* is offered only for Dolby Vision and HDR10+ videos
 (D54).
 
+## v0.5.0: Jellyfin (released 2026-10-27)
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Jellyfin servers** | Done; on-device test pending (checklist 14) | Found on the LAN (UDP discovery) or in config.ini, Quick Connect sign-in with a QR code, Continue watching, Next up, libraries, direct play, progress and watched sync, server subtitles, Recently played, Video info, subtitle downloads, intro/credits from media segments (D55). Plex now goes through the same interface. |
+
+Also: where each video is, in *Recently played* and Video info (D56); 5.1
+headphone surrounds behind the listener (D57); subtitle brightness (D58);
+eighth audit fixed (D59).
+
 ## Next, in this order
 
-1. **Next episode from *Continue watching*** (Plex): finishing an episode
-   started there should offer the next one (today *Continue watching*
-   plays one item at a time).
-2. **Jellyfin / Emby** source: same shape as Plex (reuse `dvp/http.lua`
-   and the asynchronous listing in the browser). A whole new source to
-   maintain.
-3. **SMB/NFS network shares**: many people keep video on a NAS. Needs
+1. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
+   an episode started there should offer the next one (today *Continue
+   watching* plays one item at a time).
+2. **SMB/NFS network shares**: many people keep video on a NAS. Needs
    mounting or a userspace client: FFmpeg reads `smb://` only when built
    with libsmbclient (GPLv3, which would move the bundle to GPLv3), or the
    share has to be mounted outside the sandbox.

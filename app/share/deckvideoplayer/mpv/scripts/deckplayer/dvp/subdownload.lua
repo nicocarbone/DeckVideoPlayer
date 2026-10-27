@@ -59,14 +59,16 @@ local function is_local(path)
     return path ~= nil and path:sub(1, 1) == "/"
 end
 
--- Pure: storage key of a Plex video (server + item id, no network).
-function M.plex_key(item)
-    return ("plex-" .. tostring(item.machine) .. "-" .. tostring(item.rating_key)):gsub("[^%w%-]", "_")
+-- Pure: storage key of a media server video (backend + server + item id,
+-- no network): "plex-<machine>-<ratingKey>", "jellyfin-<server>-<item>".
+function M.server_key(item)
+    return ((item.backend or "plex") .. "-" .. tostring(item.machine) .. "-" .. tostring(item.rating_key))
+        :gsub("[^%w%-]", "_")
 end
 
--- Pure: what to search for a Plex video, from Plex's own metadata (more
--- reliable than parsing a file name).
-function M.plex_info(item)
+-- Pure: what to search for a media server video, from the server's own
+-- metadata (more reliable than parsing a file name).
+function M.server_info(item)
     if item.kind == "episode" then
         return {title = item.show or item.name or "", season = item.season, episode = item.episode}
     end
@@ -85,32 +87,33 @@ function M.new(ctx, data_dir, api_url)
     self.languages = OpenSubtitles.languages(ctx.cfg.playback.subtitle_languages)
     self.dir = (data_dir and data_dir ~= "") and util.join(data_dir, "subtitles") or nil
     self.keys = {}  -- path -> key (hashing reads 128 KiB, do it once)
-    self.hashes = {} -- Plex path -> OpenSubtitles hash (fetched over HTTP)
+    self.hashes = {} -- server path -> OpenSubtitles hash (fetched over HTTP)
     return self
 end
 
-function M:plex_item(path)
-    return self.ctx.plex and self.ctx.plex:item_for(path)
+-- The media server item (Plex, Jellyfin) playing from `path`, and its backend.
+function M:server_item(path)
+    return self.ctx.servers:item_for(path)
 end
 
 function M:available(path)
-    return self.client:enabled() and self.dir ~= nil and (is_local(path) or self:plex_item(path) ~= nil)
+    return self.client:enabled() and self.dir ~= nil and (is_local(path) or self:server_item(path) ~= nil)
 end
 
--- Storage key: the file hash for local files, the item id for Plex videos.
+-- Storage key: the file hash for local files, the item id for server videos.
 function M:key(path)
     if self.keys[path] == nil then
-        local item = self:plex_item(path)
-        self.keys[path] = (item and M.plex_key(item)) or (is_local(path) and M.video_key(path)) or false
+        local item = self:server_item(path)
+        self.keys[path] = (item and M.server_key(item)) or (is_local(path) and M.video_key(path)) or false
     end
     return self.keys[path] or nil
 end
 
 -- OpenSubtitles hash for the exact-match search. cb(hash or nil). Local
--- files: the storage key. Plex: first and last 64 KiB fetched from the
--- server (two range requests), only when the user searches.
+-- files: the storage key. Server videos: first and last 64 KiB fetched from
+-- the server (two range requests), only when the user searches.
 function M:hash_for(path, cb)
-    local item = self:plex_item(path)
+    local item, backend = self:server_item(path)
     if not item then
         local key = self:key(path)
         return cb((key and #key == 16) and key or nil)
@@ -134,16 +137,16 @@ function M:hash_for(path, cb)
         self.hashes[path] = hash
         cb(hash)
     end
-    self.ctx.plex:fetch_range(path, 0, 65535, head, done)
-    self.ctx.plex:fetch_range(path, size - 65536, size - 1, tail, done)
+    backend:fetch_range(path, 0, 65535, head, done)
+    backend:fetch_range(path, size - 65536, size - 1, tail, done)
 end
 
 -- Downloaded subtitles of a video: list of {path, title, lang}.
 function M:stored(path)
-    if not self.dir or not (is_local(path) or self:plex_item(path)) then return {} end
-    -- Nothing downloaded yet (the usual case): no hashing at all. Plex
+    if not self.dir or not (is_local(path) or self:server_item(path)) then return {} end
+    -- Nothing downloaded yet (the usual case): no hashing at all. Server
     -- items and known keys cost no hashing, so they skip this check.
-    if self.keys[path] == nil and not self:plex_item(path) then
+    if self.keys[path] == nil and not self:server_item(path) then
         local top = utils.readdir(self.dir, "dirs")
         if not top or #top == 0 then return {} end
     end
@@ -226,8 +229,8 @@ end
 -- Opens the results menu for the playing file.
 function M:open(path)
     local menu = self.ctx.menu
-    local item = self:plex_item(path)
-    local info = item and M.plex_info(item) or OpenSubtitles.parse_release(path)
+    local item = self:server_item(path)
+    local info = item and M.server_info(item) or OpenSubtitles.parse_release(path)
     local spec = {
         title = "Download subtitles", style = "side", close_action = "x",
         subtitle = describe(info, path),

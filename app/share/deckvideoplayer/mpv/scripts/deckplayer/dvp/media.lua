@@ -48,6 +48,8 @@ local CODECS = {
     pcm_s16le = "PCM", pcm_s24le = "PCM", pcm_s32le = "PCM", pcm_bluray = "PCM",
     subrip = "SRT", ass = "ASS", ssa = "SSA", hdmv_pgs_subtitle = "PGS",
     dvd_subtitle = "VobSub", mov_text = "Text", webvtt = "WebVTT", dvb_subtitle = "DVB",
+    -- Jellyfin's names for the same.
+    pgssub = "PGS", dvdsub = "VobSub", dvbsub = "DVB",
     hevc = "HEVC", h264 = "H.264", av1 = "AV1", vp9 = "VP9", vp8 = "VP8",
     mpeg2video = "MPEG-2", mpeg4 = "MPEG-4", vc1 = "VC-1", prores = "ProRes",
 }
@@ -146,6 +148,16 @@ function M.resolution_badge(w, h)
     if w >= 1900 or h >= 1000 then return "1080p" end
     if w >= 1200 or h >= 700 then return "720p" end
     return h .. "p"
+end
+
+-- Subtitle brightness (D58), `level` 0.3-1: text subtitles get a grey
+-- instead of white (`sub-color`, any screen); picture subtitles (PGS,
+-- VobSub) get a lower `image-subs-hdr-peak`, which only acts on HDR
+-- output. The peak follows the grey's light output (gamma 2.2) so both
+-- kinds dim alike. `peak`: the configured peak in nits (mpv.conf, 203).
+function M.sub_brightness(level, peak)
+    local v = math.floor(255 * level + 0.5)
+    return string.format("#%02X%02X%02X", v, v, v), math.max(10, math.floor(peak * level ^ 2.2 + 0.5))
 end
 
 return M

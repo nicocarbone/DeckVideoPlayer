@@ -54,6 +54,9 @@ local SCHEMA = {
     plex = {
         allow_insecure_lan = {default = false, type = "bool"},
     },
+    jellyfin = {
+        server           = {default = {}, type = "list"},
+    },
     opensubtitles = {
         api_key          = {default = "", type = "string"},
         username         = {default = "", type = "string"},

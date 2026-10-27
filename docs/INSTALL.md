@@ -98,8 +98,8 @@ See the controls table in the [README](../README.md#controls). Notes:
 
 - The library opens directly into your folder when only one source exists
   and you haven't played anything yet. Otherwise you start at a list of
-  sources, followed by **Recently played** (the last 5 videos, local or
-  Plex;
+  sources, followed by **Recently played** (the last 5 videos, local,
+  Plex or Jellyfin, each tagged with where it is;
   `recently_played` in `config.ini`, *Menu → Remove from recently played*
   hides one). The
   microSD card shows as **SD Card** (or "SD Card (Label)" if you gave it a
@@ -107,7 +107,7 @@ See the controls table in the [README](../README.md#controls). Notes:
 - Names too long for the screen scroll when you select them.
 - **View** on a video (or *Menu → Video info*) shows what it is: size,
   bitrate, codec, resolution, frame rate, HDR type, audio and subtitle
-  tracks, and where the file is.
+  tracks, and where the file is (folder or drive, or the server).
 - **A** on a partly watched file asks *Resume from …* or *Start from the
   beginning*. **X** starts from the beginning directly.
 - Videos after the chosen one in the same folder play automatically
@@ -133,11 +133,12 @@ See the controls table in the [README](../README.md#controls). Notes:
   on the Deck's speakers, headphones and TVs (5.1 keeps its channels).
   The info panel shows `Audio out: … · night mode`. `night_mode = yes` in
   `config.ini` starts with it on.
-- **Skip intro / credits (Plex):** while an intro or the end credits play,
+- **Skip intro / credits (Plex, Jellyfin):** while an intro or the end credits play,
   *R2 Skip intro* or *R2 Next episode* appears at the bottom right; R2
   does it. `skip_intro = auto` skips intros by themselves; `off` hides the
   prompts (`skip_credits = off` for the credits). Plex detects intros on
-  the server (a Plex Pass feature) and credits; without markers nothing
+  the server (a Plex Pass feature) and credits; Jellyfin needs a plugin
+  that detects them (e.g. Intro Skipper). Without markers nothing
   appears.
 - **Headphone surround** (audio menu, Y): with headphones, 5.1 and 7.1
   soundtracks sound around you instead of being folded into plain stereo.
@@ -236,6 +237,45 @@ Notes:
   you can also revoke "Deck Video Player" under Plex → Settings →
   Authorized Devices.
 
+## Jellyfin
+
+Deck Video Player can browse and play the movies and shows of your
+Jellyfin server.
+
+1. Library → **Menu** → **Add a Jellyfin server…**. The servers on your
+   home network are listed; choose yours.
+2. A QR code and a 6-digit code appear. In Jellyfin on your phone or PC,
+   signed in as you, open your profile → **Quick Connect** and enter the
+   code (the QR code opens that page). The dialog closes by itself and the
+   server appears in the library, next to your folders.
+3. Open the server: **Continue watching**, **Next up**, then your
+   libraries. Progress bars and checkmarks come from Jellyfin, and what
+   you watch here updates Jellyfin for your other devices.
+
+Notes:
+- Server not listed? Jellyfin in Docker without host networking, or on
+  another network, doesn't answer the search. Add it to `config.ini`
+  (`server = http://192.168.1.20:8096` under `[jellyfin]`, your address)
+  and it appears in the list. Plain `http://` works only for home
+  network addresses; a server reached over the internet needs `https://`.
+- Quick Connect must be on in the server (Dashboard → General → Quick
+  Connect; it is by default).
+- Videos play in their original quality (direct play), like Plex: HDR and
+  the refresh match work as for local files, and there is no transcoding.
+- Subtitle files stored next to a video on the server are offered in the
+  subtitle menu, and *Download subtitles…* works too.
+- *Skip intro* / *Skip credits* need a server plugin that detects them
+  (e.g. Intro Skipper).
+- The info panel (View) shows `Stream: Jellyfin · <server> · local` or
+  `remote`.
+- *Remove from Continue watching* is Plex-only: Jellyfin can't hide a
+  video there and keep its progress. *Mark as unwatched* removes it (and
+  its progress).
+- The sign-in is stored in the app's data folder (`jellyfin.json`,
+  readable only by you). **Menu → Jellyfin servers → server → Sign out**
+  removes it and ends the session on the server; it is also listed under
+  Dashboard → Devices in Jellyfin.
+
 ## Troubleshooting
 
 | Symptom | Check / fix |
@@ -252,6 +292,9 @@ Notes:
 | "OpenSubtitles rejected the API key" / "login failed" | Check `api_key`, and use your username (not e-mail) with the right password. |
 | No *Headphone surround* entry in the audio menu | `audio_passthrough` is set (surround can't filter compressed audio), or the build lacks the `sofalizer` filter (log: `headphone surround: the sofalizer filter is not available`). |
 | Plex server missing or "Can't reach …" | Menu → Plex account → Refresh server list. At home the Deck must reach the server on the LAN; away from home the server needs Remote Access. The app only uses encrypted `*.plex.direct` connections; some routers block those names (DNS rebinding protection). Allow `plex.direct` in the router, or set `allow_insecure_lan = yes` under `[plex]` in `config.ini` (plain http, home networks only). |
+| Jellyfin server not listed in *Add a Jellyfin server…* | The search only reaches servers on the same network that answer Jellyfin's discovery (UDP port 7359; not Docker bridge networking). Add the server's address to `config.ini` (`server = http://…:8096` under `[jellyfin]`). |
+| "Quick Connect is off on this server" | Turn it on in Jellyfin: Dashboard → General → Quick Connect. |
+| "Use https for a server outside your home network" | Only home network addresses may use plain `http://`; give the server's `https://` address. |
 | Plex video stutters away from home | No transcoding yet: the server's upload speed must exceed the file's bitrate. Try a lower-bitrate version of the video. |
 | Returns to Steam immediately after updating to v0.3.3 (works in Desktop Mode) | The Steam shortcut names the old Flatpak branch (`--branch=master` in *Properties → Launch options*), typical when it was added with *Add a Non-Steam Game* or while Steam was running. Remove the `--branch=…` part, or close Steam and run the installer again: since v0.3.4 it repairs the shortcut. |
 | About shows an older version after updating | Two copies are installed on different Flatpak branches (releases up to v0.3.2 used `master`, later ones and test builds `stable`) and Steam starts the old one. Run the v0.3.3+ installer again (it removes other copies), or in Konsole: `flatpak list --user --app --columns=ref,version` and `flatpak uninstall --user io.github.nicocarbone.DeckVideoPlayer//BRANCH` for the old one. Settings are kept. |

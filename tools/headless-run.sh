@@ -29,6 +29,8 @@
 #                      servers (default: read-only, so tests never change the
 #                      owner's watch history). Plex sign-in for tests:
 #                      tools/plex-dev-account.py .dev/headless/data (KEEP=1)
+#   JELLYFIN_WRITE=1   the same for Jellyfin servers. Sign-in for tests:
+#                      tools/jellyfin-dev-account.py .dev/headless/data (KEEP=1)
 #
 # Examples:
 #   tools/headless-run.sh -- gshot:/tmp/library.png
@@ -85,6 +87,7 @@ gs_args="--backend headless -W $W -H $H"
 
 mpv_args="--input-ipc-server=$SOCK --msg-level=all=warn,deckplayer=v"
 [ "${PLEX_WRITE:-0}" = 1 ] || mpv_args="$mpv_args --script-opts-append=deckplayer-plex_readonly=yes"
+[ "${JELLYFIN_WRITE:-0}" = 1 ] || mpv_args="$mpv_args --script-opts-append=deckplayer-jellyfin_readonly=yes"
 # MPV_EXTRA: more mpv arguments (e.g. MPV_EXTRA=--msg-level=all=v).
 [ -n "${MPV_EXTRA:-}" ] && mpv_args="$mpv_args $MPV_EXTRA"
 mock_pid=

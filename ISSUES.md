@@ -2,6 +2,163 @@
 
 ---
 
+# Part VIII — v0.5.0 Audit: Jellyfin Integration, 5.1 Surround Placement, Source Tags & Subtitle Brightness (2026-10-27)
+
+All 440 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the v0.5.0 additions were verified:
+* **5.1 headphone surround at 120° (`dvp/surround.lua`, D57):** `speakers=4 120|5 240` for both `5.1(side)` and `5.1` was verified against FFmpeg's `sofalizer` filter with `mit_kemar_normal_pinna_dfeq.sofa` (channel indices `4` and `5` map both `SL`/`SR` and `BL`/`BR` to bit-identical 120°/240° virtual speaker positions, and observing `audio-params` in a single native table observer avoids adding the filter twice).
+* **Subtitle brightness (`dvp/player.lua`, `dvp/media.lua`, D58):** `media.sub_brightness(level, 203)` scales `sub-color` linearly (`#4D4D4D`–`#FFFFFF`) and scales `image-subs-hdr-peak` with `level ^ 2.2` (`14`–`203` nits) so bitmap subtitles on HDR displays track the luminance of text subtitles.
+* **Source tags & Video info (`dvp/library.lua`, `dvp/browser.lua`, `dvp/videoinfo.lua`, D56):** Source matching (`library.source_for`) and tags on *Recently played* rows work cleanly across local folders, SD card, USB drives, Plex, and Jellyfin.
+
+Below are the bugs, security/discovery edge cases, and release-readiness items found in the v0.5.0 code (`dvp/jellyfin.lua`, `dvp/browser.lua`, `dvp/videoinfo.lua`, `helper/dvp-discover.c`, `dvp/version.lua`, and `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`).
+
+---
+
+## 1. Jellyfin Integration Bugs & Edge Cases (v0.5.0)
+
+### 1.1. `dvp/jellyfin.lua`: `Jellyfin:streams_anonymously` passes `max_size = 1`, which causes `curl` to exit with code `63` (`code = nil`) whenever a `401` / `403` response has a body > 1 byte (*verified with curl*)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`streams_anonymously` lines 651–663) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`curl_config` line 58, `parse_result` lines 97–100)
+* **Problem (*verified*):**
+  ```lua
+  function M:streams_anonymously(item, path)
+      local id = item.machine
+      if self.anonymous[id] == nil then
+          local code = http.request_sync({url = path, headers = {"Range: bytes=0-0"}, tag = "jellyfin",
+                                          timeout = 3, max_size = 1})
+          if code == 200 or code == 206 then
+              self.anonymous[id] = true
+          elseif code == 401 or code == 403 then
+              self.anonymous[id] = false
+          end
+      end
+      return self.anonymous[id]
+  end
+  ```
+  1. `max_size = 1` sets `max-filesize = 1` in `curl`.
+  2. When a server responds to `Range: bytes=0-0` with `206 Partial Content` and `Content-Length: 1`, `curl` exits with `0` and `code` is `206`.
+  3. However, if a Jellyfin server or reverse proxy requires authentication on `/Videos/<id>/stream` and returns `401 Unauthorized` or `403 Forbidden`, its response body is almost always > 1 byte (e.g. `Content-Length: 12` `"Unauthorized"` or an HTML/JSON error page).
+  4. Whenever `Content-Length > 1` (or > 1 byte is received), `curl --max-filesize 1` exits with status **`63`** (`CURLE_FILESIZE_EXCEEDED`). In `http.parse_result`, `res.status ~= 0` causes `http.request_sync` to return **`nil, "The file is too large"`** instead of `401` or `403`.
+  5. Because `code` is `nil`, `self.anonymous[id]` stays `nil` instead of becoming `false`—so `Jellyfin:prepare(item)` repeats the blocking synchronous HTTP probe before **every single video** played from that server.
+  6. In addition, only `code == 206` confirms a 1-byte range response (a `200 OK` that ignored `Range` would only pass `max-filesize` if the entire video file were <= `max_size`).
+* **Suggested Fix:**
+  Pass `output = "/dev/null"` and a larger `max_size` (e.g. `max_size = 65536`) so `401`/`403` error pages do not trigger exit code `63`, and set `self.anonymous[id] = true` on `code == 206` and `self.anonymous[id] = false` on `code == 401 or code == 403`.
+
+---
+
+### 1.2. `dvp/browser.lua` & `dvp/jellyfin.lua`: One-season Jellyfin shows (`kind = "series_episodes"`) are missing from `SERVER_ORDER` in `dvp/browser.lua`, so `date` sort reverses episodes
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`SERVER_ORDER` line 183) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`entries_from` lines 178–180)
+* **Problem:**
+  In `dvp/jellyfin.lua` line 180:
+  ```lua
+  if t == "Series" then
+      -- One-season shows open straight into their episodes.
+      ref = {kind = it.ChildCount == 1 and "series_episodes" or "seasons", key = id}
+  ```
+  In `dvp/browser.lua` line 183:
+  ```lua
+  -- Server listings kept in the server's order: the server page, "Continue
+  -- watching", "Next up", and seasons/episodes (by number, whatever the sort).
+  local SERVER_ORDER = {root = true, ondeck = true, nextup = true, seasons = true, episodes = true}
+  ```
+  Unlike Plex (where one-season shows use `kind = "episodes"` with `/allLeaves`), Jellyfin one-season shows use `kind = "series_episodes"`, which is missing from `SERVER_ORDER`:
+  1. `Browser:sortable()` returns **`true`** inside any one-season Jellyfin show (showing `"Sorted by …"` and offering `Y Sort`).
+  2. `Browser:load_server()` runs `library.sort_entries(self.entries, self.sort)`.
+  3. If `self.sort == "date"` (from `config.ini` or from pressing `Y` in a Movies/Shows library), opening a one-season show in Jellyfin sorts its episodes by `DateCreated` (`mtime`, newest first), listing and auto-playing the episodes backwards (`E10, E09, …, E01`).
+  4. Even when `self.sort == "name"`, if a show with `ChildCount == 1` has both Specials (`Season 0`, `E01 · …`) and Season 1 (`E01 · …`), `/Shows/<id>/Episodes` returns them in season+episode order, whereas `library.sort_entries` re-sorts them alphabetically by `e.name = "E01 · …"`, interleaving Specials with Season 1.
+  5. Also, in `Jellyfin:resolve` (`dvp/jellyfin.lua` lines 625–628), if an episode belongs to a flat series without season items (`M.safe_id(it.SeriesId)` is true, `it.SeasonId` is nil), falling back to `kind = "series_episodes", key = it.SeriesId` queues the rest of the series for auto-play.
+* **Suggested Fix:**
+  Add `series_episodes = true` to `SERVER_ORDER` in `dvp/browser.lua` (and in `Jellyfin:resolve`, fall back to `kind = "series_episodes", key = it.SeriesId` when `not M.safe_id(it.SeasonId)`).
+
+---
+
+### 1.3. `dvp/jellyfin.lua`: `Jellyfin:discover` and `Jellyfin:connect` do not verify UDP broadcast addresses with `GET /System/Info/Public`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`discover` lines 368–401, `connect` lines 495–517)
+* **Problems:**
+  ```lua
+  mp.command_native_async({name = "subprocess", args = {M.DISCOVER_HELPER, "1500"},
+                           capture_stdout = true, playback_only = false}, function(_, res)
+      if not res or res.status ~= 0 then
+          msg.warn("jellyfin: discovery failed: " .. tostring(res and (res.error_string or res.status)))
+      end
+      for _, s in ipairs(M.parse_discovery(res and res.stdout)) do add(s) end
+      done()
+  end)
+  ```
+  In `Jellyfin:discover(cb)`, URLs from `self.config_urls` (`config.ini`) are probed via `self:probe(url, ...)` (`GET <url>/System/Info/Public`), whereas UDP broadcast responses from `dvp-discover` (`M.parse_discovery`) are added directly via `add(s)` **without calling `self:probe(s.url, ...)`**:
+  1. **Unverified address in `Jellyfin:connect(id, cb)` (lines 504–516):**
+     When `self:probe(server.url)` fails (e.g. the user is on a foreign Wi-Fi network, or the saved server URL timed out), `connect()` falls back to `self:discover(...)`. If a UDP packet on port 7359 claims `s.id == id`, `connect()` immediately overwrites `server.url = s.url`, saves it to `jellyfin.json`, and calls `use(s.url)`—which then sends `Authorization: MediaBrowser …, Token="<secret>"` to `s.url` without ever having verified `s.url` with `GET /System/Info/Public` (contrary to the header comment on lines 16–19 and DECISIONS D55).
+  2. **Unreachable Docker / multi-NIC UDP broadcast address shadows a working `config.ini` URL:**
+     When a Jellyfin server runs in Docker bridge mode (or on a host with multiple interfaces/subnets) without `LocalAddress` configured, its UDP broadcast packet often advertises its internal container IP (e.g. `http://172.17.0.2:8096`), so the user configures `server = http://192.168.1.50:8096` (or `https://…`) in `config.ini`.
+     Because `discover()` deduplicates by `seen[s.id]` and does not probe UDP broadcast URLs, if `dvp-discover` finishes before the `config.ini` HTTP probe (or if `connect()` falls back to `discover()` after a transient timeout), the unreachable UDP `Address` wins `seen[s.id]` and hides or overwrites the working `config.ini` URL.
+* **Suggested Fix:**
+  In `Jellyfin:discover(cb)`, probe each entry from `M.parse_discovery(res and res.stdout)` with `self:probe(s.url, function(info) if info and info.Id == s.id then add(...) end; done() end)` so only reachable, verified HTTP/HTTPS endpoints are added to `found` (and in `helper/dvp-discover.c` line 77, cap the `for (;;)` loop at e.g. 64 packets so a UDP flood on the LAN cannot buffer unbounded stdout).
+
+---
+
+### 1.4. `dvp/jellyfin.lua` & `main.lua`: `self.started[item.key]` state in `Jellyfin:report` is not cleared if a file unloads when `time-pos` is `nil` or when a session is forgotten
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`forget_server` lines 461–469, `forget_session` lines 521–524, `prepare` lines 669–690, `report` lines 702–715) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress` lines 160–185)
+* **Problem:**
+  In `Jellyfin:report`:
+  ```lua
+  if state == "stopped" then
+      endpoint = "/Sessions/Playing/Stopped"
+      self.started[item.key] = nil
+  elseif self.started[item.key] then
+      endpoint = "/Sessions/Playing/Progress"
+  else
+      endpoint = "/Sessions/Playing"
+      self.started[item.key] = true
+  end
+  ```
+  1. If `self.started[item.key]` is set to `true` (after a pause or 30-second progress tick) and the stream later fails or unloads when `mp.get_property_number("time-pos")` is `nil` (or `self.bases[item.machine]` was cleared), `save_progress(true)` returns early at `if not pos then return end` without calling `backend:report(item, "stopped", ...)`. `self.started[item.key]` remains `true`, so re-playing that item sends `/Sessions/Playing/Progress` without ever sending `/Sessions/Playing`.
+  2. Also, `file-loaded` in `main.lua` does not call `save_progress()`, so `POST /Sessions/Playing` (and Plex's initial `playing` timeline report) is not sent until the user pauses or 30 seconds of playback elapse.
+* **Suggested Fix:**
+  Clear `self.started[item.key] = nil` in `Jellyfin:prepare(item)` and reset `self.started = {}` in `forget_session` / `forget_server` (and optionally call `save_progress()` in `file-loaded` so the server dashboard shows `"Now Playing"` immediately).
+
+---
+
+## 2. Video Info Panel & Browser Polish (v0.5.0)
+
+### 2.1. `dvp/videoinfo.lua`: `VideoInfo.from_jellyfin` reports `"SDR"` (or omits `" · HDR10"` / `" · HLG"`) when `s.ColorTransfer` is `nil` and HDR is only indicated in `s.VideoRangeType`
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`hdr_label` lines 54–65, `from_jellyfin` lines 324–335)
+* **Problem:**
+  `VideoInfo.hdr_label(h)` checks `h.transfer == "smpte2084"` (for `HDR10` / `HDR10+`) and `h.transfer == "arib-std-b67"` (for `HLG`).
+  In `VideoInfo.from_jellyfin`:
+  ```lua
+  local range = tostring(s.VideoRangeType or "")
+  d.video = { ...
+             primaries = s.ColorPrimaries and tostring(s.ColorPrimaries):lower(),
+             transfer = s.ColorTransfer and tostring(s.ColorTransfer):lower(),
+             dv_profile = tonumber(s.DvProfile),
+             hdr10plus = range:find("HDR10Plus") ~= nil, ... }
+  ```
+  As noted in `videoinfo.lua` lines 205–206, `ffprobe -show_streams` (which Jellyfin runs on the server to populate `MediaStreams`) can leave `ColorTransfer` unset on some HEVC streams while Jellyfin sets `s.VideoRangeType` to `"HDR10"`, `"HDR10Plus"`, `"DOVIWithHDR10"`, `"DOVIWithHDR10Plus"`, `"HLG"`, or `"DOVIWithHLG"`. When `s.ColorTransfer` is `nil`, `d.video.transfer` is `nil`, so `hdr_label` misreports `"HDR10"` / `"HDR10Plus"` / `"HLG"` as `"SDR"` (and `"DOVIWithHDR10"` as `"Dolby Vision 8"` without `" · HDR10"`).
+* **Suggested Fix:**
+  In `VideoInfo.from_jellyfin`, fall back to `s.VideoRangeType` when `s.ColorTransfer` is nil:
+  ```lua
+  local transfer = s.ColorTransfer and tostring(s.ColorTransfer):lower()
+      or (range:find("HDR10") and "smpte2084")
+      or (range:find("HLG") and "arib-std-b67") or nil
+  ```
+
+---
+
+### 2.2. `dvp/browser.lua`: Adding a Jellyfin or Plex server while in single-source mode (`top.is_root == true`) leaves the browser inside the local folder instead of showing the new server
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`refresh_sources` lines 58–63, `plex_sign_in` line 591, `jellyfin_sign_in` line 690)
+* **Problem:**
+  When a user starts the app with only one local folder (`~/Videos`) and no *Recently played* entries (`self:single_source() == true`), `Browser:load()` skips the Start screen and opens `~/Videos` directly (`self.stack = {{path = s.path, label = s.name, is_root = true}}`).
+  If the user then selects **Menu → Add a Jellyfin server…** (or **Sign in to Plex…**) and completes sign-in, `jellyfin_sign_in` / `plex_sign_in` calls `self:reload()`. `refresh_sources()` clears `top.is_root = nil` (because `#self.sources` is now > 1), and `self:load()` reloads `self.stack[1]` (`~/Videos`)—leaving the user inside `~/Videos` instead of showing the Start screen where their new Jellyfin or Plex server was added.
+* **Suggested Fix:**
+  When `top and top.is_root and not self:single_source()` in `Browser:refresh_sources()` (or before `self:reload()` in `plex_sign_in` and `jellyfin_sign_in` when `self:at_start()`), clear `self.stack = {}` so the Start screen with the newly added server is shown.
+
+---
+
+### 2.3. Release Readiness (`dvp/version.lua`, `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`)
+* **`dvp/version.lua`:** Still `"0.4.2"` (sent in Jellyfin's `Authorization: MediaBrowser …, Version="0.4.2"`, Plex's `X-Plex-Version`, OpenSubtitles `User-Agent`, and shown in the About panel).
+* **`packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`:** Needs the `<release version="0.5.0">` entry and a `<description><ul>` bullet covering Jellyfin streaming, source tags, 5.1 surround placement, and subtitle brightness when tagging v0.5.0.
+
+---
+---
+
 # Part VII — v0.4.1 Audit: HDR Overhaul, Video Info Panel & Plex Recently Played / Continue Watching (2026-10-26)
 
 All 325 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the v0.4.1 HDR option mappings (`dvp/hdr.lua`, `mpv/mpv.conf`, `dvp/player.lua`) were verified in headless gamescope (`HDR=1` and `HDR=0`) against `mpv 0.41.0` (`vo=gpu-next`, `libplacebo v7.360.0`):

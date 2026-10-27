@@ -24,7 +24,7 @@ there is a single process and nothing between the video and the screen.
   to 48 Hz (or 72 Hz), 25 fps to 50 Hz, 30/60 fps to 60/90 Hz, then back.
 - Full **controller** control, with a UI designed for 1280×800 that scales
   to 4K TVs.
-- Audio / subtitle track selection, subtitle size/position/delay, audio
+- Audio / subtitle track selection, subtitle size/brightness/position/delay, audio
   delay, picture modes (including cropping black bars stored in the video),
   playback info panel.
 - **Resume playback** per file, watched markers, recently played list,
@@ -37,6 +37,9 @@ there is a single process and nothing between the video and the screen.
   folders (Continue watching, movies, shows), play the original files with
   HDR and hardware decoding, and keep progress in sync with your other Plex
   apps. Local network, and remote when your server allows it.
+- **Jellyfin**: find your server on the network, sign in with Quick
+  Connect, browse Continue watching, Next up, movies and shows, play the
+  original files, and keep progress in sync with your other Jellyfin apps.
 - **Download subtitles** from OpenSubtitles.com from the subtitle menu
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).
@@ -89,7 +92,8 @@ what exists and where it falls short. Corrections are welcome.
   HDR worked in an experimental rewrite that was abandoned in August 2026
   ([jellyfin-desktop#523][jmp-hdr]). If you already run one of those
   servers, compare with its client: Deck Video Player also plays from Plex
-  since v0.3, as direct play only (no transcoding).
+  (since v0.3) and Jellyfin (since v0.5), as direct play only (no
+  transcoding).
 - **[mpv](https://mpv.io)** itself (Flathub `io.mpv.Mpv`) is the engine
   this app uses, and it can output real HDR in Game Mode with the right
   settings (Vulkan, `gpu-next`, gamescope's WSI layer; see the
@@ -191,9 +195,9 @@ Uninstall with `./scripts/install-steamos.sh --uninstall`.
 | **D-pad ↑ ↓** | Move | Volume |
 | **D-pad ← →** | Page | Seek ±10 s |
 | **L1 / R1** | Page | Seek ±60 s |
-| **L2 / R2** | First / last item | Previous / next chapter; during a Plex intro or credits, R2 skips it (or goes to the next episode) |
-| **View** | Video info (codec, bitrate, HDR, tracks, path) | Playback info (decoder, HDR, refresh) |
-| **Menu** | Library menu | Playback menu (tracks, video and HDR settings, subtitle size and delay, audio delay, speed…) |
+| **L2 / R2** | First / last item | Previous / next chapter; during a Plex or Jellyfin intro or credits, R2 skips it (or goes to the next episode) |
+| **View** | Video info (source, codec, bitrate, HDR, tracks, path) | Playback info (decoder, HDR, refresh) |
+| **Menu** | Library menu | Playback menu (tracks, video and HDR settings, subtitle size, brightness and delay, audio delay, speed…) |
 
 A keyboard also works (arrows, Enter, Esc/Backspace, `x`, `y`, `m`, `i`,
 PgUp/PgDn, Home/End).
@@ -289,9 +293,8 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md): next a night mode for audio,
-Plex *Skip intro* and next episode, Jellyfin and network shares; Flathub
-publication at some point. Past releases: [CHANGELOG.md](CHANGELOG.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md): next episode from *Continue
+watching* and network shares; Flathub publication at some point. Past releases: [CHANGELOG.md](CHANGELOG.md).
 
 ## Known limitations / to verify on hardware
 

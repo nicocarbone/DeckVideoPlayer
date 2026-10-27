@@ -19,11 +19,13 @@ non-trivial.
 | HDR / refresh rate / device detection | `…/dvp/display.lua`, `helper/dvp-gamescope-refresh.c` (D31), `app/share/deckvideoplayer/mpv/mpv.conf`, `app/bin/deckvideoplayer` |
 | Folder listing, sources, sorting | `…/dvp/library.lua` |
 | Plex (sign-in, servers, browse, playback, progress) | `…/dvp/plex.lua`, Plex parts of `…/dvp/browser.lua` and `…/main.lua`, `tools/plex-dev-account.py` |
+| Jellyfin (discovery, Quick Connect, browse, playback, progress) | `…/dvp/jellyfin.lua`, `helper/dvp-discover.c`, Jellyfin parts of `…/dvp/browser.lua`, `tools/jellyfin-dev-account.py` (D55) |
+| Plex / Jellyfin behind one interface | `…/dvp/servers.lua` (router used by browser, main, player, subtitles, video info) |
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
 | HDR choices (Video menu) | `…/dvp/hdr.lua` (D52), rows in `player:hdr_items()` |
-| Video info panel (library) | `…/dvp/videoinfo.lua` (ffprobe / Plex metadata, D50) |
+| Video info panel (library) | `…/dvp/videoinfo.lua` (ffprobe / Plex / Jellyfin metadata, D50) |
 | Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
 | Flatpak build | `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`, `scripts/build-flatpak.sh` |
 | Steam integration | `scripts/install-steamos.sh`, `scripts/steam_shortcut.py`, `packaging/steam/` |
@@ -66,7 +68,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-26, v0.4.2)
+## Current state (2026-10-27, v0.5.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -85,8 +87,9 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   Deck: checklist items 11–12 (surround listening, real download).
 - The repo is public: never commit API keys, tokens or passwords.
   OpenSubtitles keys are per user, in their `config.ini` (D29). Never
-  commit details of the owner's Plex server either (addresses, names,
-  library titles, ids, hashes from it): tests and docs use made-up data.
+  commit details of the owner's Plex or Jellyfin servers either
+  (addresses, names, library titles, ids, hashes from them): tests and
+  docs use made-up data.
 - v0.3.1 (D42): *Crop black bars* picture mode (`dvp/cropdetect.lua`),
   B dismisses the controls before stopping, *Recently played* on the
   start screen.
@@ -130,8 +133,18 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   Seventh audit (ISSUES.md Part VII) fixed in D53.
 - v0.4.2 (2026-10-26): *Display, per scene* only for videos with
   per-scene metadata (D54).
+- v0.5.0 (2026-10-27, D55): Jellyfin as a second media server, with
+  Plex moved behind the same interface (`dvp/servers.lua`). Tested against
+  the owner's Jellyfin 12.4 test server (browse, play, subtitles,
+  Recently played, Video info, Flatpak; progress, watched marks and Next
+  up with JELLYFIN_WRITE=1, items restored) and Plex regression-tested.
+  Tests against it: `tools/jellyfin-dev-account.py`, read-only unless
+  `JELLYFIN_WRITE=1`. Also: source tags in *Recently played* and a
+  Source row in Video info (D56), 5.1 headphone surrounds at 120° (D57),
+  subtitle brightness (D58). Eighth audit (ISSUES.md Part VIII) fixed in
+  D59.
 - Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
-  *Continue watching*, Jellyfin, SMB/NFS;
+  *Continue watching*, SMB/NFS;
   Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only

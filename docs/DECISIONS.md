@@ -1232,3 +1232,180 @@ signals the scene's value (116 nits in a dark scene).
   metadata for HDR10.
 - HDR10+ is covered by the same fields but untested here (no HDR10+
   sample).
+
+## D55. Jellyfin as a second media server (v0.5.0)
+
+Goal: feature parity with Plex where Jellyfin allows it, without
+changing how Plex behaves (owner's request: don't break tested features).
+
+- **One interface for both** (`dvp/servers.lua`): library entries refer to
+  their item with `server` / `server_recent` (was `plex` / `plex_recent`),
+  whose `backend` names the module; the browser, the playback hooks,
+  subtitles, video info and the player ask the router. `dvp/plex.lua`
+  only gained `ID`/`NAME`, the `backend` field, `video_info()` and
+  `recent_ref()`. Subtitle storage keys of Plex videos are unchanged
+  (`plex-<machine>-<ratingKey>`), so earlier downloads still load.
+  Verified on the owner's Plex server after the change (read-only):
+  browse, Continue watching, play, info panel, Recently played with the
+  rest of the season, Video info.
+- **Finding servers:** Jellyfin answers a UDP broadcast on port 7359
+  ("who is JellyfinServer?"). mpv's Lua has no sockets, so a small helper
+  (`helper/dvp-discover.c`) sends it on every IPv4 interface and prints
+  the answers. Servers it can't see (another network, Docker without host
+  networking) go in config.ini (`[jellyfin] server = URL`). No address
+  typing in the UI: there is no keyboard in game mode.
+- **Sign-in: Quick Connect.** A 6-digit code approved in a Jellyfin app
+  where the user is signed in (profile → Quick Connect); the QR code opens
+  that page of the server's web app (`/web/#/quickconnect`). No
+  passwords. The server issues a device token (Dashboard → Devices);
+  *Sign out* revokes it (`/Sessions/Logout`) and forgets the server.
+  `jellyfin.json` is owner-only, like `plex.json`.
+- **http on the LAN:** Jellyfin servers usually have no certificate, so
+  plain http is allowed, but only to private addresses (RFC 1918,
+  loopback, link-local, `.local`, single-label names); anything else must
+  be https. Unlike Plex (D39) there is no opt-in: an https-only Jellyfin
+  would not work for most home setups. Before the token is sent, the
+  address must answer `/System/Info/Public` (no token) with the server's
+  id; if the saved address doesn't, the LAN is searched for the same id
+  (the server's address changed), and each answer is checked the same
+  way before it is used (D59).
+- **No token for mpv:** mpv logs header values at `-v` (measured), and
+  Jellyfin has nothing like Plex's transient token. But Jellyfin serves
+  `/Videos/<id>/stream?static=true` and subtitle files without a token
+  (measured on 12.4), so mpv gets none. Checked once per connection with
+  a 1-byte range request; a server that refuses gets the token in the
+  header (then visible in verbose logs). Verified: a verbose log of a
+  Jellyfin playback contains no token.
+- **Listings:** server page = *Continue watching* (`/UserItems/Resume`),
+  *Next up* (`/Shows/NextUp`, without resumable episodes, which are in
+  Continue watching), then the libraries (`/UserViews`; music, books,
+  photos and Live TV skipped). Shows → seasons → episodes; a one-season
+  show opens straight into its episodes. Libraries sort by name or date
+  (`SortName`, `DateCreated`); seasons, episodes and the two lists keep the
+  server's order, and their videos play alone (no auto-play of unrelated
+  items).
+- **Playback:** direct play only (no transcoding), like Plex. The on_load
+  hook fetches the item (resume point, size, media source, external text
+  subtitles as `.srt`/`.ass`/`.vtt`) and, when the server has them, its
+  media segments: *Intro* → skip intro, *Outro* → skip credits / next
+  episode (D47). Jellyfin only has segments when a plugin detects them
+  (e.g. Intro Skipper); the owner's server has none, so the prompt is
+  untested on Jellyfin (the markers logic is shared and unit-tested).
+- **Progress:** `/Sessions/Playing` on the first report, then
+  `/Sessions/Playing/Progress`, and `/Sessions/Playing/Stopped` when the
+  file closes; watched / unwatched with `/UserPlayedItems/<id>`. Jellyfin
+  marks a video played past 90 %, like Plex, so main.lua's rule (mark it
+  only below that) is shared.
+- **Not possible:** *Remove from Continue watching* keeping the progress
+  (Jellyfin has no such call; only clearing the position, which is *Mark
+  as unwatched*), so the menu entry is Plex-only.
+- **Tests against the owner's server:** `tools/jellyfin-dev-account.py`
+  (Quick Connect, token in git-ignored `.dev/jellyfin/`); headless runs
+  are read-only unless `JELLYFIN_WRITE=1`. Write tests (owner's OK,
+  2026-10-27, items restored afterwards): progress reaches the server
+  from the periodic report and from a quick stop with no earlier report;
+  resume starts at the server's position; *Continue watching* shows it;
+  *Mark as watched* / *unwatched* from a listing and from *Recently
+  played*; stopping an episode at 96 % makes Jellyfin mark it played and
+  *Next up* move to the next one. *Mark as unwatched* restores the exact
+  starting state (position 0, play count 0). Never commit the server's
+  address, name, ids or library titles; tests use made-up data.
+
+## D56. Where a video is: tags in *Recently played*, Source in Video info
+
+*Recently played* mixes local files and server videos, and with two
+servers the same film can be listed twice (played from Plex and from
+Jellyfin, or a local copy and a server copy). They stay separate rows:
+each place keeps its own progress and watched state (the servers sync
+theirs with their other apps), so merging them would show one place's
+progress for another's video. Instead each row has a small tag on the
+right: *Local*, *SD Card*, *USB*, *Drive* (the local source holding the
+file, by longest path prefix, `library.source_for`), or the service
+name, with the server's name when more than one server of that service
+is signed in.
+
+Video info's first row is *Source*: "Local · Videos", "SD Card (Label)",
+"USB drive · Label", or "Plex · <server> · local network / remote" (how
+the app reached it). *Folder* stays the path on the disk or on the
+server. The in-player Stream row (D55) already said this while playing.
+
+## D57. Headphone surround: 5.1 surrounds behind the listener
+
+The owner found the front/rear separation of 5.1 on headphones subtle.
+Cause: most 5.1 tracks decode as "5.1(side)", and sofalizer puts side
+channels at 90° (`af_sofalizer.c`), right beside the ears. In a 5.1 mix
+they are the surrounds, which a 5.1 room has at 100–120° (ITU-R BS.775).
+Measured with pink noise on the left surround through the shipped HRTF,
+left ear relative to the front speaker (30°): the rear cue, a dip in the
+4–6 kHz band, is −2 dB at 90°, −6 dB at 110° and −10 dB at 130°; at 150°
+the dip widens to 6–10 kHz but the left/right difference shrinks (3.7 dB
+vs 6.6 dB at 90°), which loses the sense of width.
+
+- **Decision:** 5.1 and 5.1(side) surrounds at ±120°, the back end of the
+  ITU range (`Surround.SPEAKERS`). 7.1 keeps sofalizer's sides at 90° and
+  backs at 150°, which is how 7.1 rooms are laid out.
+- **FFmpeg quirk:** sofalizer's `speakers` option looks channel *names* up
+  as layout indexes (`vspkrpos[AV_CHAN_SIDE_LEFT]` is read as layout
+  index 9), so "SL 120" does nothing on 5.1. Positions are given by index
+  ("4 120|5 240"), which is why they depend on the layout name
+  (`audio-params/channels`).
+- **Limits that remain:** a generic dummy head with no room sound and no
+  head tracking can't place sounds as firmly as speakers: front sounds
+  tend to stay close to or inside the head, and front/back confusions are
+  common. Adding room reflections (a binaural room response) would help
+  externalization; that is a larger change, not planned yet.
+- Dialogue level (D48) is unchanged: the centre channel isn't moved.
+
+## D58. Subtitle brightness
+
+White subtitles glare in dark scenes, above all on OLED and HDR screens.
+*Subtitle brightness* (playback menu, 30–100 % in 10 % steps) sets
+`sub-color` to a grey for text subtitles (any screen) and lowers
+`image-subs-hdr-peak` for picture subtitles (PGS, VobSub, DVB), following
+the grey's light output (`peak × level^2.2`, from the 203 nits of
+mpv.conf), so both kinds dim alike on HDR. mpv has no colour control for
+picture subtitles on SDR output, so those stay as they are there.
+Styled ASS subtitles keep their own colours (mpv only applies `sub-color`
+to plain text). Session-wide like the subtitle size, not saved; no
+brighter-than-white setting (203 nits is already the HDR reference).
+
+## D59. Eighth audit (ISSUES.md Part VIII, Gemini, v0.5.0 work) reviewed
+
+All findings checked against the code; fixed unless noted.
+
+- **1.1 Anonymous-stream check:** confirmed with curl: `max-filesize 1`
+  makes curl fail (exit 63, no HTTP code) on any 401/403 with a body, so
+  the check never concluded and ran again before every video of a
+  server that needs the token. The body now goes to `/dev/null` with a
+  64 KB cap (error pages fit; a server that ignores Range and starts
+  sending the video hits the cap, which also means "no token needed").
+- **1.2 One-season shows** (`series_episodes`) were sortable, so *Date*
+  sort reversed their episodes: now kept in the server's order like
+  seasons and episodes. *Recently played* auto-play also falls back to
+  the whole show for an episode outside any season.
+- **1.3 Discovery answers were not verified:** anyone on the LAN can
+  answer the broadcast, and `connect()` (when the saved address stops
+  answering) took the address of an answer with the right id and sent
+  the token there, contrary to D55. Every answer is now probed
+  (`/System/Info/Public`, no token) and kept only if the address answers
+  with the same id; `parse_discovery` keeps answers with the same id from
+  different addresses apart (a fake first answer can't hide the real
+  one), at most 16, and dvp-discover stops after 64 packets. `config.ini`
+  addresses win over broadcast ones (a server in a container may announce
+  an address that can't be reached). Tested against the owner's server
+  with a wrong saved address: found again and saved.
+- **1.4 "Playing" state:** a playback that ended without a position left
+  the item marked as started, so the next play of it began with a
+  progress report instead of "playing". `prepare()` resets it; sign-out
+  clears all. Declined: reporting "playing" as soon as the file loads
+  (also for Plex): the first report at the first pause or 30 s tick is
+  tested behaviour, and servers show the session from then.
+- **2.1 Jellyfin HDR type** without `ColorTransfer`: taken from
+  `VideoRangeType` (HDR10, HDR10Plus, HLG, DOVIWith…).
+- **2.2 Sign-in from the only folder:** with one source and nothing
+  recently played the start screen is skipped; signing in to Plex or
+  Jellyfin from there left the new server out of sight. Sign-in now goes
+  to the start screen (`reload_to_start`). Other reloads (an SD card
+  inserted while browsing) keep the folder, as before.
+- **2.3 Version and metainfo:** done at release time, as for every
+  release (version.lua, metainfo `<release>`, CHANGELOG heading).

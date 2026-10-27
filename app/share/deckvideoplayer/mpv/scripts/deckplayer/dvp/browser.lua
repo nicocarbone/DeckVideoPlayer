@@ -5,7 +5,6 @@ local util = require "dvp.util"
 local library = require "dvp.library"
 local Resume = require "dvp.resume"
 local qrencode = require "dvp.qrencode"
-local Plex = require "dvp.plex"
 local VideoInfo = require "dvp.videoinfo"
 
 local M = {}
@@ -17,7 +16,7 @@ local ROW_H = 60
 local ROW_GAP = 4
 local FS = 26
 
--- ctx: cfg, resume, menu, plex, play(list, start), quit(), quit_dialog(), help(), toast(text)
+-- ctx: cfg, resume, menu, plex, servers, play(list, start), quit(), quit_dialog(), help(), toast(text)
 function M.new(ctx)
     local self = setmetatable({}, M)
     self.ctx = ctx
@@ -46,14 +45,14 @@ end
 -- Re-reads the configured folders and mounted drives, so an SD card or USB
 -- drive inserted while the app runs shows up. Cheap (reads mountinfo).
 -- Also picks the "Recently played" videos (skipping files that are gone or
--- on a drive that isn't inserted: one stat per listed file; Plex videos
--- while signed in to their server's account).
+-- on a drive that isn't inserted: one stat per listed file; server videos
+-- while signed in to their server).
 function M:refresh_sources()
-    self.sources = library.sources(self.cfg, self.ctx.plex and self.ctx.plex:sources())
-    local plex = self.ctx.plex
+    local servers = self.ctx.servers
+    self.sources = library.sources(self.cfg, servers:sources())
     self.recents = self.ctx.resume:recent(self.cfg.interface.recently_played, function(path)
-        local machine = Plex.parse_recent_key(path)
-        if machine then return plex ~= nil and plex:signed_in() and plex:server(machine) ~= nil end
+        local available = servers:recent_available(path)
+        if available ~= nil then return available end
         return util.file_exists(path)
     end)
     local top = self.stack[1]
@@ -69,30 +68,44 @@ function M:single_source()
     return #self.sources == 1 and #self.recents == 0
 end
 
+-- Short tag of where a "Recently played" video is: "Local", "SD Card",
+-- "USB", "Plex", "Jellyfin"; with the server's name when several servers
+-- of that kind are signed in. The same video played from two places has
+-- two rows (each place keeps its own progress); the tags tell them apart.
+function M:recent_tag(path, backend, id)
+    if not backend then return library.source_tag(library.source_for(self.sources, path)) end
+    local count = 0
+    for _, s in ipairs(self.sources) do
+        if s.kind == backend.ID then count = count + 1 end
+    end
+    local server = count > 1 and backend:server(id)
+    return server and (backend.NAME .. " · " .. server.name) or backend.NAME
+end
+
 -- Entries of the start screen: the sources, then "Recently played".
 function M:root_entries()
     local entries = {}
     for _, s in ipairs(self.sources) do
         entries[#entries + 1] = {
-            label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind, plex = s.plex,
+            label = s.name, name = s.name, path = s.path, is_dir = true, source = s.kind, server = s.server,
         }
     end
     if #self.recents > 0 then
         entries[#entries + 1] = {header = true, label = "Recently played"}
         for _, path in ipairs(self.recents) do
-            local machine, key = Plex.parse_recent_key(path)
-            if machine then
-                -- Played from Plex: opened through the server (D50).
-                local label = (self.ctx.resume:get(path) or {}).title or "Plex video"
+            local backend, id, key = self.ctx.servers:parse_recent_key(path)
+            if backend then
+                -- Played from a media server: opened through the server (D50).
+                local label = (self.ctx.resume:get(path) or {}).title or (backend.NAME .. " video")
                 entries[#entries + 1] = {
                     label = label, name = label, path = path, is_dir = false, recent = true,
-                    plex_recent = {machine = machine, key = key, rating_key = key:match("(%d+)$")},
+                    server_recent = backend.recent_ref(id, key), tag = self:recent_tag(path, backend, id),
                 }
             else
                 local name = util.basename(path)
                 entries[#entries + 1] = {
                     label = library.display_name(name, false, self.cfg.interface.clean_names),
-                    name = name, path = path, is_dir = false, recent = true,
+                    name = name, path = path, is_dir = false, recent = true, tag = self:recent_tag(path),
                 }
             end
         end
@@ -123,12 +136,12 @@ function M:load()
         -- With a single source there is no point in showing the root list.
         if self:single_source() then
             local s = self.sources[1]
-            self.stack = {{path = s.path, label = s.name, is_root = true, plex = s.plex}}
+            self.stack = {{path = s.path, label = s.name, is_root = true, server = s.server}}
             return self:load()
         end
         self.entries = self:root_entries()
-    elseif loc.plex then
-        return self:load_plex(loc)
+    elseif loc.server then
+        return self:load_server(loc)
     else
         local entries, err = library.list(loc.path, self.cfg, self.sort)
         if not entries then
@@ -143,14 +156,14 @@ function M:load()
     self.scroll = 0
 end
 
--- Plex listings arrive asynchronously: show "Loading…", then fill in if
--- the user is still at that location. `self.after_load` (optional) runs
--- once the entries are there (e.g. to restore the cursor on a path).
-function M:load_plex(loc)
+-- Media server listings arrive asynchronously: show "Loading…", then fill
+-- in if the user is still at that location. `self.after_load` (optional)
+-- runs once the entries are there (e.g. to restore the cursor on a path).
+function M:load_server(loc)
     self.entries = {}
     self.loading = true
     self.selected, self.scroll = 1, 0
-    self.ctx.plex:list(loc.plex, function(entries, err)
+    self.ctx.servers:for_ref(loc.server):list(loc.server, function(entries, err)
         if self:location() ~= loc then return end
         self.loading = false
         self.error = err
@@ -165,19 +178,22 @@ function M:load_plex(loc)
     end)
 end
 
--- Plex listings kept in the server's order: the server page, "Continue
--- watching", and seasons/episodes (by number, whatever the sort).
-local SERVER_ORDER = {root = true, ondeck = true, seasons = true, episodes = true}
+-- Server listings kept in the server's order: the server page, "Continue
+-- watching", "Next up", and seasons/episodes (by number, whatever the sort).
+local SERVER_ORDER = {root = true, ondeck = true, nextup = true, seasons = true, episodes = true,
+                      series_episodes = true}
+-- Listings of unrelated videos: play just the chosen one.
+local SINGLE_PLAY = {ondeck = true, nextup = true}
 
--- Whether Y sorts this listing (not the source list, nor Plex listings kept
--- in server order).
+-- Whether Y sorts this listing (not the source list, nor server listings
+-- kept in server order).
 function M:sortable()
     local loc = self:location()
     if not loc then return false end
-    return not (loc.plex and SERVER_ORDER[loc.plex.kind])
+    return not (loc.server and SERVER_ORDER[loc.server.kind])
 end
 
--- Progress of an entry: Plex entries carry their own state, local files
+-- Progress of an entry: server entries carry their own state, local files
 -- use resume.json. Same shape either way: {pos, duration, watched}.
 function M:entry_state(e)
     if e.state then return e.state end
@@ -197,7 +213,7 @@ function M:resume_position(e)
 end
 
 -- `select` (optional): path to put the cursor on, also when the listing
--- arrives later (Plex).
+-- arrives later (media servers).
 function M:show(select)
     self.active = true
     self:refresh_sources()
@@ -222,6 +238,13 @@ function M:reload()
     self:render()
 end
 
+-- After signing in to a server: from the only folder (the start screen was
+-- skipped), go to the start screen, where the new server now is.
+function M:reload_to_start()
+    if #self.stack == 1 and self.stack[1].is_root then self.stack = {} end
+    self:reload()
+end
+
 -- True at the top level (source list, or the only source's folder).
 function M:at_start()
     local top = self.stack[1]
@@ -234,11 +257,11 @@ function M:hide()
     self.layer:clear()
 end
 
--- Move the cursor to `path` if it is in the current listing (a Plex
+-- Move the cursor to `path` if it is in the current listing (a server
 -- stream URL also finds its "Recently played" entry).
 function M:select_path(path)
-    local plex = self.ctx.plex
-    local alt = plex and Plex.recent_key(plex:item_for(path))
+    local servers = self.ctx.servers
+    local alt = servers:recent_key(servers:item_for(path))
     for i, e in ipairs(self.entries) do
         if e.path == path or (alt and e.path == alt) then
             self.selected = i
@@ -251,7 +274,7 @@ end
 function M:enter(entry)
     self.after_load = nil   -- meant for a listing we are leaving
     self.cursor[loc_key(self:location())] = self.selected
-    table.insert(self.stack, {path = entry.path, label = entry.label, plex = entry.plex})
+    table.insert(self.stack, {path = entry.path, label = entry.label, server = entry.server})
     self:load()
     self:render()
 end
@@ -291,8 +314,8 @@ function M:playlist_from(index)
         end
     end
     local loc = self:location()
-    -- "Continue watching" mixes unrelated videos: play just the chosen one.
-    if not self.cfg.playback.autoplay_next or (loc and loc.plex and loc.plex.kind == "ondeck") then
+    -- "Continue watching" / "Next up" mix unrelated videos: play just the chosen one.
+    if not self.cfg.playback.autoplay_next or (loc and loc.server and SINGLE_PLAY[loc.server.kind]) then
         return {self.entries[index].path}
     end
     local out = {}
@@ -316,19 +339,20 @@ end
 function M:open_file(index, from_start)
     local entry = self.entries[index]
     self.cursor[loc_key(self:location())] = index
-    if entry.plex_recent then return self:open_plex_recent(entry, from_start) end
+    if entry.server_recent then return self:open_server_recent(entry, from_start) end
     self:start(entry, self:playlist_from(index), from_start)
 end
 
--- A Plex video from "Recently played": asks its server for the current
+-- A server video from "Recently played": asks its server for the current
 -- state (and the rest of the season), then plays as from its listing.
-function M:open_plex_recent(entry, from_start)
+function M:open_server_recent(entry, from_start)
     if self.opening then return end
     self.opening = true
-    local r = entry.plex_recent
+    local r = entry.server_recent
+    local backend = self.ctx.servers:for_ref(r)
     -- The first request may have to find the server: say something is happening.
-    self.ctx.toast("Opening from Plex…")
-    self.ctx.plex:resolve(r.machine, r.key, self.cfg.playback.autoplay_next, function(fresh, list, err)
+    self.ctx.toast("Opening from " .. backend.NAME .. "…")
+    backend:resolve(r.machine, r.key, self.cfg.playback.autoplay_next, function(fresh, list, err)
         self.opening = false
         -- The server's progress (maybe from another device) for the row.
         if fresh then
@@ -366,7 +390,7 @@ function M:start(entry, list, from_start)
         })
     else
         -- No explicit choice unless X (from start): playback then uses the
-        -- latest saved position (for Plex, fresh from the server: the
+        -- latest saved position (for servers, fresh from the server: the
         -- listing may be older than a play on another device).
         self.ctx.play(list, from_start and 0 or nil)
     end
@@ -380,7 +404,7 @@ function M:toggle_sort()
         if cur then self.after_load = function() self:select_path(cur.path) end end
     else
         -- Entries carry names and dates: re-sort in place, no new listing
-        -- (for Plex, no new request to the server).
+        -- (for servers, no new request).
         library.sort_entries(self.entries, self.sort)
         if cur then self:select_path(cur.path) end
     end
@@ -389,7 +413,7 @@ function M:toggle_sort()
 end
 
 -- Marks a video watched (no position) or unwatched (no mark, no position):
--- on the Plex server for Plex videos, in resume.json for local files.
+-- on the server for Plex / Jellyfin videos, in resume.json for local files.
 function M:mark(entry, watched)
     local resume = self.ctx.resume
     -- The copy shown in "Recently played" follows.
@@ -398,16 +422,16 @@ function M:mark(entry, watched)
         if watched then resume:mark_watched(key) else resume:mark_unwatched(key) end
         resume:flush()
     end
-    if entry.plex or entry.plex_recent then
-        local item = entry.plex or entry.plex_recent
+    if entry.server or entry.server_recent then
+        local item = entry.server or entry.server_recent
         local duration = (entry.state or {}).duration
-        local plex = self.ctx.plex
-        plex:connect(item.machine, function(base, err)
-            if not base then self.ctx.toast(err or "Can't reach the Plex server") return end
-            plex:set_watched(item, watched, function(ok)
-                if not ok then self.ctx.toast("Plex didn't accept the change") return end
-                if entry.plex then entry.state = {duration = duration, watched = watched or nil} end
-                mark_recent(Plex.recent_key(item))
+        local backend = self.ctx.servers:for_ref(item)
+        backend:connect(item.machine, function(base, err)
+            if not base then self.ctx.toast(err or ("Can't reach the " .. backend.NAME .. " server")) return end
+            backend:set_watched(item, watched, function(ok)
+                if not ok then self.ctx.toast(backend.NAME .. " didn't accept the change") return end
+                if entry.server then entry.state = {duration = duration, watched = watched or nil} end
+                mark_recent(backend.recent_key(item))
                 self:render()
             end)
         end)
@@ -422,12 +446,13 @@ function M:mark(entry, watched)
     self:render()
 end
 
--- Hides a Plex item from "Continue watching" (also in other Plex apps),
--- keeping its progress.
+-- Hides a server item from "Continue watching" (also in its other apps),
+-- keeping its progress (Plex only, D55).
 function M:remove_from_continue(entry)
     local loc = self:location()
-    self.ctx.plex:remove_from_continue(entry.plex, function(ok)
-        if not ok then self.ctx.toast("Plex didn't accept the change") return end
+    local backend = self.ctx.servers:for_ref(entry.server)
+    backend:remove_from_continue(entry.server, function(ok)
+        if not ok then self.ctx.toast(backend.NAME .. " didn't accept the change") return end
         self.ctx.toast("Removed from Continue watching")
         if self:location() ~= loc then return end
         for i, e in ipairs(self.entries) do
@@ -442,7 +467,7 @@ function M:remove_from_continue(entry)
 end
 
 function M:video_info(entry)
-    VideoInfo.open(self.ctx, entry)
+    VideoInfo.open(self.ctx, entry, library.source_label(library.source_for(self.sources, entry.path)))
 end
 
 function M:open_menu()
@@ -473,7 +498,9 @@ function M:open_menu()
         end
     end
     local loc = self:location()
-    if cur and cur.plex and not cur.is_dir and loc and loc.plex and loc.plex.kind == "ondeck" then
+    local cur_backend = cur and self.ctx.servers:for_ref(cur.server)
+    if cur_backend and cur_backend.remove_from_continue and not cur.is_dir
+        and loc and loc.server and loc.server.kind == "ondeck" then
         table.insert(items, {label = "Remove from Continue watching", action = function()
             self:remove_from_continue(cur)
         end})
@@ -494,6 +521,15 @@ function M:open_menu()
                              action = function() self:plex_account_menu() end})
     elseif plex then
         table.insert(items, {label = "Sign in to Plex…", action = function() self:plex_sign_in() end})
+    end
+    local jf = self.ctx.jellyfin
+    if jf and jf:signed_in() then
+        local names = {}
+        for _, s in ipairs(jf:servers()) do names[#names + 1] = s.name end
+        table.insert(items, {label = "Jellyfin servers", value = table.concat(names, ", "),
+                             action = function() self:jellyfin_menu() end})
+    elseif jf then
+        table.insert(items, {label = "Add a Jellyfin server…", action = function() self:jellyfin_add() end})
     end
     table.insert(items, {label = "Controls", action = function() self.ctx.help() end})
     table.insert(items, {label = "About", action = function() self.ctx.about() end})
@@ -556,7 +592,7 @@ function M:plex_sign_in()
                     else
                         self.ctx.toast("Signed in to Plex as " .. (plex:username() or "?"))
                     end
-                    self:reload()
+                    self:reload_to_start()
                 elseif perr then
                     timer:kill()
                     menu:update(spec, {message = perr, code = false, qr = false})
@@ -585,6 +621,112 @@ function M:plex_account_menu()
             self:load()
             self:render()
             self.ctx.toast("Signed out of Plex")
+        end},
+    }})
+end
+
+---------------------------------------------------------------------------
+-- Jellyfin servers (found on the LAN or in config.ini; Quick Connect, D55)
+---------------------------------------------------------------------------
+
+-- Lists the servers found, to sign in to one.
+function M:jellyfin_add()
+    local jf, menu = self.ctx.jellyfin, self.ctx.menu
+    local spec = {title = "Add a Jellyfin server", subtitle = "On your network, and in config.ini",
+                  style = "side", items = {{label = "Looking for servers…", disabled = true}}}
+    menu:open(spec)
+    jf:discover(function(found)
+        local items = {}
+        for _, s in ipairs(found) do
+            local host = s.url:match("^https?://(.*)$")
+            items[#items + 1] = {label = s.name, value = jf:server(s.id) and "Signed in" or host,
+                                 action = function() self:jellyfin_sign_in(s) end}
+        end
+        if #items == 0 then items[1] = {label = "No servers found", disabled = true} end
+        items[#items + 1] = {separator = true}
+        items[#items + 1] = {label = "Search again", action = function() self:jellyfin_add() end}
+        items[#items + 1] = {label = "Not listed? See [jellyfin] in config.ini", disabled = true}
+        menu:update(spec, {items = items})
+    end)
+end
+
+-- Quick Connect: a code to approve in a Jellyfin app where the user is
+-- signed in (profile → Quick Connect). The QR code opens that page of the
+-- server's web app on a phone on the same network.
+function M:jellyfin_sign_in(server)
+    local jf, menu = self.ctx.jellyfin, self.ctx.menu
+    local timer, cancelled = nil, false
+    -- Closing the dialog also drops the code, so answers still in flight
+    -- neither sign in nor touch whatever is on screen by then.
+    local function stop()
+        cancelled = true
+        if timer then timer:kill() end
+        jf:cancel_quick_connect()
+    end
+    local spec = {
+        title = "Sign in to " .. server.name, style = "center",
+        message = "Getting a code…",
+        -- (Choosing an item doesn't call on_cancel, so Cancel stops too.)
+        items = {{label = "Cancel", action = stop}},
+        on_cancel = stop,
+    }
+    menu:open(spec)
+    jf:start_quick_connect(server, function(code, err)
+        if cancelled then return end
+        if not code then
+            menu:update(spec, {message = tostring(err)})
+            return
+        end
+        local ok, matrix = qrencode.qrcode(server.url .. "/web/#/quickconnect")
+        local fields = ok and {qr = matrix, code = code,
+                               message = "Scan with your phone, or in Jellyfin\nopen your profile → Quick Connect\nand enter:"}
+            or {code = code, message = "In Jellyfin, open your profile → Quick Connect and enter:"}
+        if not menu:update(spec, fields) then return end
+        -- Poll every 3 s while the dialog is open (only then: battery).
+        local busy = false
+        timer = mp.add_periodic_timer(3, function()
+            if busy then return end
+            busy = true
+            jf:poll_quick_connect(function(done, perr)
+                busy = false
+                if cancelled then return end
+                if done then
+                    timer:kill()
+                    menu:close_all()
+                    local s = jf:server(server.id)
+                    self.ctx.toast("Signed in to " .. server.name .. " as " .. tostring(s and s.username or "?"))
+                    self:reload_to_start()
+                elseif perr then
+                    timer:kill()
+                    menu:update(spec, {message = perr, code = false, qr = false})
+                end
+            end)
+        end)
+    end)
+end
+
+function M:jellyfin_menu()
+    local jf = self.ctx.jellyfin
+    local items = {}
+    for _, s in ipairs(jf:servers()) do
+        items[#items + 1] = {label = s.name, value = s.username,
+                             action = function() self:jellyfin_server_menu(s) end}
+    end
+    items[#items + 1] = {separator = true}
+    items[#items + 1] = {label = "Add a server…", action = function() self:jellyfin_add() end}
+    self.ctx.menu:open({title = "Jellyfin", style = "side", items = items})
+end
+
+function M:jellyfin_server_menu(s)
+    local jf = self.ctx.jellyfin
+    self.ctx.menu:open({title = s.name, subtitle = s.username, style = "side", items = {
+        {label = "Address", value = s.url, disabled = true},
+        {label = "Sign out", action = function()
+            jf:sign_out(s.id)
+            self.stack = {}
+            self:load()
+            self:render()
+            self.ctx.toast("Signed out of " .. s.name)
         end},
     }})
 end
@@ -656,7 +798,7 @@ function M:draw_row(a, e, x0, x1, y, sel)
     local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
     local inner = sel and t.accent or t.bg
     local ix = x0 + 20
-    if e.source == "plex" then
+    if e.source == "plex" or e.source == "jellyfin" then
         a:icon_server(ix, cy, 30, {color = icon_color, inner = inner})
     elseif e.source == "sdcard" then
         a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
@@ -674,6 +816,12 @@ function M:draw_row(a, e, x0, x1, y, sel)
     if e.is_dir then
         a:icon_triangle(rx - 6, cy, 14, "right", {color = sel and t.text or t.dim})
         status_w = 30
+        -- Which kind of server a server source is (names alone may not say).
+        local backend = e.source and self.ctx.servers:get(e.source)
+        if backend then
+            a:text(rx - 30, cy, backend.NAME, {size = 18, align = 6, color = sel and t.text or t.subtext})
+            status_w = status_w + 8 + ui.text_width(backend.NAME, 18)
+        end
         if e.state and e.state.watched then
             a:icon_check(rx - 40, cy, 24, {color = sel and t.text or t.good, inner = sel and t.accent or t.bg})
             status_w = 62
@@ -698,6 +846,16 @@ function M:draw_row(a, e, x0, x1, y, sel)
                 a:text(rx, cy, "Resume " .. label, {size = 18, align = 6, color = sel and t.text or t.subtext})
                 status_w = ui.text_width("Resume " .. label, 18)
             end
+        end
+        -- Where a "Recently played" video is (Local, SD Card, Plex…).
+        if e.tag then
+            local tag = ui.fit_text(e.tag, 16, 240)
+            local tw = ui.text_width(tag, 16) + 20
+            local tx1 = rx - status_w - (status_w > 0 and 18 or 0)
+            a:rect(tx1 - tw, cy - 14, tw, 28, {radius = 14, color = sel and t.text or t.dim,
+                                               opacity = sel and 0.25 or 0.35})
+            a:text(tx1 - tw / 2, cy, tag, {size = 16, align = 5, color = sel and t.text or t.subtext})
+            status_w = rx - (tx1 - tw)
         end
     end
 
@@ -783,7 +941,8 @@ function M:render()
         if self.loading then
             a:text(W / 2, cy, "Loading…", {size = 30, bold = true, align = 5, color = t.subtext})
         elseif self.error then
-            local what = (loc and loc.plex) and "Cannot load from Plex" or "Cannot open this folder"
+            local backend = loc and self.ctx.servers:for_ref(loc.server)
+            local what = backend and ("Cannot load from " .. backend.NAME) or "Cannot open this folder"
             a:text(W / 2, cy, what, {size = 30, bold = true, align = 5})
             a:text(W / 2, cy + 44, ui.fit_text(tostring(self.error), 20, W - 160),
                 {size = 20, align = 5, color = t.subtext})

@@ -29,6 +29,8 @@ local KeepAwake = require "dvp.keepawake"
 local SubDownload = require "dvp.subdownload"
 local About = require "dvp.about"
 local Plex = require "dvp.plex"
+local Servers = require "dvp.servers"
+local Jellyfin = require "dvp.jellyfin"
 
 local opts = {
     config_file = "",
@@ -39,6 +41,8 @@ local opts = {
     -- Development only: never write progress/watched state to Plex servers
     -- (tools/headless-run.sh sets it unless PLEX_WRITE=1).
     plex_readonly = false,
+    -- Same for Jellyfin servers (unless JELLYFIN_WRITE=1).
+    jellyfin_readonly = false,
 }
 options.read_options(opts, "deckplayer")
 
@@ -144,11 +148,15 @@ end
 
 local plex = Plex.new(opts.data_dir, {allow_insecure = cfg.plex.allow_insecure_lan})
 plex.readonly = opts.plex_readonly
+local jellyfin = Jellyfin.new(opts.data_dir, {urls = cfg.jellyfin.server})
+jellyfin.readonly = opts.jellyfin_readonly
+-- Media servers behind one interface (D55).
+local servers = Servers.new({plex, jellyfin})
 
 -- Saves the position of the current file: in resume.json for local files,
--- on the server for Plex videos (D37). `ending`: the file is being closed
--- (blocking report so it arrives even when the app quits; a finished video
--- is marked watched).
+-- on the server for Plex / Jellyfin videos (D37, D55). `ending`: the file is
+-- being closed (blocking report so it arrives even when the app quits; a
+-- finished video is marked watched).
 local function save_progress(ending)
     local path = state.current_path
     if not path then return end
@@ -157,22 +165,22 @@ local function save_progress(ending)
     local duration = mp.get_property_number("duration")
     -- Skipped the closing credits to the next episode: as if it had ended.
     if ending and state.finished_path == path and duration then pos = duration end
-    local item = plex:item_for(path)
+    local item, backend = servers:item_for(path)
     if item then
         if ending then
-            plex:report(item, "stopped", pos, duration, true)
-            -- Plex marks a video watched itself past its "video played
-            -- threshold" (90 % by default); scrobble only below that, or
-            -- the play would count twice (D39).
+            backend:report(item, "stopped", pos, duration, true)
+            -- The server marks a video watched itself past its threshold
+            -- (90 % by default in Plex and Jellyfin); mark it only below
+            -- that, or the play would count twice (D39).
             if duration and duration > 0 and Resume.is_finished(pos, duration) and pos / duration < 0.9 then
-                plex:set_watched(item, true, nil, true)
+                backend:set_watched(item, true, nil, true)
             end
         else
-            plex:report(item, mp.get_property_native("pause") and "paused" or "playing", pos, duration)
+            backend:report(item, mp.get_property_native("pause") and "paused" or "playing", pos, duration)
         end
         -- A local copy for "Recently played" (D50); the server stays the
         -- source of truth for the position.
-        local key = Plex.recent_key(item)
+        local key = backend.recent_key(item)
         if key then resume:update(key, pos, duration, nil, nil, item.title) end
         return
     end
@@ -191,7 +199,7 @@ end
 
 -- Progress is saved by the on_unload hook, which mpv runs for stop and
 -- quit too. Saving here as well would race: an async "playing" report could
--- reach Plex after the final "stopped" one.
+-- reach the server after the final "stopped" one.
 local function stop_playback()
     mp.commandv("stop")
 end
@@ -248,7 +256,7 @@ local ctx = {
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
     help = help, toast = toast, surround = surround, night = night, keepawake = keepawake,
     hdr = hdr,
-    app_dir = app_dir, data_dir = opts.data_dir, plex = plex,
+    app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, servers = servers,
     finished = function() state.finished_path = state.current_path end,
 }
 ctx.about = function() About.open(ctx) end
@@ -304,26 +312,27 @@ mp.add_hook("on_load", 50, function()
     mp.set_property_number("file-local-options/audio-delay", 0)
     local start = state.pending_start[path]
     state.pending_start[path] = nil
-    local item = plex:item_for(path)
-    state.plex_subs = nil
+    local item, backend = servers:item_for(path)
+    state.server_subs = nil
     if item then
-        -- Plex: the token goes in a header (never in the URL), and the
-        -- server's resume point and subtitle files are fetched now.
-        local prep = plex:prepare(item)
-        state.plex_prepared = prep.ok
-        state.plex_unreachable = prep.unreachable
-        -- Streaming token only if the server answered (don't wait twice for
+        -- Media server: a token, if any, goes in a header (never in the
+        -- URL), and the server's resume point and subtitle files are
+        -- fetched now.
+        local prep = backend:prepare(item)
+        state.server_prepared = prep.ok
+        state.server_unreachable = prep.unreachable
+        -- Streaming header only if the server answered (don't wait twice for
         -- an unreachable server).
         if prep.ok then
-            mp.set_property("file-local-options/http-header-fields", plex:header_fields(item))
+            mp.set_property("file-local-options/http-header-fields", backend:header_fields(item))
         elseif prep.unreachable then
             -- Fail now instead of waiting for a network timeout, and drop the
             -- rest of the playlist: every next episode would wait as well.
             mp.commandv("playlist-clear")
-            mp.set_property("stream-open-filename", "dvp-plex-unreachable://")
+            mp.set_property("stream-open-filename", "dvp-server-unreachable://")
         end
         mp.set_property("file-local-options/force-media-title", item.title or "")
-        state.plex_subs = prep.subs
+        state.server_subs = prep.subs
         player:set_markers(prep.markers)
         if start == nil and cfg.playback.resume and prep.pos
             and not Resume.is_finished(prep.pos, (item.duration or 0) / 1000) then
@@ -353,8 +362,8 @@ end)
 -- opened but before tracks are selected, so they take part in selection.
 mp.add_hook("on_preloaded", 50, function()
     ctx.subtitles:load_stored(mp.get_property("path"))
-    -- Subtitle files stored next to a Plex video on the server.
-    for _, s in ipairs(state.plex_subs or {}) do
+    -- Subtitle files stored next to a server video (Plex, Jellyfin).
+    for _, s in ipairs(state.server_subs or {}) do
         mp.commandv("sub-add", s.url, "auto", s.title, s.lang)
     end
 end)
@@ -392,16 +401,17 @@ end)
 
 mp.register_event("end-file", function(ev)
     if ev.reason == "error" then
-        local item = plex:item_for(state.loading_path)
-        if item and state.plex_prepared then
+        local item, backend = servers:item_for(state.loading_path)
+        if item and state.server_prepared then
             -- The server answered: keep the connection for the next episode;
             -- only the streaming token may be stale (server restart).
-            plex:forget_token(item.machine)
+            backend:forget_token(item.machine)
         elseif item then
             -- Unreachable: reconnect (maybe another address) next time.
-            plex:forget_session(item.machine)
+            backend:forget_session(item.machine)
         end
-        toast(item and state.plex_unreachable and "Can't reach the Plex server" or "Could not play this file")
+        toast(item and state.server_unreachable and ("Can't reach the " .. backend.NAME .. " server")
+              or "Could not play this file")
         msg.error("playback failed: " .. tostring(ev.file_error))
     end
     state.current_path = nil

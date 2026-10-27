@@ -20,6 +20,26 @@ function M.from_plex(md)
     return out
 end
 
+-- Markers from Jellyfin's media segments (GET /MediaSegments/<id>; times
+-- in ticks of 100 ns). Jellyfin stores segments that a plugin detected
+-- (e.g. Intro Skipper); "Outro" is the closing credits. Recaps, previews
+-- and commercials are ignored.
+local SEGMENT_KINDS = {Intro = "intro", Outro = "credits"}
+local TICKS = 1e7
+
+function M.from_jellyfin(segments)
+    local out = {}
+    for _, sg in ipairs((type(segments) == "table" and segments.Items) or {}) do
+        local kind = SEGMENT_KINDS[sg.Type]
+        local start, stop = tonumber(sg.StartTicks), tonumber(sg.EndTicks)
+        if kind and start and stop and (stop - start) / TICKS >= 2 then
+            out[#out + 1] = {kind = kind, start = start / TICKS, stop = stop / TICKS, final = kind == "credits"}
+        end
+    end
+    table.sort(out, function(a, b) return a.start < b.start end)
+    return out
+end
+
 -- The marker playing at `pos` (s), or nil. The last second doesn't count:
 -- skipping there would do nothing useful.
 function M.at(list, pos)

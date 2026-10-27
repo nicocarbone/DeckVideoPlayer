@@ -1,7 +1,8 @@
 -- "Video info" panel of the library (v0.4.1, D50): container, size,
 -- bitrate, video format with HDR type, audio and subtitle tracks, path.
 -- Local files are read with ffprobe (in the background, only when asked);
--- Plex videos with the item's metadata from the server (Media/Part/Stream).
+-- Plex and Jellyfin videos with the item's metadata from the server.
+-- The first row says where the video is (local folder, drive or server).
 
 local utils = require "mp.utils"
 local util = require "dvp.util"
@@ -119,7 +120,7 @@ local function sub_row(i, t)
 end
 
 -- Sections from a normalized description:
--- {file = {name, folder, server, size, duration, container, bitrate},
+-- {file = {source, name, folder, size, duration, container, bitrate},
 --  video = {codec, profile, width, height, fps, bit_depth, primaries,
 --           transfer, dv_profile, hdr10plus, bitrate, mastering, maxcll, maxfall} or nil,
 --  audio = {{lang, title, codec, profile, layout, channels, default, display}},
@@ -128,8 +129,8 @@ function M.sections(d)
     local out = {}
     local f = d.file or {}
     local rows = {}
+    add(rows, "Source", f.source)
     add(rows, "Name", f.name)
-    add(rows, "Server", f.server)
     add(rows, "Folder", f.folder)
     add(rows, "Size", M.format_size(f.size))
     add(rows, "Duration", f.duration and f.duration > 0 and util.format_time(f.duration))
@@ -254,14 +255,21 @@ function M.from_ffprobe(probe, frame, path)
     return d
 end
 
+-- "Plex · Home · local network": a media server's Source row. `connection`:
+-- "local" / "remote" (how the app reached it), or nil.
+function M.server_source(service, server_name, connection)
+    local how = connection == "local" and "local network" or connection == "remote" and "remote" or nil
+    return join(service, server_name, how)
+end
+
 -- Normalized description of a Plex item from its full metadata
--- (GET /library/metadata/<id>).
-function M.from_plex(md, server_name)
+-- (GET /library/metadata/<id>). `source`: see server_source.
+function M.from_plex(md, source)
     local m = type(md.Media) == "table" and md.Media[1] or {}
     local part = type(m.Part) == "table" and m.Part[1] or {}
     local file = type(part.file) == "string" and part.file or nil
     local d = {file = {
-        name = file and util.basename(file) or md.title, server = server_name,
+        source = source, name = file and util.basename(file) or md.title,
         folder = file and util.dirname(file),
         size = tonumber(part.size), duration = tonumber(md.duration or m.duration) and (md.duration or m.duration) / 1000,
         container = m.container and tostring(m.container):upper(),
@@ -299,8 +307,51 @@ function M.from_plex(md, server_name)
     return d
 end
 
+-- Normalized description of a Jellyfin item from its full metadata
+-- (GET /Items/<id>: MediaSources with MediaStreams). `source`: see server_source.
+function M.from_jellyfin(it, source)
+    local ms = type(it.MediaSources) == "table" and it.MediaSources[1] or {}
+    local path = type(ms.Path) == "string" and ms.Path or (type(it.Path) == "string" and it.Path) or nil
+    local ticks = tonumber(ms.RunTimeTicks or it.RunTimeTicks)
+    local d = {file = {
+        source = source, name = path and util.basename(path) or it.Name,
+        folder = path and util.dirname(path),
+        size = tonumber(ms.Size), duration = ticks and ticks / 1e7,
+        container = ms.Container and tostring(ms.Container):upper(),
+        bitrate = tonumber(ms.Bitrate),
+    }, audio = {}, subs = {}}
+    for _, s in ipairs(type(ms.MediaStreams) == "table" and ms.MediaStreams or {}) do
+        if s.Type == "Video" and not d.video then
+            local range = tostring(s.VideoRangeType or "")
+            d.video = {codec = s.Codec and tostring(s.Codec):lower(),
+                       profile = s.Profile and (tostring(s.Profile):gsub("^%l", string.upper)),
+                       width = tonumber(s.Width), height = tonumber(s.Height),
+                       fps = tonumber(s.RealFrameRate) or tonumber(s.AverageFrameRate),
+                       bit_depth = tonumber(s.BitDepth),
+                       primaries = s.ColorPrimaries and tostring(s.ColorPrimaries):lower(),
+                       -- Without a transfer from the server's probe, the
+                       -- range type ("HDR10", "DOVIWithHLG"…) still says it.
+                       transfer = s.ColorTransfer and tostring(s.ColorTransfer):lower()
+                           or (range:find("HDR10") and "smpte2084")
+                           or (range:find("HLG") and "arib-std-b67") or nil,
+                       dv_profile = tonumber(s.DvProfile),
+                       hdr10plus = range:find("HDR10Plus") ~= nil,
+                       bitrate = tonumber(s.BitRate)}
+        elseif s.Type == "Audio" then
+            d.audio[#d.audio + 1] = {lang = s.Language, title = s.Title, codec = s.Codec and tostring(s.Codec):lower(),
+                                     profile = s.Profile, layout = s.ChannelLayout, channels = s.Channels,
+                                     default = s.IsDefault == true, display = s.DisplayTitle}
+        elseif s.Type == "Subtitle" then
+            d.subs[#d.subs + 1] = {lang = s.Language, title = s.Title, codec = s.Codec and tostring(s.Codec):lower(),
+                                   forced = s.IsForced == true, sdh = s.IsHearingImpaired == true,
+                                   default = s.IsDefault == true, external = s.IsExternal == true}
+        end
+    end
+    return d
+end
+
 ---------------------------------------------------------------------------
--- Reading (ffprobe / Plex) and the panel
+-- Reading (ffprobe / Plex / Jellyfin) and the panel
 ---------------------------------------------------------------------------
 
 local function ffprobe(args, cb)
@@ -334,9 +385,10 @@ function M.probe_local(path, cb)
     end)
 end
 
--- Opens the panel for a library entry: a local file, or a Plex item (an
--- entry with `plex` or `plex_recent` = {machine, key}).
-function M.open(ctx, entry)
+-- Opens the panel for a library entry: a local file, or a media server
+-- item (an entry with `server` or `server_recent`, dvp/servers.lua).
+-- `source`: the Source row of a local file (library.source_label).
+function M.open(ctx, entry, source)
     local spec = {title = "Video info", subtitle = entry.label, style = "side", wide = true,
                   items = {{label = "Reading…", disabled = true}}}
     ctx.menu:open(spec)
@@ -346,13 +398,15 @@ function M.open(ctx, entry)
         ctx.menu:update(spec, {items = d and M.items(M.sections(d))
                                     or {{label = err or "Not available", disabled = true}}})
     end
-    local ref = entry.plex or entry.plex_recent
-    if ref then
-        ctx.plex:metadata(ref.machine, ref.key, function(md, err, server_name)
-            if md then show(M.from_plex(md, server_name)) else show(nil, err) end
-        end)
+    local ref = entry.server or entry.server_recent
+    local backend = ctx.servers:for_ref(ref)
+    if backend then
+        backend:video_info(ref, show)
     else
-        M.probe_local(entry.path, show)
+        M.probe_local(entry.path, function(d, err)
+            if d then d.file.source = source end
+            show(d, err)
+        end)
     end
 end
 

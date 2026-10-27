@@ -64,6 +64,16 @@ here.
 |---|---|---|---|
 | `allow_insecure_lan` | bool | `no` | Also try plain `http://` on the server's local addresses. Only for routers that block Plex's `*.plex.direct` names (DNS rebinding protection) when Plex fails at home. The Plex token then travels unencrypted, so only enable it if the Deck stays on networks you trust (D39). |
 
+## `[jellyfin]`
+
+Jellyfin servers are added from the library (*Menu → Add a Jellyfin
+server…*), which finds servers on your home network. List here the ones it
+can't find.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `server` | URL, repeatable | none | A Jellyfin server to offer in *Add a Jellyfin server…*, e.g. `http://192.168.1.20:8096` or `https://jellyfin.example.com` (a path such as `/jellyfin` after a reverse proxy is fine). Plain `http://` only for home network addresses (private IPs, `.local` names); use `https://` otherwise (D55). |
+
 ## `[opensubtitles]`
 
 "Download subtitles…" in the subtitle menu (X). The menu entry only

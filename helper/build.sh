@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds dvp-gamescope-refresh and dvp-keep-awake into OUTDIR (default:
+# Builds dvp-gamescope-refresh, dvp-keep-awake and dvp-discover into OUTDIR (default:
 # .dev/bin). Used by the Flatpak manifest and by the dev/test scripts. Needs
 # a C compiler, wayland-scanner, libwayland-client headers (libwayland-dev)
 # and libsystemd headers (libsystemd-dev).
@@ -9,9 +9,11 @@ out=${1:-"$here/../.dev/bin"}
 mkdir -p "$out"
 bin="$out/dvp-gamescope-refresh"
 awake="$out/dvp-keep-awake"
+discover="$out/dvp-discover"
 # Skip when up to date (dev scripts call this on every run).
 if [ -x "$bin" ] && [ "$bin" -nt "$here/dvp-gamescope-refresh.c" ] && [ "$bin" -nt "$here/gamescope-control.xml" ] &&
-   [ -x "$awake" ] && [ "$awake" -nt "$here/dvp-keep-awake.c" ]; then
+   [ -x "$awake" ] && [ "$awake" -nt "$here/dvp-keep-awake.c" ] &&
+   [ -x "$discover" ] && [ "$discover" -nt "$here/dvp-discover.c" ]; then
     exit 0
 fi
 tmp=$(mktemp -d)
@@ -24,3 +26,4 @@ ${CC:-cc} -O2 -Wall -Wextra -I"$tmp" -o "$bin" \
     $(pkg-config --cflags --libs wayland-client)
 # shellcheck disable=SC2046
 ${CC:-cc} -O2 -Wall -Wextra -o "$awake" "$here/dvp-keep-awake.c" $(pkg-config --cflags --libs libsystemd)
+${CC:-cc} -O2 -Wall -Wextra -o "$discover" "$here/dvp-discover.c"

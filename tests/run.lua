@@ -34,6 +34,21 @@ local function eq(name, got, want)
     check(name, got == want, string.format("got %s, want %s", tostring(got), tostring(want)))
 end
 
+-- Every module parses, also those the tests below don't load (browser,
+-- player, main…): a syntax error there would only show when the app starts.
+do
+    local utils = require "mp.utils"
+    local files = {root .. "/main.lua"}
+    for _, name in ipairs(utils.readdir(root .. "/dvp", "files") or {}) do
+        if name:match("%.lua$") then files[#files + 1] = root .. "/dvp/" .. name end
+    end
+    for _, f in ipairs(files) do
+        local ok, err = loadfile(f)
+        check("parses " .. f:match("[^/]+/[^/]+$"), ok ~= nil, err)
+    end
+    check("modules found", #files > 20)
+end
+
 -- util ------------------------------------------------------------------
 eq("format_time short", util.format_time(65), "1:05")
 eq("format_time hours", util.format_time(3725), "1:02:05")
@@ -199,12 +214,23 @@ eq("external sub detail", media.track_detail({type = "sub", codec = "subrip", ex
     "External · Forced")
 eq("lang pt-br", media.language("pt-br"), "Portuguese (Brazil)")
 
+local sbc, sbp = media.sub_brightness(1, 203)
+eq("sub brightness full", sbc .. " " .. sbp, "#FFFFFF 203")
+sbc, sbp = media.sub_brightness(0.5, 203)
+eq("sub brightness half", sbc .. " " .. sbp, "#808080 44")
+eq("sub brightness floor", select(2, media.sub_brightness(0.3, 20)), 10)
+
 -- surround -----------------------------------------------------------------
 eq("lavfi escape", Surround.escape_lavfi("/a b:c,[d]'e\\f"), "/a b\\\\:c\\,\\[d\\]\\\\\\'e\\\\\\\\f")
 local fstr = Surround.filter_string("/x/h.sofa", 6)
 local graph = "sofalizer=sofa=/x/h.sofa:gain=0:lfegain=3:type=freq,volume=12.5dB,"
     .. "alimiter=limit=0.891:attack=5:release=50:level=0"
 eq("surround filter", fstr, "@dvp-surround:lavfi=graph=%" .. #graph .. "%" .. graph)
+-- 5.1 surrounds at 120° (D57), by layout index; 7.1 keeps sofalizer's positions
+local g51 = Surround.filter_string("/x/h.sofa", 6, "5.1(side)")
+eq("surround 5.1 speakers", g51:find(":type=freq:speakers=4 120|5 240,volume=12.5dB,", 1, true) ~= nil, true)
+eq("surround 5.1 back speakers", Surround.filter_string("/x/h.sofa", 6, "5.1"):find("speakers=4 120|5 240", 1, true) ~= nil, true)
+eq("surround 7.1 default speakers", Surround.filter_string("/x/h.sofa", 8, "7.1"):find("speakers", 1, true), nil)
 -- sofalizer takes 3 dB per input channel: same dialogue level for any layout
 eq("surround gain 7.1", Surround.gain(8), 18.5)
 eq("surround gain 4.0", Surround.gain(4), 6.5)
@@ -432,13 +458,13 @@ local evil = Plex.entries_from({Metadata = {
 eq("plex entries with unsafe keys dropped", #evil, 0)
 eq("plex section path", pents[1].path, "plex://m1/library/sections/3/all")
 eq("plex movie url", pents[2].path, "https://srv/library/parts/1/file.mkv")
-eq("plex movie title", pents[2].plex.title, "Alien (1979)")
-eq("plex one-season show", pents[3].plex.key, "/library/metadata/8/allLeaves")
-eq("plex one-season show lists episodes", pents[3].plex.kind, "episodes")
-eq("plex show lists seasons", pents[4].plex.kind, "seasons")
+eq("plex movie title", pents[2].server.title, "Alien (1979)")
+eq("plex one-season show", pents[3].server.key, "/library/metadata/8/allLeaves")
+eq("plex one-season show lists episodes", pents[3].server.kind, "episodes")
+eq("plex show lists seasons", pents[4].server.kind, "seasons")
 eq("plex season lists episodes", Plex.entries_from({Metadata = {
     {type = "season", title = "Book Two", index = 2, key = "/library/metadata/10/children"}}},
-    "https://srv", "m1", "seasons")[1].plex.kind, "episodes")
+    "https://srv", "m1", "seasons")[1].server.kind, "episodes")
 check("plex watched show", pents[4].state and pents[4].state.watched)
 local subs = Plex.external_subtitles({Media = {{Part = {{Stream = {
     {streamType = 3, codec = "srt", key = "/library/streams/5", languageTag = "en", displayTitle = "English"},
@@ -455,10 +481,10 @@ eq("build text", About.build_text(bi), "2026-10-23 · 1a2b3c4-modified")
 eq("build text no commit", About.build_text(About.parse_build_info("date=2026-10-23\ncommit=\n")), "2026-10-23")
 eq("build text dev", About.build_text(About.parse_build_info(nil)), "development build")
 
-eq("plex sub key", SubDL.plex_key({machine = "ab12", rating_key = "77"}), "plex-ab12-77")
-local pinfo = SubDL.plex_info({kind = "episode", show = "Sherlock", name = "The Blind Banker", season = 1, episode = 2})
+eq("plex sub key", SubDL.server_key({machine = "ab12", rating_key = "77"}), "plex-ab12-77")
+local pinfo = SubDL.server_info({kind = "episode", show = "Sherlock", name = "The Blind Banker", season = 1, episode = 2})
 check("plex sub info episode", pinfo.title == "Sherlock" and pinfo.season == 1 and pinfo.episode == 2)
-pinfo = SubDL.plex_info({kind = "movie", name = "Some Film", year = 1995})
+pinfo = SubDL.server_info({kind = "movie", name = "Some Film", year = 1995})
 check("plex sub info movie", pinfo.title == "Some Film" and pinfo.year == 1995 and not pinfo.season)
 eq("safe lang", SubDL.safe_lang("pt-br"), "pt-br")
 eq("unsafe lang", SubDL.safe_lang("../../x"), "und")
@@ -624,8 +650,11 @@ local md = {title = "Film", duration = 7260000, Media = {{container = "mkv", bit
          languageTag = "en", default = true},
         {streamType = 3, codec = "srt", languageTag = "es", key = "/library/streams/9"},
     }}}}}}
-local pr = rows_of(VI.sections(VI.from_plex(md, "Home server")))
-eq("plex server", pr["File/Server"], "Home server")
+local pr = rows_of(VI.sections(VI.from_plex(md, VI.server_source("Plex", "Home server", "local"))))
+eq("plex source", pr["File/Source"], "Plex · Home server · local network")
+eq("source first", VI.sections(VI.from_plex(md, "Plex"))[1].rows[1].label, "Source")
+eq("server source remote", VI.server_source("Jellyfin", "Home", "remote"), "Jellyfin · Home · remote")
+eq("server source unknown", VI.server_source("Plex", "Home", nil), "Plex · Home")
 eq("plex folder", pr["File/Folder"], "/data/movies/Film")
 eq("plex codec", pr["Video/Codec"], "HEVC Main 10")
 eq("plex hdr", pr["Video/HDR"], "Dolby Vision 8 · HDR10")
@@ -723,6 +752,173 @@ check("hdr config", hcfg.display.hdr_mapping == "dynamic" and hcfg.display.hdr_p
     and hcfg.display.sdr_to_hdr == "400")
 check("hdr config defaults", config.defaults().display.hdr_mapping == "static"
     and config.defaults().display.sdr_to_hdr == "off")
+
+-- Jellyfin (D55) ---------------------------------------------------------------
+-- Made-up ids and names (never the owner's server).
+local JF = require "dvp.jellyfin"
+local SID = "0123456789abcdef0123456789abcdef"
+local IID = "fedcba9876543210fedcba9876543210"
+check("jf safe id", JF.safe_id(SID) and JF.safe_id("01234567-89ab-cdef-0123-456789abcdef")
+    and not JF.safe_id("../x") and not JF.safe_id("abc") and not JF.safe_id(nil))
+check("jf private hosts", JF.private_host("192.168.1.20") and JF.private_host("10.0.0.5")
+    and JF.private_host("172.20.1.1") and JF.private_host("127.0.0.1") and JF.private_host("nas.local")
+    and JF.private_host("jellyfin") and not JF.private_host("172.32.0.1")
+    and not JF.private_host("8.8.8.8") and not JF.private_host("jellyfin.example.com"))
+eq("jf url lan http", JF.normalize_url(" http://192.168.1.20:8096/ "), "http://192.168.1.20:8096")
+eq("jf url https prefix", JF.normalize_url("https://Media.Example.com/jellyfin"), "https://media.example.com/jellyfin")
+eq("jf url public http refused", select(2, JF.normalize_url("http://media.example.com")),
+   "Use https for a server outside your home network")
+eq("jf url userinfo refused", JF.normalize_url("http://evil@192.168.1.2:8096"), nil)
+eq("jf url bad port", JF.normalize_url("http://192.168.1.2:99999"), nil)
+eq("jf url path tricks", JF.normalize_url("http://192.168.1.2:8096/../x"), nil)
+eq("jf url no slash prefix", JF.normalize_url("http://192.168.1.2:8096x"), nil)
+eq("jf auth header", JF.auth_header("Deck", "dev1", "tok"),
+   'MediaBrowser Client="Deck Video Player", Device="Deck", DeviceId="dev1", Version="'
+   .. require("dvp.version") .. '", Token="tok"')
+local disc = JF.parse_discovery('{"Address":"http://192.168.1.20:8096","Id":"' .. SID .. '","Name":"Home"}\n'
+    .. '{"Address":"http://192.168.1.20:8096","Id":"' .. SID .. '","Name":"Home"}\n'
+    .. '{"Address":"http://8.8.8.8:8096","Id":"' .. IID .. '","Name":"Far"}\nnot json\n')
+check("jf discovery", #disc == 1 and disc[1].name == "Home" and disc[1].url == "http://192.168.1.20:8096")
+-- Same id from another address: both kept (discover() probes which is real)
+local disc2 = JF.parse_discovery('{"Address":"http://192.168.1.66:8096","Id":"' .. SID .. '","Name":"Fake"}\n'
+    .. '{"Address":"http://192.168.1.20:8096","Id":"' .. SID .. '","Name":"Home"}\n')
+check("jf discovery same id", #disc2 == 2 and disc2[2].url == "http://192.168.1.20:8096")
+local flood = {}
+for n = 1, 40 do flood[n] = '{"Address":"http://10.0.0.' .. n .. ':8096","Id":"' .. SID .. '","Name":"x"}' end
+eq("jf discovery cap", #JF.parse_discovery(table.concat(flood, "\n")), JF.MAX_ANSWERS)
+local st = JF.item_state({RunTimeTicks = 36000 * 1e7, UserData = {PlaybackPositionTicks = 600 * 1e7}})
+check("jf state pos", st.pos == 600 and st.duration == 36000 and not st.watched)
+st = JF.item_state({RunTimeTicks = 3600 * 1e7, UserData = {PlaybackPositionTicks = 3590 * 1e7}})
+check("jf state finished", st.watched == true and st.pos == nil)
+check("jf state played", JF.item_state({UserData = {Played = true}}).watched == true)
+check("jf state short pos", JF.item_state({RunTimeTicks = 3600e7, UserData = {PlaybackPositionTicks = 10e7}}).pos == nil)
+eq("jf date key", JF.date_key("2024-05-01T12:34:56.0000000Z"), 20240501123456)
+local ep = {Type = "Episode", Name = "Pilot", IndexNumber = 1, ParentIndexNumber = 2, SeriesName = "Show"}
+eq("jf episode label", JF.item_label(ep, "episodes"), "E01 · Pilot")
+eq("jf episode label ondeck", JF.item_label(ep, "nextup"), "Show · S02E01 · Pilot")
+eq("jf movie label", JF.item_label({Type = "Movie", Name = "Film", ProductionYear = 1999}, "items"), "Film (1999)")
+local SER, SEA = "11111111111111111111111111111111", "22222222222222222222222222222222"
+local jents = JF.entries_from({
+    {Id = "33333333333333333333333333333333", Type = "CollectionFolder", IsFolder = true, CollectionType = "movies", Name = "Movies"},
+    {Id = "44444444444444444444444444444444", Type = "CollectionFolder", IsFolder = true, CollectionType = "music", Name = "Music"},
+    {Id = SER, Type = "Series", IsFolder = true, Name = "Show", ChildCount = 3},
+    {Id = "55555555555555555555555555555555", Type = "Series", IsFolder = true, Name = "Mini", ChildCount = 1},
+    {Id = SEA, Type = "Season", IsFolder = true, Name = "Season 1", SeriesId = SER, UserData = {Played = true}},
+    {Id = IID, Type = "Movie", MediaType = "Video", Name = "Film", ProductionYear = 1999, SortName = "film",
+     RunTimeTicks = 6000e7, DateCreated = "2024-05-01T12:00:00Z", UserData = {PlaybackPositionTicks = 0}},
+    {Id = "bad", Type = "Movie", MediaType = "Video", Name = "No id"},
+    "junk",
+}, "http://192.168.1.20:8096", SID, "items")
+eq("jf entries count", #jents, 5)
+check("jf library", jents[1].is_dir and jents[1].server.kind == "items" and jents[1].server.backend == "jellyfin")
+eq("jf series seasons", jents[2].server.kind, "seasons")
+eq("jf one-season series", jents[3].server.kind, "series_episodes")
+check("jf season", jents[4].server.kind == "episodes" and jents[4].server.series == SER and jents[4].state.watched)
+local jm = jents[5]
+check("jf movie", not jm.is_dir and jm.path == "http://192.168.1.20:8096/Videos/" .. IID .. "/stream?static=true"
+    and jm.server.key == IID and jm.server.rating_key == IID and jm.server.duration == 6000000
+    and jm.server.title == "Film (1999)" and jm.mtime == 20240501120000 and jm.name == "film")
+eq("jf listing root", JF.listing_path({kind = "root"}, "U"), "/UserViews?userId=U")
+eq("jf listing episodes", JF.listing_path({kind = "episodes", key = SEA, series = SER}, "U"),
+   "/Shows/" .. SER .. "/Episodes?userId=U&SeasonId=" .. SEA .. "&Fields=DateCreated,SortName,ChildCount&EnableImages=false")
+check("jf listing nextup", JF.listing_path({kind = "nextup"}, "U"):find("EnableResumable=false", 1, true) ~= nil)
+local jsubs = JF.external_subtitles({Id = IID, MediaSources = {{Id = SID, MediaStreams = {
+    {Type = "Subtitle", IsExternal = true, Codec = "subrip", Index = 3, Language = "spa"},
+    {Type = "Subtitle", IsExternal = true, Codec = "PGSSUB", Index = 4},
+    {Type = "Subtitle", IsExternal = false, Codec = "ass", Index = 5},
+}}}}, "http://h:8096")
+check("jf external subs", #jsubs == 1 and jsubs[1].url == "http://h:8096/Videos/" .. IID .. "/" .. SID
+    .. "/Subtitles/3/Stream.srt" and jsubs[1].lang == "spa")
+local rk = JF.recent_key({machine = SID, key = IID})
+eq("jf recent key", rk, "jellyfin://" .. SID .. "/" .. IID)
+local rs, ri = JF.parse_recent_key(rk)
+check("jf parse recent", rs == SID and ri == IID)
+eq("jf parse plex key", JF.parse_recent_key("plex://abc/library/metadata/42"), nil)
+eq("jf recent ref", JF.recent_ref(SID, IID).backend, "jellyfin")
+local jmk = Markers.from_jellyfin({Items = {
+    {Type = "Outro", StartTicks = 2500e7, EndTicks = 2600e7},
+    {Type = "Intro", StartTicks = 60e7, EndTicks = 150e7},
+    {Type = "Recap", StartTicks = 0, EndTicks = 50e7},
+    {Type = "Intro", StartTicks = 10e7, EndTicks = 11e7},
+}})
+check("jf markers", #jmk == 2 and jmk[1].kind == "intro" and jmk[1].start == 60 and jmk[1].stop == 150
+    and jmk[2].kind == "credits" and jmk[2].final == true)
+eq("jf no markers", #Markers.from_jellyfin(nil), 0)
+local jvi = VI.from_jellyfin({Name = "Film", MediaSources = {{Path = "/media/Movies/Film/Film.mkv", Size = 15234000000,
+    Container = "mkv", Bitrate = 16800000, RunTimeTicks = 7260e7, MediaStreams = {
+        {Type = "Video", Codec = "hevc", Profile = "Main 10", Width = 3840, Height = 2160, RealFrameRate = 23.976,
+         BitDepth = 10, ColorTransfer = "smpte2084", ColorPrimaries = "bt2020", DvProfile = 8,
+         VideoRangeType = "DOVIWithHDR10Plus"},
+        {Type = "Audio", Codec = "eac3", Profile = "Dolby Digital Plus + Dolby Atmos", ChannelLayout = "5.1",
+         Language = "eng", IsDefault = true},
+        {Type = "Subtitle", Codec = "PGSSUB", Language = "spa", IsForced = true},
+    }}}}, "Jellyfin · Home")
+local jr = rows_of(VI.sections(jvi))
+eq("jf vi hdr", jr["Video/HDR"], "Dolby Vision 8 · HDR10+")
+eq("jf vi folder", jr["File/Folder"], "/media/Movies/Film")
+eq("jf vi source", jr["File/Source"], "Jellyfin · Home")
+local function jf_hdr(range, dv)
+    local d = VI.from_jellyfin({MediaSources = {{MediaStreams = {{Type = "Video", Codec = "hevc",
+        VideoRangeType = range, DvProfile = dv}}}}})
+    return rows_of(VI.sections(d))["Video/HDR"]
+end
+eq("jf range hdr10", jf_hdr("HDR10"), "HDR10")
+eq("jf range hdr10+", jf_hdr("HDR10Plus"), "HDR10+")
+eq("jf range hlg", jf_hdr("HLG"), "HLG")
+eq("jf range dv hdr10", jf_hdr("DOVIWithHDR10", 8), "Dolby Vision 8 · HDR10")
+eq("jf range sdr", jf_hdr("SDR"), "SDR")
+eq("jf vi audio", jr["Audio/English"], "E-AC-3 Atmos · 5.1 · Default")
+eq("jf vi sub", jr["Subtitles (1)/Spanish"], "PGS · Forced")
+
+-- Where a local file is (Recently played tags, Video info Source row)
+local srcs = {{name = "Videos", path = "/home/deck/Videos", kind = "folder"},
+              {name = "Movies", path = "/home/deck/Videos/Movies", kind = "folder"},
+              {name = "SD Card", path = "/run/media/deck/abcd-1234", kind = "sdcard"},
+              {name = "Stick", path = "/run/media/deck/Stick", kind = "usb"},
+              {name = "USB drive", path = "/run/media/deck/0a1b2c3d", kind = "usb"},
+              {name = "Home", path = "plex://m1/", kind = "plex"}}
+eq("source longest", library.source_for(srcs, "/home/deck/Videos/Movies/a.mkv").name, "Movies")
+eq("source folder", library.source_for(srcs, "/home/deck/Videos/b.mkv").name, "Videos")
+eq("source not prefix", library.source_for(srcs, "/home/deck/VideosOld/c.mkv"), nil)
+eq("source none", library.source_tag(library.source_for(srcs, "/tmp/x.mkv")), "Local")
+eq("source sd tag", library.source_tag(library.source_for(srcs, "/run/media/deck/abcd-1234/x.mkv")), "SD Card")
+eq("source usb tag", library.source_tag(srcs[4]), "USB")
+eq("source folder tag", library.source_tag(srcs[1]), "Local")
+eq("source label folder", library.source_label(srcs[2]), "Local · Movies")
+eq("source label sd", library.source_label(srcs[3]), "SD Card")
+eq("source label usb", library.source_label(srcs[4]), "USB drive · Stick")
+eq("source label usb plain", library.source_label(srcs[5]), "USB drive")
+eq("source label none", library.source_label(nil), "Local")
+eq("jf sub key", SubDL.server_key({backend = "jellyfin", machine = SID, rating_key = IID}),
+   "jellyfin-" .. SID .. "-" .. IID)
+eq("jf config servers", #config.from_text("[jellyfin]\nserver = http://192.168.1.20:8096\nserver = https://x.example\n").jellyfin.server, 2)
+
+-- Media server router (D55)
+local Servers = require "dvp.servers"
+local fake = function(id, name)
+    local b = {ID = id, NAME = name, items = {}}
+    function b:sources() return {{name = name, kind = id}} end
+    function b:item_for(path) return self.items[path] end
+    function b:signed_in() return true end
+    function b:server(m) return m == "srv" and {} or nil end
+    b.parse_recent_key = function(path) return path:match("^" .. id .. "://(%w+)/(%w+)$") end
+    b.recent_key = function(item) return id .. "://" .. item.machine .. "/" .. item.key end
+    return b
+end
+local fp, fj = fake("plex", "Plex"), fake("jellyfin", "Jellyfin")
+fj.items["http://x/v"] = {backend = "jellyfin", machine = "srv", key = "k1"}
+local router = Servers.new({fp, fj})
+eq("router sources", #router:sources(), 2)
+local ri_item, ri_backend = router:item_for("http://x/v")
+check("router item", ri_item ~= nil and ri_backend == fj)
+eq("router local file", router:item_for("/videos/a.mkv"), nil)
+eq("router recent key", router:recent_key(ri_item), "jellyfin://srv/k1")
+local rb, rid, rkey = router:parse_recent_key("jellyfin://srv/k1")
+check("router parse recent", rb == fj and rid == "srv" and rkey == "k1")
+check("router recent available", router:recent_available("jellyfin://srv/k1") == true
+    and router:recent_available("jellyfin://gone/k1") == false and router:recent_available("/v/a.mkv") == nil)
+eq("router get", router:get("plex"), fp)
+eq("router for_ref", router:for_ref({backend = "jellyfin"}), fj)
 
 print(string.format("%d checks, %d failures", count, failures))
 mp.commandv("quit", failures == 0 and "0" or "1")
