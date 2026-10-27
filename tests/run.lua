@@ -673,8 +673,21 @@ end
 local o = Hdr.options(hs{gamma = "pq", itm = 400}, hd)
 check("hdr static = defaults", o["target-peak"] == "auto" and o["target-colorspace-hint-mode"] == "target"
     and o["inverse-tone-mapping"] == "no" and o["target-colorspace-hint"] == "yes")
-eq("hdr dynamic", Hdr.options(hs{gamma = "pq", mapping = "dynamic"}, hd)["target-colorspace-hint-mode"],
+eq("hdr dynamic", Hdr.options(hs{gamma = "pq", mapping = "dynamic", dynamic = true}, hd)["target-colorspace-hint-mode"],
    "source-dynamic")
+-- Plain HDR10 has no per-scene metadata: "dynamic" works as "static".
+eq("hdr10 dynamic = static", Hdr.options(hs{gamma = "pq", mapping = "dynamic"}, hd)["target-colorspace-hint-mode"],
+   "target")
+eq("hdr10 dynamic shown", Hdr.shown_mapping(hs{mapping = "dynamic"}), "static")
+eq("dv dynamic shown", Hdr.shown_mapping(hs{mapping = "dynamic", dynamic = true}), "dynamic")
+eq("choices hdr10", table.concat(Hdr.mapping_choices(false), ","), "static,app")
+eq("choices dv", table.concat(Hdr.mapping_choices(true), ","), "static,dynamic,app")
+eq("hdr10 steps over dynamic", Hdr.step(Hdr.mapping_choices(false), "static", 1), "app")
+check("scene metadata", Hdr.has_scene_metadata({["max-pq-y"] = 0.5})
+    and Hdr.has_scene_metadata({["scene-max-r"] = 140})
+    and Hdr.has_scene_metadata({}, {["dolby-vision-profile"] = 8})
+    and not Hdr.has_scene_metadata({["max-luma"] = 1000, ["max-cll"] = 1000}, {codec = "hevc"})
+    and not Hdr.has_scene_metadata(nil, nil))
 o = Hdr.options(hs{gamma = "hlg", mapping = "app", peak = 800}, hd)
 check("hdr app", o["target-peak"] == "800" and o["hdr-compute-peak"] == "yes")
 o = Hdr.options(hs{gamma = "bt.1886", mapping = "app", peak = 800, itm = 400}, hd)
@@ -688,8 +701,10 @@ eq("hdr off before a file", Hdr.options(hs{enabled = false}, hd)["target-colorsp
 check("no hdr screen: app", Hdr.options(hs{gamma = "pq", mapping = "app", screen = false}, hd)["target-peak"] == "auto")
 check("no hdr screen: itm", Hdr.options(hs{gamma = "bt.1886", itm = 600, screen = false}, hd)["inverse-tone-mapping"] == "no")
 eq("no hdr screen: dynamic dropped",
-   Hdr.options(hs{gamma = "pq", mapping = "dynamic", screen = false}, hd)["target-colorspace-hint-mode"], "target")
-eq("no hdr screen: nothing effective", Hdr.effective(hs{gamma = "pq", mapping = "dynamic", screen = false}), nil)
+   Hdr.options(hs{gamma = "pq", mapping = "dynamic", dynamic = true, screen = false}, hd)["target-colorspace-hint-mode"],
+   "target")
+eq("no hdr screen: nothing effective",
+   Hdr.effective(hs{gamma = "pq", mapping = "dynamic", dynamic = true, screen = false}), nil)
 check("defaults untouched", hd["target-peak"] == "auto")
 check("expects hdr", Hdr.expects_hdr(hs{gamma = "pq"}) and Hdr.expects_hdr(hs{gamma = "bt.1886", itm = 300})
     and not Hdr.expects_hdr(hs{gamma = "bt.1886"}) and not Hdr.expects_hdr(hs{gamma = "pq", enabled = false})

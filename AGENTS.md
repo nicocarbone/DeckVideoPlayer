@@ -66,7 +66,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-26, v0.4.1)
+## Current state (2026-10-26, v0.4.2)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -128,6 +128,8 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   (D52, `dvp/hdr.lua`): a Video menu with Picture, refresh matching, HDR
   on/off, HDR mapping and SDR to HDR; defaults as in v0.4.0.
   Seventh audit (ISSUES.md Part VII) fixed in D53.
+- v0.4.2 (2026-10-26): *Display, per scene* only for videos with
+  per-scene metadata (D54).
 - Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
   *Continue watching*, Jellyfin, SMB/NFS;
   Flathub publication floating.

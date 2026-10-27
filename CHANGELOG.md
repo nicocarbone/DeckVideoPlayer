@@ -5,6 +5,18 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.4.2 (2026-10-26)
+
+A smaller HDR menu for videos without scene-by-scene information.
+
+### Changed
+
+- **HDR mapping → *Display, per scene*** is only offered for videos that
+  have scene-by-scene HDR information (Dolby Vision, HDR10+). With plain
+  HDR10 it changed nothing, so those videos now offer *Display* and *App*
+  only. If you set it in `config.ini`, it still applies to the videos
+  that have the information.
+
 ## v0.4.1 (2026-10-26)
 
 Video info in the library, a Video menu with HDR settings, and Plex

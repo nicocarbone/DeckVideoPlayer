@@ -78,6 +78,11 @@ Video info for local and Plex videos (View in the library), Plex videos in
 (D50). A Video menu with HDR choices: HDR off, who maps HDR to the screen,
 SDR to HDR (D51 test, D52).
 
+## v0.4.2: per-scene HDR mapping only where it applies
+
+*Display, per scene* is offered only for Dolby Vision and HDR10+ videos
+(D54).
+
 ## Next, in this order
 
 1. **Next episode from *Continue watching*** (Plex): finishing an episode

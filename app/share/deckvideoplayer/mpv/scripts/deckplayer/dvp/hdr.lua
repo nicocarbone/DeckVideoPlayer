@@ -7,9 +7,11 @@
 -- HDR mapping, for HDR sources:
 --   static  mpv sends the source's whole-film metadata; gamescope / the TV
 --           fits it to the display (the default, as up to v0.4.0).
---   dynamic the same, with per-scene metadata (Dolby Vision / HDR10+, or
---           measured) passed to the display
---           (`target-colorspace-hint-mode=source-dynamic`).
+--   dynamic the same, with the file's per-scene metadata (Dolby Vision /
+--           HDR10+) passed to the display
+--           (`target-colorspace-hint-mode=source-dynamic`). Only offered
+--           for files that have it: for plain HDR10 mpv sends the same
+--           static values (measured, D54), so it would change nothing.
 --   app     mpv tone-maps to `peak` nits itself (per-scene metadata, peak
 --           detection) and tells the display the content peaks there.
 -- SDR to HDR, for SDR sources: mpv's inverse tone mapping to PQ / BT.2020
@@ -54,21 +56,46 @@ function M.parse_itm(v)
     return tonumber(v) or 0
 end
 
+-- Pure: whether the video has per-scene HDR metadata: mpv's video-params
+-- carry scene values (Dolby Vision RPU, HDR10+), or the track is Dolby
+-- Vision.
+function M.has_scene_metadata(vp, track)
+    vp = vp or {}
+    return (vp["max-pq-y"] or vp["scene-max-r"] or vp["scene-avg"]
+            or (track and track["dolby-vision-profile"])) ~= nil
+end
+
+-- Pure: the mappings offered for a video with (`dynamic`) or without
+-- per-scene metadata.
+function M.mapping_choices(dynamic)
+    if dynamic then return M.MAPPINGS end
+    return {"static", "app"}
+end
+
+-- Pure: the mapping in effect for state `s` = {mapping, dynamic}: "dynamic"
+-- without per-scene metadata works as "static" (the choice is kept for the
+-- next video that has it).
+function M.shown_mapping(s)
+    if s.mapping == "dynamic" and not s.dynamic then return "static" end
+    return s.mapping
+end
+
 -- Pure: the choices that actually apply to source `s.gamma` (nil while
 -- unknown): {mapping = ..., itm = ...}, or nil for "nothing beyond the
 -- defaults". `s.screen == false` (no HDR output) drops them all.
 function M.effective(s)
     if not s.enabled or not s.gamma or s.screen == false then return nil end
     if is_hdr(s.gamma) then
-        if s.mapping == "static" then return nil end
-        return {mapping = s.mapping}
+        local mapping = M.shown_mapping(s)
+        if mapping == "static" then return nil end
+        return {mapping = mapping}
     end
     if s.itm > 0 then return {itm = s.itm} end
     return nil
 end
 
--- Pure: option values for state `s` = {enabled, gamma, mapping, peak, itm,
--- screen}, starting from `defaults`.
+-- Pure: option values for state `s` = {enabled, gamma, dynamic, mapping,
+-- peak, itm, screen}, starting from `defaults`.
 function M.options(s, defaults)
     local o = {}
     for k, v in pairs(defaults) do o[k] = v end
@@ -128,6 +155,9 @@ function M.new(cfg, device, notify)
         -- No video (between files): check a known HDR screen again.
         if not gamma and self.screen then self.screen = nil end
         self.gamma = gamma
+        -- Read once per file: the first frame already carries it.
+        self.dynamic = is_hdr(gamma) and M.has_scene_metadata(mp.get_property_native("video-params"),
+                                                              mp.get_property_native("current-tracks/video"))
         self:apply()
     end)
     -- HDR output proves an HDR screen, also one thought to be SDR.
@@ -198,7 +228,7 @@ function M:toggle()
 end
 
 function M:set_mapping(dir)
-    self.mapping = M.step(M.MAPPINGS, self.mapping, dir)
+    self.mapping = M.step(M.mapping_choices(self.dynamic), M.shown_mapping(self), dir)
     self:apply()
 end
 

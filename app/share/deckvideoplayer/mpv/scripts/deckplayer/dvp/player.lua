@@ -544,7 +544,8 @@ function M:hdr_items(items)
     if not hdr.enabled or not hdr.gamma then return end
     if hdr.is_hdr(hdr.gamma) then
         items[#items + 1] = {label = "HDR mapping",
-            value = function() return hdr.LABELS[hdr.mapping] end,
+            -- "Display, per scene" only for Dolby Vision / HDR10+ videos.
+            value = function() return hdr.LABELS[hdr:shown_mapping()] end,
             adjust = function(d) hdr:set_mapping(d) end}
         if hdr.mapping == "app" then
             items[#items + 1] = {label = "Peak brightness",

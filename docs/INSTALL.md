@@ -156,7 +156,7 @@ See the controls table in the [README](../README.md#controls). Notes:
   in SteamOS): *HDR* off shows HDR videos in SDR. *HDR mapping* for HDR
   videos: *Display* (default: the screen fits the picture to its
   brightness), *Display, per scene* (it also gets the scene-by-scene
-  information of Dolby Vision / HDR10+ videos), *App* (the player does it
+  information; offered only for Dolby Vision / HDR10+ videos, which have it), *App* (the player does it
   for the *Peak brightness* you pick). *SDR to HDR* shows SDR videos in
   HDR. Which looks best is a matter of taste; menu changes last until the
   app closes, `config.ini` sets your defaults (`hdr_mapping`, `hdr_peak`,

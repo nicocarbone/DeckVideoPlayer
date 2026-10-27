@@ -45,7 +45,7 @@ in `dvp/config.lua`.
 | `device` | `auto` \| `deck-oled` \| `deck-lcd` \| `tv` | `auto` | Detected from DMI (`Galileo` = OLED, `Jupiter` = LCD, else `tv`). Affects the default quality. |
 | `quality` | `auto` \| `battery` \| `balanced` \| `high` | `auto` | Rendering profile; `auto` = `balanced` on Deck, `high` on tv. |
 | `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). *HDR* in the Video menu changes it for the session (D52). |
-| `hdr_mapping` | `static` \| `dynamic` \| `app` | `static` | Who fits HDR video to the screen: the display with the film's metadata (`static`), the display with per-scene metadata (`dynamic`), or the player, tone-mapping to `hdr_peak` (`app`). Video menu: *HDR mapping* (D52). |
+| `hdr_mapping` | `static` \| `dynamic` \| `app` | `static` | Who fits HDR video to the screen: the display with the film's metadata (`static`), the display with per-scene metadata (`dynamic`; only Dolby Vision and HDR10+ videos have it, others use `static`, D54), or the player, tone-mapping to `hdr_peak` (`app`). Video menu: *HDR mapping* (D52). |
 | `hdr_peak` | nits | `1000` | Peak brightness for `hdr_mapping = app` (300–2000, in steps of 100). |
 | `sdr_to_hdr` | `off` \| `300` \| `400` \| `600` \| `1000` | `off` | Shows SDR video in HDR with highlights up to this many nits. Only on a screen in HDR mode; switches itself off elsewhere. Video menu: *SDR to HDR*. |
 | `refresh_match` | `auto` \| `off` | `auto` | Refresh-rate matching in gamescope (Deck panels), D31. Default for the session; *Match refresh rate* in the Video menu toggles it. |

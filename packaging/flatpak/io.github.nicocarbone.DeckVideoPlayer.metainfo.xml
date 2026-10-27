@@ -56,6 +56,14 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.4.2" date="2026-10-26">
+      <description>
+        <p>HDR mapping per scene only where it applies.</p>
+        <ul>
+          <li>"Display, per scene" is offered only for Dolby Vision and HDR10+ videos, which have scene-by-scene information</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-10-26">
       <description>
         <p>Video info, HDR settings, and Plex in Recently played.</p>

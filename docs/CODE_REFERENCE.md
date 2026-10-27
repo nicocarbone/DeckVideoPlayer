@@ -464,7 +464,10 @@ output is expected), `check()` (reads `video-target-params/gamma`; on an
 SDR output drops every choice and calls `notify`),
 `show_menu()`, `describe()` (info panel line). Pure (unit-tested):
 `options(state, defaults)`, `effective(state)`, `expects_hdr(state)`,
-`step`, `clamp_peak`, `parse_itm`, `is_hdr`. The rows are built in
+`step`, `clamp_peak`, `parse_itm`, `is_hdr`, `has_scene_metadata(vp,
+track)`, `mapping_choices(dynamic)`, `shown_mapping(state)` (D54: "dynamic"
+works as "static" without per-scene metadata; `dynamic` is read once per
+file). The rows are built in
 `player:hdr_items()`.
 
 ## `dvp/videoinfo.lua`: Video info panel (D50)

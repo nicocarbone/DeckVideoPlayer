@@ -1209,3 +1209,26 @@ fixed.
   opened and cancelled meanwhile no longer leads to a surprise start);
   the server's progress is copied into the row (`resume:sync`, play time
   kept).
+
+## D54. *Display, per scene* only for videos with per-scene metadata
+
+Owner's question: plain HDR10 has no per-scene information, so why offer
+it there? Measured in headless gamescope (HDR on): with
+`target-colorspace-hint-mode=source-dynamic`, an HDR10 file signals the
+same 1000 nits as `target`, on the Deck profile and on the TV profile
+(where `hdr-compute-peak` is on: mpv's measured peaks feed its own tone
+mapping, not the metadata sent to the display). A Dolby Vision 8.1 file
+signals the scene's value (116 nits in a dark scene).
+
+- mpv's `video-params` only carry scene values (`scene-max-r/g/b`,
+  `scene-avg`, `max-pq-y`, `avg-pq-y`) when the file has Dolby Vision RPU
+  or HDR10+ metadata. `Hdr.has_scene_metadata()` checks them, or a Dolby
+  Vision track, once per file when the transfer function becomes known
+  (the first frame carries them).
+- Without them the menu offers *Display* and *App* only, and a
+  `dynamic` choice (config.ini, or picked on an earlier video) works as
+  `static` and shows as *Display*; it applies again to the next video
+  that has the metadata. The info panel no longer claims per-scene
+  metadata for HDR10.
+- HDR10+ is covered by the same fields but untested here (no HDR10+
+  sample).
