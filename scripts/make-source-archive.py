@@ -28,13 +28,35 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_MANIFEST = os.path.join(ROOT, "packaging", "flatpak", "io.github.nicocarbone.DeckVideoPlayer.yml")
 
 
+# No automatic gc / maintenance: a background git process could still be
+# writing in .git (e.g. .git/modules) while it is removed below. The
+# environment form also reaches the git processes of submodule updates.
+GIT_ENV = dict(os.environ, GIT_CONFIG_COUNT="2",
+               GIT_CONFIG_KEY_0="gc.auto", GIT_CONFIG_VALUE_0="0",
+               GIT_CONFIG_KEY_1="maintenance.auto", GIT_CONFIG_VALUE_1="false")
+
+
 def run(*cmd, cwd=None):
-    subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.DEVNULL)
+    env = GIT_ENV if cmd[0] == "git" else None
+    subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.DEVNULL, env=env)
+
+
+def remove_tree(path):
+    """shutil.rmtree, retried briefly if something still writes in it."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2)
 
 
 def log(*a):
@@ -59,7 +81,7 @@ def fetch_git(url, commit, dest):
         run("git", "submodule", "update", "-q", "--init", "--recursive", "--depth", "1", cwd=dest)
     for dirpath, dirnames, filenames in os.walk(dest):
         if ".git" in dirnames:
-            shutil.rmtree(os.path.join(dirpath, ".git"))
+            remove_tree(os.path.join(dirpath, ".git"))
             dirnames.remove(".git")
         if ".git" in filenames:  # submodule gitlink file
             os.remove(os.path.join(dirpath, ".git"))
