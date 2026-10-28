@@ -7,6 +7,12 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## v0.7.0 (unreleased)
 
+### New
+
+- **Guide for network shares (SMB):** the install guide shows how to
+  have SteamOS mount a NAS or PC share (once, in Desktop Mode, kept
+  through SteamOS updates) and add it to the library.
+
 ### Changed
 
 - **Folders on a network share no longer freeze the app.** Folders are

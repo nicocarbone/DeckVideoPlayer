@@ -1634,3 +1634,43 @@ Flatpak's mpv); skipped elsewhere.
   working, no leftover process), auto-play from *Recently played*, delete
   keeping the cursor, and the Flatpak.
 
+## D65. SMB shares: a mount guide, not code (v0.7.0 work)
+
+- **What:** `docs/INSTALL.md` → *Network shares (SMB)*: SteamOS mounts the
+  share with a systemd `.mount` + `.automount` pair in
+  `/etc/systemd/system`, the app reads it as a folder (D64). No SMB code,
+  credentials or listening socket in the app (ROADMAP v0.7.0).
+- **No `mount.cifs`:** `cifs-utils` (which resolves host names and reads
+  `credentials=` files) isn't reliably part of SteamOS, and installing it
+  needs the read-only root disabled and is lost on updates. Without it,
+  the kernel parses the options itself: the guide uses an **IP address**
+  and `username=` / `password=` in the unit's `Options=` (the unit file is
+  `chmod 600`). Trade-off, stated in the guide: programs running as the
+  user can read mount options through `systemctl`, so a read-only account
+  is recommended; a password with a comma can't be written there. Guest
+  shares: `username=guest,password=`.
+- **Automount:** mounts on first access and releases the share after 10
+  idle minutes (`TimeoutIdleSec`), so a NAS can sleep and a NAS that was
+  off at boot still works later. The mount is read-only (`ro`); the app
+  never writes to network folders anyway (D60).
+- **SteamOS updates:** since 3.6 an update discards files added to `/etc`
+  except a keep-list (`/usr/lib/rauc/atomic-update-keep.conf` plus
+  drop-ins in `/etc/atomic-update.conf.d/`, one path pattern per line,
+  the drop-ins themselves kept). The default list keeps `.service` units
+  and `.wants` links but not `.mount` / `.automount`, so the guide adds a
+  drop-in listing both units.
+- **Mount point `~/NAS` + `flatpak override --filesystem=…:ro`:** not
+  inside `~/Videos` (opening the library's Videos folder would stat it and
+  wake the NAS each time), not `/mnt` (read-only root on SteamOS), not
+  `/run/media` (udisks' place for drives, and an unmounted automount
+  point isn't listed there). The override is the existing documented way
+  to add a folder outside the sandbox.
+- **Old NAS units:** servers that only speak SMB 2.0 need `vers=2.0`
+  (Linux's default negotiation starts at SMB 2.1).
+- **NFS** isn't covered: SteamOS lacks `nfs-utils`.
+- **Tested** on a desktop without `mount.cifs` (like SteamOS), against the
+  owner's test NAS (SMB 2.0.2, guest share): the units as written (paths
+  adapted), kernel mount through the automount, the Flatpak with the
+  override (listing, network icon, playback with a sidecar subtitle).
+  Not yet on a Deck: the keep-list across a real SteamOS update.
+

@@ -282,6 +282,113 @@ Notes:
   removes it and ends the session on the server; it is also listed under
   Dashboard → Devices in Jellyfin.
 
+## Network shares (SMB)
+
+Videos on a NAS or a shared folder of a PC play once SteamOS mounts the
+share as a folder. The app reads it like any other folder; a share that is
+asleep or off only makes that folder slow to open, never the whole app.
+The setup is done once, in Desktop Mode, in Konsole, and needs your
+`sudo` password (run `passwd` first if you never set one).
+
+You need the server's **IP address** (give it a fixed one in your
+router), the **share name**, and a **user name and password** that can
+read it. A user that can only read the videos is the safest choice.
+
+1. A folder for the share:
+
+   ```sh
+   mkdir -p ~/NAS
+   ```
+
+2. How to mount it (your address, share, user and password):
+
+   ```sh
+   sudo tee /etc/systemd/system/home-deck-NAS.mount >/dev/null <<'EOF'
+   [Unit]
+   Description=NAS share for Deck Video Player
+   Wants=network-online.target
+   After=network-online.target
+
+   [Mount]
+   What=//192.168.1.50/Videos
+   Where=/home/deck/NAS
+   Type=cifs
+   Options=ro,username=USER,password=PASSWORD,uid=1000,gid=1000,iocharset=utf8
+   TimeoutSec=30
+   EOF
+   sudo chmod 600 /etc/systemd/system/home-deck-NAS.mount
+   ```
+
+3. Mount it when it is opened, and let go of it after 10 idle minutes (so
+   a NAS can sleep):
+
+   ```sh
+   sudo tee /etc/systemd/system/home-deck-NAS.automount >/dev/null <<'EOF'
+   [Unit]
+   Description=Mount the NAS share when it is opened
+
+   [Automount]
+   Where=/home/deck/NAS
+   TimeoutIdleSec=10min
+
+   [Install]
+   WantedBy=multi-user.target
+   EOF
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now home-deck-NAS.automount
+   ```
+
+4. Keep both files through SteamOS updates (since SteamOS 3.6 an update
+   discards files added to `/etc` unless they are listed like this):
+
+   ```sh
+   sudo tee /etc/atomic-update.conf.d/deckvideoplayer-nas.conf >/dev/null <<'EOF'
+   /etc/systemd/system/home-deck-NAS.mount
+   /etc/systemd/system/home-deck-NAS.automount
+   EOF
+   ```
+
+5. Check: `ls ~/NAS` should list the share (the first access mounts it,
+   which can take a few seconds). If it doesn't, `journalctl -u
+   home-deck-NAS.mount -n 20` says why.
+
+6. Let the app read it, and add it to the library:
+
+   ```sh
+   flatpak override --user --filesystem=/home/deck/NAS:ro io.github.nicocarbone.DeckVideoPlayer
+   ```
+
+   and in `~/.config/deckvideoplayer/config.ini`, under `[library]`:
+
+   ```ini
+   folder = ~/NAS
+   ```
+
+The share appears on the start screen with a network icon, and its
+videos show a *Network* tag in *Recently played*.
+
+Notes:
+- **Old NAS units** that only speak SMB 2.0 (the mount fails with
+  "Operation not supported"): add `vers=2.0` to the `Options=` line.
+  Newer servers need nothing: the best version is chosen by itself.
+- **A share without a password:** use `username=guest,password=` in
+  `Options=`.
+- **Why an IP address and the password in the file:** the usual helper
+  (`mount.cifs`, which looks up names and reads separate password files)
+  isn't always part of SteamOS, and installing it doesn't survive updates.
+  The file is readable only by root, but programs running as you can see
+  the mount options through `systemctl`, so use an account that can only
+  read the videos. A password with a comma can't be written this way.
+- **Another folder name:** unit files are named after the folder they
+  mount: `/home/deck/NAS` → `home-deck-NAS.mount` / `.automount`. For
+  another path, `systemd-escape -p --suffix=mount /home/deck/My Share`
+  prints the name to use.
+- **To remove it:** `sudo systemctl disable --now home-deck-NAS.automount`,
+  then delete the three files above and run `sudo systemctl daemon-reload`.
+- The app never writes to the share: it is mounted read-only (`ro`),
+  and downloads and *Delete* refuse network folders anyway.
+- NFS shares aren't covered yet: SteamOS lacks the tools to mount them.
+
 ## Troubleshooting
 
 | Symptom | Check / fix |
