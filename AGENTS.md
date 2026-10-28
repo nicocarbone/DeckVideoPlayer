@@ -153,9 +153,11 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   software, per video) in the Video menu, because 4K AV1 stutters with
   the Deck's hardware decoder (D62); bug hunt (D61); B closes toasts and
   the skip prompt first (D63).
-- Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
-  *Continue watching*, SMB/NFS;
-  Flathub publication floating.
+- Planned: see `docs/ROADMAP.md`. v0.7.0: folder listings that don't
+  block on network shares, network folders (shares mounted by SteamOS)
+  and DLNA servers, with no credentials or new native library in the
+  app; then in-app SMB (libsmb2 helper), NFS, downloads from shares, next
+  episode from *Continue watching*. Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

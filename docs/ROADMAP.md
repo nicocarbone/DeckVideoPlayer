@@ -104,15 +104,43 @@ eighth audit fixed (D59).
 Also: a bug hunt (D61), and B closes toasts and the skip prompt before
 stopping (D63).
 
+## v0.7.0: network shares and DLNA (planned)
+
+Scope chosen to keep the new attack surface small: no new native
+library, no credentials in the app, no listening socket, no sandbox
+change. In-app SMB/NFS clients come later (see below).
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Folders that don't block** | Planned, first | Folder listings and file checks move off mpv's main thread (a subprocess with a timeout), so a sleeping or vanished network share shows "Not responding" instead of freezing the app. Touches the browser's core: regression-test local folders, SD card, USB drives, *Recently played*, Downloads. |
+| **Network folders** | Planned | Shares mounted by SteamOS (SMB or NFS, e.g. a systemd automount under `/mnt`) used as `folder =` in `config.ini`: recognised from the mount table (as delete already does, D60), shown with a *Network* icon and tag; no sidecar or hash work before the listing arrives; never deletable. The app never handles the share's password. |
+| **Mount guide** | Planned | `docs/INSTALL.md`: mounting an SMB or NFS share on SteamOS (systemd automount, credentials file readable by root only, SMB version notes for old NAS units), and adding it to `config.ini`. |
+| **DLNA servers** | Planned | A third server type behind `dvp/servers.lua`. Discovery: SSDP `M-SEARCH` for `MediaServer:1` (extend `dvp-discover`). Browsing: `ContentDirectory` `Browse` (SOAP over the async `dvp/http.lua`), DIDL-Lite parsed by a small Lua parser (no DTDs or entities, size caps). Playback: the item's http(s) URL in mpv, only if it points at the host that answered. Resume, watched marks and *Recently played* kept locally (DLNA has no standard progress sync). Target servers: minidlna/ReadyMedia, Jellyfin and Plex DLNA, a NAS's built-in server; claim only what was tested. |
+
+Not in v0.7.0: in-app SMB/NFS, downloads from shares or DLNA, DLNA
+subtitles (vendor-specific), DLNA progress sync.
+
 ## Next, in this order
 
-1. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
+1. **In-app SMB** (no system mount): a helper built on libsmb2
+   (LGPL-2.1, SMB2/3) that lists folders and streams files to mpv
+   through a local HTTP endpoint (`127.0.0.1`, random port and per-session
+   token, only files the app asked for); the password goes to the helper
+   on stdin, never to mpv. Starts with a spike: build it in the Flatpak
+   and measure a high-bitrate 4K remux through it on a Deck (CPU,
+   battery). Not Samba's libsmbclient in FFmpeg: huge dependency tree, in
+   the player process, password in the URL (logs), and no folder
+   listing. (Licensing is not the obstacle: the bundle is already
+   GPL-3.0-or-later because FFmpeg is built with `--enable-version3`.)
+2. **In-app NFS** with libnfs (LGPL-2.1) in the same helper, if worth it:
+   most NFS exports only accept privileged source ports, which a
+   sandboxed app can't use, so many would need `insecure` on the server;
+   a system mount (v0.7.0) may be the better answer for NFS users.
+3. **Downloads from shares and DLNA** through the same paths (D60's
+   queue, curl).
+4. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
    an episode started there should offer the next one (today *Continue
    watching* plays one item at a time).
-2. **SMB/NFS network shares**: many people keep video on a NAS. Needs
-   mounting or a userspace client: FFmpeg reads `smb://` only when built
-   with libsmbclient (GPLv3, which would move the bundle to GPLv3), or the
-   share has to be mounted outside the sandbox.
 
 ## Floating (any time)
 
