@@ -194,7 +194,7 @@ User-Agent. Bump it with the metainfo `<release>` when releasing.
     default 4 = left-middle), `bold, italic, outline, clip, font`
   - `text` never wraps (`\q2`).
   - `qr(x, y, size, matrix)`: QR code on a white square with quiet zone.
-  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_sdcard`, `icon_server`,
+  - icons: `icon_folder`, `icon_video`, `icon_drive`, `icon_sdcard`, `icon_network` (D64), `icon_server`,
     `icon_check`, `icon_play`, `icon_pause`, `icon_triangle(dir)`
   - `button(btn, x, cy, s, o)`: controller glyphs `A B X Y`, `L1 R1 L2 R2`,
     `MENU`, `VIEW`, `DPAD`, `DPAD_LR`, `DPAD_UD`. Returns the width.

@@ -365,6 +365,16 @@ function Ass:qr(x, y, size, matrix, o)
 end
 
 -- Media server (Plex): two stacked rack units with status lights.
+-- A network share: a folder on a network line (stem down to a bar).
+function Ass:icon_network(x, cy, s, o)
+    local fx, fw, fh = x + s * 0.12, s * 0.76, s * 0.44
+    local fy = cy - s * 0.38
+    self:rect(fx, fy - s * 0.07, s * 0.32, s * 0.16, {radius = s * 0.05, color = o.color, opacity = o.opacity})
+    self:rect(fx, fy, fw, fh, {radius = s * 0.08, color = o.color, opacity = o.opacity})
+    self:rect(x + s * 0.46, fy + fh, s * 0.08, s * 0.2, {color = o.color, opacity = o.opacity})
+    return self:rect(x, fy + fh + s * 0.2, s, s * 0.09, {radius = s * 0.045, color = o.color, opacity = o.opacity})
+end
+
 function Ass:icon_server(x, cy, s, o)
     local w, h = s, s * 0.34
     for i = 0, 1 do

@@ -1613,8 +1613,9 @@ Flatpak's mpv); skipped elsewhere.
   systemd automount mounts the share on first access and waits for it)
   are listed as sources of kind `network` without checking them;
   *Recently played* files there are listed without a stat (if the share is
-  gone, opening the file says so). Tagged "Network" in *Recently played*
-  and Video info.
+  gone, opening the file says so). Their own icon on the start screen (a
+  folder on a network line, `icon_network`), tagged "Network" in
+  *Recently played* and Video info.
 - ***Recently played* playlists** (the rest of the folder, to play next)
   come from the same asynchronous listing; after 5 s the video plays
   alone.

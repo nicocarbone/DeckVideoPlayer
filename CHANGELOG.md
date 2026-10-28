@@ -12,7 +12,8 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 - **Folders on a network share no longer freeze the app.** Folders are
   read in the background: if a share is asleep or gone, the library says
   the folder is slow to answer and B goes back, instead of the whole app
-  hanging. Shares mounted on the system (SMB, NFS) are tagged *Network*.
+  hanging. Shares mounted on the system (SMB, NFS) have their own icon on
+  the start screen and a *Network* tag in *Recently played*.
 
 ## v0.6.0 (2026-10-28)
 

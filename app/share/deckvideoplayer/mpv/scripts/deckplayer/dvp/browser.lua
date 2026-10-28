@@ -1040,6 +1040,8 @@ function M:draw_row(a, e, x0, x1, y, sel)
         a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})
     elseif e.source == "usb" or e.source == "removable" then
         a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
+    elseif e.source == "network" then
+        a:icon_network(ix, cy, 30, {color = icon_color})
     elseif e.is_dir then
         a:icon_folder(ix, cy, 30, {color = icon_color})
     else
