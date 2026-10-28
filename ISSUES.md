@@ -1,5 +1,12 @@
 # Code Audit: Findings & Optimization Opportunities
 
+**Status review (2026-10-28, v0.6.0):** every finding below was checked
+against the code. Each has a **Status** line: *Solved*, *Partly solved*
+(the rest declined, with the reason), *Not solved (declined)* with the
+reason, or *Accepted (by design)*. The reasoning for each part is in
+`docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
+VI: D49, VII: D53, VIII: D59).
+
 ---
 
 # Part VIII — v0.5.0 Audit: Jellyfin Integration, 5.1 Surround Placement, Source Tags & Subtitle Brightness (2026-10-27)
@@ -16,6 +23,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ## 1. Jellyfin Integration Bugs & Edge Cases (v0.5.0)
 
 ### 1.1. `dvp/jellyfin.lua`: `Jellyfin:streams_anonymously` passes `max_size = 1`, which causes `curl` to exit with code `63` (`code = nil`) whenever a `401` / `403` response has a body > 1 byte (*verified with curl*)
+
+> **Status: Solved** (D59). The body goes to `/dev/null` with a 64 KB cap, so 401/403 error pages come back as codes; a server that ignores `Range` and hits the cap counts as "streams without a token".
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`streams_anonymously` lines 651–663) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`curl_config` line 58, `parse_result` lines 97–100)
 * **Problem (*verified*):**
   ```lua
@@ -45,6 +55,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ---
 
 ### 1.2. `dvp/browser.lua` & `dvp/jellyfin.lua`: One-season Jellyfin shows (`kind = "series_episodes"`) are missing from `SERVER_ORDER` in `dvp/browser.lua`, so `date` sort reverses episodes
+
+> **Status: Solved** (D59). `series_episodes` is in `SERVER_ORDER` (kept in the server's order, not sortable); `resolve` falls back to the whole show for an episode outside any season.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`SERVER_ORDER` line 183) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`entries_from` lines 178–180)
 * **Problem:**
   In `dvp/jellyfin.lua` line 180:
@@ -71,6 +84,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ---
 
 ### 1.3. `dvp/jellyfin.lua`: `Jellyfin:discover` and `Jellyfin:connect` do not verify UDP broadcast addresses with `GET /System/Info/Public`
+
+> **Status: Solved** (D59). Every broadcast answer is probed (`/System/Info/Public`, no token) and kept only if that address answers with the same id; `config.ini` addresses win over broadcast ones; `parse_discovery` keeps at most 16 answers and `dvp-discover` stops after 64 packets.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`discover` lines 368–401, `connect` lines 495–517)
 * **Problems:**
   ```lua
@@ -95,6 +111,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ---
 
 ### 1.4. `dvp/jellyfin.lua` & `main.lua`: `self.started[item.key]` state in `Jellyfin:report` is not cleared if a file unloads when `time-pos` is `nil` or when a session is forgotten
+
+> **Status: Partly solved** (D59). Fixed: `prepare()` resets the item's "started" state and sign-out clears all of it. Declined: reporting "playing" as soon as the file loads (for Jellyfin and Plex). The first report at the first pause or 30 s tick is tested behaviour, servers show the session from then, and an earlier report only changes when the dashboard shows it.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/jellyfin.lua` (`forget_server` lines 461–469, `forget_session` lines 521–524, `prepare` lines 669–690, `report` lines 702–715) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress` lines 160–185)
 * **Problem:**
   In `Jellyfin:report`:
@@ -119,6 +138,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ## 2. Video Info Panel & Browser Polish (v0.5.0)
 
 ### 2.1. `dvp/videoinfo.lua`: `VideoInfo.from_jellyfin` reports `"SDR"` (or omits `" · HDR10"` / `" · HLG"`) when `s.ColorTransfer` is `nil` and HDR is only indicated in `s.VideoRangeType`
+
+> **Status: Solved** (D59). The HDR type falls back to `VideoRangeType` (HDR10, HDR10Plus, HLG, DOVIWith…) when `ColorTransfer` is missing.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`hdr_label` lines 54–65, `from_jellyfin` lines 324–335)
 * **Problem:**
   `VideoInfo.hdr_label(h)` checks `h.transfer == "smpte2084"` (for `HDR10` / `HDR10+`) and `h.transfer == "arib-std-b67"` (for `HLG`).
@@ -143,6 +165,9 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ---
 
 ### 2.2. `dvp/browser.lua`: Adding a Jellyfin or Plex server while in single-source mode (`top.is_root == true`) leaves the browser inside the local folder instead of showing the new server
+
+> **Status: Solved** (D59). Signing in to Plex or Jellyfin goes to the start screen (`reload_to_start`); other reloads (an SD card inserted while browsing) keep the folder.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`refresh_sources` lines 58–63, `plex_sign_in` line 591, `jellyfin_sign_in` line 690)
 * **Problem:**
   When a user starts the app with only one local folder (`~/Videos`) and no *Recently played* entries (`self:single_source() == true`), `Browser:load()` skips the Start screen and opens `~/Videos` directly (`self.stack = {{path = s.path, label = s.name, is_root = true}}`).
@@ -153,8 +178,23 @@ Below are the bugs, security/discovery edge cases, and release-readiness items f
 ---
 
 ### 2.3. Release Readiness (`dvp/version.lua`, `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`)
+
+> **Status: Solved**. Done at release time, as for every release (v0.5.0 on 2026-10-27; `version.lua` is now 0.6.0 with its metainfo entry).
+
 * **`dvp/version.lua`:** Still `"0.4.2"` (sent in Jellyfin's `Authorization: MediaBrowser …, Version="0.4.2"`, Plex's `X-Plex-Version`, OpenSubtitles `User-Agent`, and shown in the About panel).
 * **`packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`:** Needs the `<release version="0.5.0">` entry and a `<description><ul>` bullet covering Jellyfin streaming, source tags, 5.1 surround placement, and subtitle brightness when tagging v0.5.0.
+
+## 3. v0.5.0 (Part VIII) Summary Checklist
+
+Reviewed and fixed on 2026-10-27 (DECISIONS D59).
+
+- [x] **Jellyfin (`dvp/jellyfin.lua`):** Anonymous-stream check: body to `/dev/null` with a 64 KB cap, so 401/403 come back as codes.
+- [x] **Jellyfin (`dvp/browser.lua`, `dvp/jellyfin.lua`):** One-season shows keep the server's order; *Recently played* falls back to the whole show.
+- [x] **Jellyfin (`dvp/jellyfin.lua`, `helper/dvp-discover.c`):** Broadcast answers probed and kept only with the same id; `config.ini` addresses win; at most 16 answers, 64 packets.
+- [x] **Jellyfin (`dvp/jellyfin.lua`):** `prepare()` resets the "playing" state; sign-out clears it. *(Declined: reporting "playing" at file load; the first report at the first pause or 30 s tick is tested behaviour.)*
+- [x] **Video info (`dvp/videoinfo.lua`):** HDR type from `VideoRangeType` when `ColorTransfer` is missing.
+- [x] **Browser (`dvp/browser.lua`):** Sign-in from the only folder goes to the start screen.
+- [x] **Release:** version and metainfo updated when tagging v0.5.0.
 
 ---
 ---
@@ -173,6 +213,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ## 1. HDR Overhaul Bugs & Edge Cases (v0.4.1)
 
 ### 1.1. `dvp/player.lua` & `main.lua`: Overlay HDR badge (`[HDR10]`, `[HDR10 → SDR]`, `[SDR → HDR]`) and Info panel do not update when toggling HDR options while paused (and lag behind when playing)
+
+> **Status: Solved** (D53). `video-target-params/gamma` is observed; badges and the info panel redraw when it changes, also while paused.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`Hdr.new` callback lines 134–137, `dispatch` lines 290–295) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`render` lines 622–627, `render_info` lines 770–790)
 * **Problem (*verified in headless gamescope*):**
   1. When the user changes `HDR` (`On`/`Off`), `HDR mapping`, `Peak brightness`, or `SDR to HDR` in the Video menu, `dispatch()` calls `player:render()` synchronously in the same Lua tick right after `mp.set_property(...)`.
@@ -186,6 +229,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ---
 
 ### 1.2. `dvp/hdr.lua`: Non-HDR display detection (`Hdr:check` / `Hdr.effective`) leaves `mapping == "dynamic"` active and fails to refresh an open Video menu when `mapping` is `"static"` or `"dynamic"`
+
+> **Status: Solved** (D53). No HDR choice is effective on a screen not in HDR mode, and an open Video menu is rebuilt whenever the screen turns out to be SDR.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/hdr.lua` (`Hdr.effective` lines 57–66, `Hdr:check` lines 147–169)
 * **Problems:**
   ```lua
@@ -212,6 +258,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ---
 
 ### 1.3. `dvp/hdr.lua`: `self.screen` (`true` / `false`) is cached for the entire process lifetime and never re-evaluated on dock/undock or SteamOS HDR toggle
+
+> **Status: Partly solved** (D53). A known HDR screen is checked again with each file, and a known SDR screen is promoted as soon as mpv outputs HDR. Declined: re-checking an SDR screen with every file, which would flash every SDR file on an SDR TV with *SDR to HDR* set. A change in the middle of a file applies from the next file.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/hdr.lua` (`Hdr.new` line 117, `Hdr:apply` line 140, `Hdr:check` lines 157–162)
 * **Problem:**
   Once `Hdr:check()` sets `self.screen = true` or `self.screen = false`, `if self.screen == nil and M.expects_hdr(self)` never runs again for the rest of the app session:
@@ -225,6 +274,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ## 2. Video Info Panel, Menu & Plex Recently Played Bugs (v0.4.1)
 
 ### 2.1. `dvp/menu.lua` & `dvp/videoinfo.lua`: Section headers (`header = true`) are treated as selectable rows in `Menu`
+
+> **Status: Solved** (D53). Section headers are not selectable and scrolling up shows a section's header; the Video info workaround was removed. (The highlight didn't disappear on headers as reported; the cursor stopped on them.)
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/menu.lua` (`selectable` lines 48–50, `render` lines 244–247) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`VideoInfo.open` lines 345–348)
 * **Problems:**
   1. In `dvp/menu.lua`, `local function selectable(item) return item and not item.disabled and not item.separator end` does not exclude `item.header`.
@@ -242,6 +294,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ---
 
 ### 2.2. `dvp/videoinfo.lua`: `VideoInfo.from_plex` does not normalize `colorPrimaries` / `colorTrc` case
+
+> **Status: Solved** (D53). `colorPrimaries` / `colorTrc` are lowercased.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`hdr_label` lines 53–64, `PRIMARIES` lines 66–67, `from_plex` lines 273–281)
 * **Problem:**
   `from_plex` passes `primaries = s.colorPrimaries` and `transfer = s.colorTrc` verbatim into `PRIMARIES[v.primaries or ""]` and `M.hdr_label(v)`. If a Plex server reports uppercase/mixed-case strings (e.g. `"BT709"` or `"SMPTE2084"`), `PRIMARIES` returns `nil` and `hdr_label` falls back to `"SDR"`. Normalizing `s.colorPrimaries` and `s.colorTrc` with `:lower()` makes Plex metadata handling resilient.
@@ -249,6 +304,9 @@ Below are the bugs and edge cases found in the HDR state machine/UI synchronizat
 ---
 
 ### 2.3. `dvp/browser.lua`: Opening a Plex item from *Recently played* (`open_plex_recent`) has no loading feedback, does not guard `open_file` on local entries while in flight, and leaves stale `resume.json` progress if the Resume prompt is canceled
+
+> **Status: Solved** (D53). "Opening from Plex…" toast; the item opens only if the cursor is still on that row and nothing else opened; the server's progress is synced into `resume.json` (`resume:sync`).
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`open_file` lines 316–321, `open_plex_recent` lines 325–339, `start` lines 341–363)
 * **Problems:**
   1. **No visual feedback during `plex:resolve` (up to 4–10 s on first connect):** When pressing **A** or **X** on a Plex item in *Recently played* right after launching the app, `plex:resolve` has to probe/connect to the Plex server, fetch `/library/metadata/<id>`, and (for TV episodes) fetch `/library/metadata/<parent>/children` before anything happens on screen. During those seconds, no toast or loading indicator is shown.
@@ -282,6 +340,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ## 1. Audio DSP & Filter Chain Bugs (v0.4.0)
 
 ### 1.1. `dvp/nightmode.lua`: `acompressor` uses default `link=average` instead of `link=maximum`, breaking compression on 5.1 and 7.1 tracks
+
+> **Status: Solved** (D49). `link=maximum` on `acompressor` (loud centre-only 5.1 measured 4 dB louder with night mode before; now −6.4 dB like stereo).
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/nightmode.lua` (`M.GRAPH`, lines 14–17)
 * **Problem:**
   ```lua
@@ -308,6 +369,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ---
 
 ### 1.2. `dvp/surround.lua`: Boosting `sofalizer` `gain` to `12.5` / `18.5` dB without a limiter causes `+8..+10 dBFS` clipping and FFmpeg log spam on loud multi-channel scenes
+
+> **Status: Solved** (D49). `sofalizer` at gain 0, then `volume` and `alimiter` at −1 dBFS. (Confirmed with a smaller margin than reported: +2.7 dBFS peaks; now −1.0 dBFS, no warnings, same dialogue loudness.)
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/surround.lua` (`GAIN_51`, `LFE_GAIN`, `gain`, `filter_string`, lines 16–43)
 * **Problem:**
   ```lua
@@ -333,6 +397,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ---
 
 ### 1.3. `dvp/nightmode.lua`: Enabling `night_mode = yes` in `config.ini` calls `af pre` while mpv is idle, bypassing filter validation and muting audio if unavailable
+
+> **Status: Solved** (D49). The filter is added once audio is open, not while idle.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/nightmode.lua` (`M.new`, `M:set`, lines 25–56)
 * **Problem:**
   ```lua
@@ -353,6 +420,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ## 2. Plex Intro / Credits Markers & Playback Lifecycle Bugs (v0.4.0)
 
 ### 2.1. `dvp/player.lua` & `main.lua`: Pressing `R2` on `"Next episode"` / `"Next video"` during final credits leaves the episode unwatched / in-progress when credits are longer than `END_MARGIN`
+
+> **Status: Solved** (D49). *R2 Next episode* counts the episode as finished (`ctx.finished()`).
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`skip_marker`, lines 194–205) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress`, lines 142–164)
 * **Problem:**
   When `self.marker` is a final credits marker (`mk.kind == "credits" and mk.final`) and `has_next` is true, the prompt offers **`R2 Next episode`** (or **`R2 Next video`**). Pressing `R2` runs:
@@ -377,6 +447,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ---
 
 ### 2.2. `dvp/input.lua` & `dvp/player.lua`: `R2` (`rt`) key-repeat and 1-second marker polling race with `skip_marker()`
+
+> **Status: Solved** (D49). No auto-repeat on the triggers; R2 checks the marker at the current position; the marker timer stops during a skip and restarts on `playback-restart`. (The prompt flashing during an exact seek doesn't happen: mpv reports the seek target as `time-pos` while seeking.)
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/input.lua` (`REPEATABLE`, lines 30–33) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`check_marker`, `skip_marker`, `handle`, lines 174–205, 307–309)
 * **Problems:**
   1. **`R2` (`rt`) is marked `REPEATABLE = true`, causing a chapter jump (+5 min) if the trigger is held >200 ms:**
@@ -395,6 +468,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ---
 
 ### 2.3. `main.lua` & `dvp/player.lua`: Previous file's markers are not cleared at the start of `on_load`, `skip_intro = "auto"` conflicts with `resumed_at` / `0:00` load, and `osd-dimensions` omits `render_marker()`
+
+> **Status: Partly solved** (D49). Fixed: markers are cleared at the start of `on_load`, the prompt is redrawn on resize, and "Resumed at" shows before the automatic intro skip. Declined: skipping an intro at 0:00 inside `on_load`, because the extra seek happens before the first frame is shown anyway.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (lines 286–315, 358–369, 423–427) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (lines 73–79, 208–225)
 * **Problems:**
   1. **Markers not cleared at the top of `on_load`:**
@@ -416,6 +492,9 @@ All 252 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the diff
 ## 3. Native Helper Robustness (v0.4.0)
 
 ### 3.1. `helper/dvp-keep-awake.c`: `request_inhibit` ignores `stop` (`SIGTERM`) between blocking D-Bus calls and recreates `status_file` after `keepawake:stop()` deletes it
+
+> **Status: Solved** (D49). No status write and no portal call after SIGTERM or when orphaned.
+
 * **Location:** `helper/dvp-keep-awake.c` (`write_status`, `request_inhibit`, lines 31–41, 77–127) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/keepawake.lua` (`stop`, lines 65–72)
 * **Problem:**
   In `helper/dvp-keep-awake.c`, `request_inhibit(bus)` runs two sequential synchronous D-Bus calls (`org.freedesktop.ScreenSaver.Inhibit` and `org.freedesktop.portal.Inhibit.Inhibit`, each with a 5 s timeout) and calls `write_status()` after each one, before `main()` enters `while (!stop && getppid() == parent)`.
@@ -451,6 +530,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 ## 1. Security, Privacy & Native Helper Vulnerabilities (v0.3.5)
 
 ### 1.1. `helper/dvp-keep-awake.c`: 100% CPU busy-loop on D-Bus disconnect, `SIGTERM` race, and `PR_SET_PDEATHSIG` thread semantics
+
+> **Status: Solved** (D45). Breaks on `sd_bus_process < 0`, checks `stop` before a bounded `sd_bus_wait`, guards `unique[0] == ':'`. The `PR_SET_PDEATHSIG` thread claim doesn't apply: the thread that spawns the helper stays blocked on it, so the death signal fires as intended.
+
 * **Location:** `helper/dvp-keep-awake.c` (`request_inhibit` lines 81–86, `main` lines 124–144)
 * **Problems:**
   ```c
@@ -477,6 +559,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
   * In the event loop, break if `sd_bus_process` returns `< 0`, check `if (stop) break;` immediately before `sd_bus_wait`, and use a bounded wait (e.g. `1000000` µs = 1 s, or `sigaction` without `SA_RESTART`) so a signal arriving just before `sd_bus_wait` can never hang the helper.
 
 ### 1.2. Predictable `/tmp` fallback filename and leftover status files in `dvp/keepawake.lua` & `helper/dvp-keep-awake.c`
+
+> **Status: Solved** (D45). Falls back to `data_dir` before `/tmp`, removes the status file in `stop()`, checks `snprintf` bounds.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/keepawake.lua` (`KeepAwake.new` lines 34–36, `KeepAwake:stop` lines 58–64) and `helper/dvp-keep-awake.c` (`write_status` lines 30–39)
 * **Problems:**
   1. When `XDG_RUNTIME_DIR` is unset, `KeepAwake.new` falls back to `/tmp/dvp-keep-awake-<pid>.status`, and `write_status()` opens `/tmp/dvp-keep-awake-<pid>.status.tmp` with `fopen(tmp, "w")` (without `O_EXCL` or `O_NOFOLLOW`) in world-writable `/tmp`. Falling back to `data_dir` (which is already private under `umask 077`) avoids `/tmp`.
@@ -485,6 +570,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Pass `opts.data_dir` to `KeepAwake.new(cfg, opts.data_dir)` as the fallback before `/tmp`, call `os.remove(self.status_file)` in `KeepAwake:stop()`, and check the `snprintf` return value in `write_status()`.
 
 ### 1.3. `http.curl_quote`: NUL byte (`\0`) not stripped
+
+> **Status: Solved** (D45). NUL bytes (`%z`) are stripped in `http.curl_quote`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`http.curl_quote` lines 16–19)
 * **Problem:** `curl_quote` escapes `\`, `"`, `\n`, `\r`, `\t`, but does not strip NUL bytes (`%z`). Because curl reads `-K -` lines as C strings, a NUL byte in any string would truncate the line in curl's config parser.
 * **Suggested Fix:** Strip `%z` (`:gsub("%z", "")`) in `http.curl_quote`.
@@ -494,6 +582,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 ## 2. Bugs & Functional Edge Cases (v0.3.5)
 
 ### 2.1. Three bugs in *Crop black bars* (`dvp/cropdetect.lua` & `dvp/player.lua`)
+
+> **Status: Solved** (D45). Opposite bars must both be present (`math.min`), and `crop_bars` is set only when a crop was applied. 2.1.3 doesn't apply: detection never runs while a crop is active.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/cropdetect.lua` (`cropdetect.bounds` lines 19–49) and `dvp/player.lua` (`Player:set_zoom` lines 316–327, `Player:crop_black_bars` lines 332–344)
 * **Problems:**
   1. **Asymmetric dark edges in normal scenes are misdetected as single-sided black bars (`dvp/cropdetect.lua`):**
@@ -519,6 +610,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
   * In `Player:set_zoom("bars")`: set `self.crop_bars = self:crop_black_bars()` (returning `true` only when a crop was applied).
 
 ### 2.2. `Browser:recent_playlist` uses `self.sort`, playing TV episodes backwards when `self.sort == "date"`
+
+> **Status: Solved** (D45). `recent_playlist` uses name order, so episodes never auto-play backwards.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:recent_playlist` lines 281–290)
 * **Problem:**
   ```lua
@@ -531,6 +625,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Always sort by `"name"` in `Browser:recent_playlist`: `library.list(util.dirname(path), self.cfg, "name")`.
 
 ### 2.3. `Resume:mark_watched` and `Resume:mark_unwatched` mishandle pre-v0.3.1 entries (`e.played == nil`)
+
+> **Status: Solved** (D45). `played` is preserved for pre-v0.3.1 entries.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/resume.lua` (`Resume:mark_watched` lines 74–80, `Resume:mark_unwatched` lines 84–93, `Resume:recent` lines 110–113)
 * **Problems:**
   Entries saved before v0.3.1 have `e.played == nil` and use `e.t` as their played timestamp in `Resume:recent()` (`local t = e.played; if t == nil then t = e.t end`).
@@ -556,6 +653,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
   * In `mark_unwatched`: migrate `if e.played == nil and e.t then e.played = e.t end` before checking `if e.played then`.
 
 ### 2.4. `Plex:poll_pin` misses PIN expiry (`404`) whenever `pins.short` responds before `pins.strong`
+
+> **Status: Solved** (D45). `expired` is tracked across both PIN requests.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:poll_pin` lines 371–394)
 * **Problem:**
   ```lua
@@ -568,6 +668,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Record `if code == 404 and pin == pins.short then expired = true end` before checking `pending == 0`, and pass `expired and "The code expired" or nil` to `cb`.
 
 ### 2.5. Plex playlist failure cascade in `main.lua` (`on_load` / `end-file`)
+
+> **Status: Solved** (D45). The playlist is cleared when `prepare` fails in `on_load`; `bases[machine]` is kept when `prepare` succeeded.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`on_load` lines 286–303, `end-file` lines 361–371) and `dvp/plex.lua` (`forget_session` lines 483–486)
 * **Problems:**
   When starting a video in a Plex folder/season with `autoplay_next = true`, `play()` appends all remaining videos in the folder (`list[2..N]`) to mpv's playlist:
@@ -578,6 +681,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
   * When `prep.ok` was `true` and `end-file` fails with `ev.reason == "error"`, only clear `self.transient[item.machine] = nil` (keeping `self.bases[item.machine]`).
 
 ### 2.6. `KeepAwake:start()` ignores positive exit codes and unexpected helper termination
+
+> **Status: Solved** (D45). Unexpected helper exits while playing are reported.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/keepawake.lua` (`KeepAwake:start` lines 40–56, `KeepAwake:info_lines` lines 74–79)
 * **Problem:**
   ```lua
@@ -589,21 +695,33 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** If the callback runs with `self.job == job`, the helper exited unexpectedly while playing: if `status ~= 1` (or if `.status` has no `request`), set `self.error` so `info_lines()` reports that the helper exited instead of showing a stale `"accepted"` status.
 
 ### 2.7. `Player:open_subtitle_menu()` omits `rebuild`, so completed downloads don't refresh the open Subtitles menu
+
+> **Status: Solved** (D45). `open_subtitle_menu()` has `rebuild`; `Menu:refresh()` uses `first_selectable`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player:open_subtitle_menu` lines 294–299) and `dvp/menu.lua` (`Menu:refresh` lines 83–90)
 * **Problem:** `open_audio_menu()` and `open_main_menu()` pass `rebuild = function() ... end`, but `open_subtitle_menu()` omits `rebuild = function() return self:subtitle_items() end`. If a subtitle download finishes while the user has the **Subtitles** menu open, `self.ctx.menu:refresh()` (`dvp/subdownload.lua` line 297) does not rebuild the track list. Also, in `Menu:refresh()`, `spec.selected = math.min(spec.selected, #spec.items)` does not call `first_selectable`, which can leave the cursor on a separator if the rebuilt item count changes.
 * **Suggested Fix:** Add `rebuild = function() return self:subtitle_items() end` in `Player:open_subtitle_menu()`, and use `spec.selected = first_selectable(spec.items, math.min(spec.selected, #spec.items), -1)` in `Menu:refresh()`.
 
 ### 2.8. Stale `self.after_load` callback in `Browser` when navigating away from a loading Plex folder
+
+> **Status: Solved** (D45). `after_load` is cleared in `enter()` and *Go to library start*.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:enter` lines 230–235, `"Go to library start"` lines 361–366)
 * **Problem:** If `self.after_load` is set while a Plex folder is loading (via `reload()` or `go_back()`) and, before the response arrives, the user selects `"Go to library start"` or enters another Plex folder, `self.after_load` remains set and executes on the next Plex listing that finishes loading.
 * **Suggested Fix:** Clear `self.after_load = nil` in `Browser:enter()` and `"Go to library start"`.
 
 ### 2.9. **B** does not dismiss `Advanced statistics`, and `stats.lua` stays visible over the Library screen
+
+> **Status: Solved** (D45). `stats_visible` is tracked: B closes the statistics, and `stop_screen()` turns them off.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player:stop_screen` lines 71–79, `Player:handle` lines 174–182, `Player:main_menu_items` lines 421–423)
 * **Problem:** *Menu → Advanced statistics* toggles mpv's built-in `stats/display-stats-toggle`. Because `dvp/input.lua` binds controller buttons and keys with `mp.add_forced_key_binding`, pressing **B** during playback does not close `Advanced statistics` (it stops the video instead), and `stats.lua` remains drawn on top of the Library browser after playback stops.
 * **Suggested Fix:** Track `self.stats_visible` in `Player`: dismiss it on **B** (`elseif self.stats_visible then self:toggle_stats()`) and turn it off in `stop_screen()` when `self.stats_visible` is `true`.
 
 ### 2.10. Multi-account Steam profiles and branch regex edge cases in `scripts/install-steamos.sh` & `scripts/steam_shortcut.py`
+
+> **Status: Solved** (D45). Multi-user Steam profiles are handled, `BRANCH_RE` no longer eats quotes, and only non-`stable` branches are removed.
+
 * **Location:** `scripts/install-steamos.sh` (`remove_installed_branches` lines 26–30, `add_to_steam` lines 58–66, line 114) and `scripts/steam_shortcut.py` (`BRANCH_RE` line 160)
 * **Problems:**
   1. **Second Steam profile skipped:** In `scripts/install-steamos.sh` line 59, `python3 "$here/steam_shortcut.py" status 2>/dev/null | grep -q 'app id'` matches if *any* Steam user on the Deck already has the shortcut, returning early and never adding the shortcut to a second Steam account on the same Deck (`-> not added`). Checking `! ... | grep -q 'not added'` (or running `add` whenever Steam is closed, since `add` already unpins and installs artwork idempotently) handles multi-account Decks.
@@ -615,6 +733,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 ## 3. Optimization Opportunities (v0.3.5)
 
 ### 3.1. `Browser:toggle_sort()` re-fetches the entire Plex listing over the network (and re-reads local folders) instead of sorting `self.entries` in place
+
+> **Status: Solved** (D45). `toggle_sort()` sorts `self.entries` in place.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:toggle_sort` lines 319–330)
 * **Problem:**
   ```lua
@@ -628,6 +749,9 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Optimization:** When `not self.loading`, sort `self.entries` in place with `library.sort_entries(self.entries, self.sort)` and re-select `cur.path`. Sorting becomes instantaneous (0 ms, zero network or disk I/O).
 
 ### 3.2. Continuous 0.5 s overlay redraws and 4 s `hide_timer` churn while paused (`dvp/player.lua`)
+
+> **Status: Solved** (D45). `hide_timer` is not re-armed while paused; `render_info()` updates on pause change.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player:update_timer` lines 81–87, `Player:show_overlay` lines 94–109, `Player:on_pause_change` lines 118–121)
 * **Problem:**
   While a video is paused:
@@ -636,17 +760,25 @@ All 229 Lua checks and 9 Python tests in `tests/run.sh` pass. Below are the secu
 * **Optimization:** In `self.hide_timer`'s callback, if `mp.get_property_native("pause") or self.ctx.menu:is_open()`, simply return without re-calling `self:show_overlay()` (`on_pause_change(false)` and menu close already re-arm the timeout when resuming or closing the menu). Also call `if self.info_visible then self:render_info() end` in `on_pause_change`.
 
 ### 3.3. Duplicate `mp.get_property_native("video-params")` marshaling on every overlay and info-panel tick
+
+> **Status: Solved** (D45). `vp` from `media.hdr_state` is reused.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player:badges` lines 447–450, `Player:info_lines` lines 585 & 596)
 * **Problem:** Both `Player:badges()` and `Player:info_lines()` call `mp.get_property_native("video-params")` and immediately call `media.hdr_state(self.video_track)`, which calls `mp.get_property_native("video-params")` a second time and returns `vp` as its 3rd return value.
 * **Optimization:** Reuse the `vp` returned by `media.hdr_state(self.video_track)` in both `badges()` and `info_lines()`.
 
 ### 3.4. `SubDownload:stored(path)` calls `utils.readdir(self.dir, "dirs")` on every Plex video load
+
+> **Status: Solved** (D45). `stored()` skips the folder listing for server items and cached keys.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload:stored` lines 141–151)
 * **Optimization:** The `utils.readdir(self.dir, "dirs")` check exists only to avoid hashing a local file when no subtitles have ever been downloaded. For Plex items (`self:plex_item(path) ~= nil`) or already-cached keys (`self.keys[path] ~= nil`), `self:key(path)` does no file I/O, so `stored(path)` can go straight to `utils.readdir(util.join(self.dir, key), "files")`.
 
 ---
 
 ## 4. Release Readiness & Polish (v0.3.5)
+
+> **Status: Solved** (D45). v0.3 features in the metainfo `<description>`; `ini_get` normalizes `-` and quotes like `config.lua`.
 
 1. **AppStream Metainfo feature list (`packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` lines 21–28):**
    * The top-level `<description><ul>` feature list still ends with the v0.2.0 features (headphone surround and OpenSubtitles) and does not mention Plex Media Server streaming, black-bar cropping, or screen-awake inhibition.
@@ -689,6 +821,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 ## 1. Security & Privacy Vulnerabilities (v0.3.0)
 
 ### 1.1. Unbounded download into `/tmp` (RAM exhaustion) in `Plex:fetch_range` if a server ignores `Range`
+
+> **Status: Solved** (D40). `max_size` equals the range size and HTTP 206 is required.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:fetch_range` lines 436–445) and `dvp/subdownload.lua` (`SubDownload:hash_for` lines 112–138)
 * **Problem:**
   ```lua
@@ -710,6 +845,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Pass `max_size = to - from + 1` (65536) to `http.request` and require `code == 206` (since `hash_for` only runs on files `>= 128 KiB`).
 
 ### 1.2. TOCTOU permission window in `util.write_file_atomic` when writing `plex.json`
+
+> **Status: Solved** (D40). `umask 077` in the launcher (the `chmod` stays as a fallback).
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/util.lua` (`write_file_atomic` lines 127–149) and `app/bin/deckvideoplayer` (lines 17–21)
 * **Problem:**
   ```lua
@@ -729,6 +867,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Create `$CONFIG_DIR` and `$DATA_DIR` with mode `0700` (`mkdir -m 700 -p ...`) or set `umask 077` in `app/bin/deckvideoplayer` before `exec "$MPV"` (every file the app creates in `$DATA_DIR` or `/tmp` is private to the user). That makes every file `0600` atomically at creation time and eliminates the blocking `chmod` subprocess spawn.
 
 ### 1.3. Unvalidated `c.uri`, `c.address`, and `c.port` in `Plex.server_candidates`
+
+> **Status: Solved** (D40). Bare https origins only; insecure http only for IPv4 literals with a numeric port.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex.server_candidates` lines 92–119)
 * **Problems:**
   ```lua
@@ -745,6 +886,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Validate `https(uri)` with `uri:match("^https://[%w%-%._]+:%d+$") ~= nil` and validate `l.c.address:match("^%d+%.%d+%.%d+%.%d+$")` and `tonumber(l.c.port)` before formatting the `http://` fallback.
 
 ### 1.4. `Plex:sign_out()` leaves `self.transient` tokens in memory and can be overwritten by an in-flight `refresh_account`
+
+> **Status: Solved** (D40). `sign_out` clears transient tokens and PINs; late `refresh_account` answers are dropped.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:refresh_account` lines 371–389, `Plex:sign_out` lines 391–395)
 * **Problems:**
   1. `Plex:sign_out()` resets `self.bases` and `self.items`, but forgets to clear `self.transient = {}` and `self.pin = nil`.
@@ -756,6 +900,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 ## 2. Bugs & Functional Edge Cases (v0.3.0)
 
 ### 2.1. Race condition on Stop / Quit: `stop_playback()` and `quit()` send an async `"playing"` report right before `on_unload` sends a sync `"stopped"` report
+
+> **Status: Solved** (D40). Verified first that mpv runs `on_unload` on quit; no async report races the final one.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`stop_playback` lines 170–174, `quit` lines 176–182, `on_unload` lines 330–333, `shutdown` lines 408–413)
 * **Problem:**
   ```lua
@@ -773,6 +920,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Remove `save_progress()` and `resume:flush()` from `stop_playback()` and `quit()` (and in `shutdown`, only call them if `state.current_path` is still set), because `on_unload` is guaranteed to run for every unloaded file.
 
 ### 2.2. Canceling the Plex sign-in dialog does not cancel in-flight `poll_pin` / `start_pin`
+
+> **Status: Solved** (D40). `cancel_pin`, late answers ignored; a claimed PIN with a failed server list closes the dialog as signed in.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:plex_sign_in` lines 335–379) and `dvp/plex.lua` (`Plex:poll_pin` lines 345–368)
 * **Problems:**
   1. `stop()` only kills `timer`, without clearing `plex.pin` or setting a `cancelled` flag. If a `poll_pin` (or its nested `refresh_account`) request is in flight when the user presses **B** or **Cancel**, and completes a moment later:
@@ -782,6 +932,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Set `cancelled = true` and `plex.pin = nil` in `stop()`, check `if cancelled then return end` in `start_pin` and `poll_pin` callbacks, and if `plex:signed_in()` is true when `poll_pin` finishes (even with a server-list error), close the sign-in dialog, toast the error/sign-in, and reload.
 
 ### 2.3. Discrepancy between `Plex.item_state`, `Browser:render`, and `Browser:resume_position`
+
+> **Status: Solved** (D40). Fixed in `item_state`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex.item_state` lines 155–161) and `dvp/browser.lua` (`Browser:resume_position` lines 130–140, `Browser:render` lines 535–555)
 * **Problem:**
   ```lua
@@ -798,6 +951,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Apply `Resume.MIN_POSITION` and `Resume.is_finished` directly inside `Plex.item_state(md)` (matching `Resume:update` in `dvp/resume.lua`): only set `state.pos` when `pos >= Resume.MIN_POSITION and not Resume.is_finished(pos, duration)`, and set `state.watched = true` when `(md.viewCount or 0) > 0 or Resume.is_finished(pos, duration)`.
 
 ### 2.4. Global `"date"` sort order scrambles TV Seasons and Episodes in Plex
+
+> **Status: Solved** (D40). Season and episode listings keep the server's order and are not sortable.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:load_plex` lines 103–105, `Browser:sortable` lines 117–121) and `dvp/plex.lua` (`Plex.entries_from` lines 178–206)
 * **Problems:**
   1. `self.sort` (`"name"` or `"date"`) is shared across all folders. If a user presses **Y** in a Movie library to sort by **Date added**, and then opens a Plex TV Show → Season 1, `Browser:load_plex` sorts Seasons and Episodes by `mtime` (`addedAt`, newest first), listing episodes backwards (`E10, E09, …, E01`) and seasons backwards (`Season 4, Season 3, …`).
@@ -805,6 +961,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Keep season and episode listings in season/episode order (or set `e.name = string.format("%04d %s", md.index or 0, label)` for seasons and episodes and don't sort seasons/episodes by `addedAt`).
 
 ### 2.5. Fresh resume position (`prep.pos`) from `plex:prepare` is ignored for the selected video
+
+> **Status: Solved** (D40). No start position unless the user chose one, so the server's fresh position is used.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`play` lines 162–168, `on_load` lines 279–300)
 * **Problem:**
   * When starting playback from the browser, `play(list, start)` sets `state.pending_start[list[1]] = start or 0`.
@@ -812,6 +971,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Suggested Fix:** Either pass `nil` to `play(list, nil)` when the user did not explicitly choose `"Start from the beginning"` (and had no cached `pos` prompt), or skip the redundant `plex:prepare` resume check when `start` was already chosen.
 
 ### 2.6. Transient network error in `SubDownload:hash_for` permanently disables hash search for that Plex video
+
+> **Status: Solved** (D40). A failed hash fetch is not cached; a later search retries.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload:hash_for` lines 118–133)
 * **Problem:** Line 133 sets `self.hashes[path] = hash or false`, and line 118 returns immediately if `self.hashes[path] ~= nil`. If either HTTP range request times out or fails once, `self.hashes[path]` is cached as `false` for the rest of the session and never retries when the user searches again.
 * **Suggested Fix:** Only cache non-nil hashes (`if hash then self.hashes[path] = hash end`).
@@ -821,6 +983,9 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 ## 3. Optimization Opportunities (v0.3.0)
 
 ### 3.1. Prefetch the Plex transient delegation token asynchronously on `connect` to cut `on_load` blocking in half
+
+> **Status: Solved** (D40). `prefetch_token` after `connect`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/plex.lua` (`Plex:connect` lines 418–421, `Plex:media_token` lines 508–525) and `main.lua` (`on_load` lines 286–291)
 * **Problem:** On the first video played from a Plex server, `on_load` blocks mpv's main thread for **two sequential synchronous `curl` subprocesses** (two separate TCP + TLS handshakes):
   1. `plex:prepare(item)` (`GET /library/metadata/<id>`)
@@ -828,17 +993,25 @@ All 200 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the secu
 * **Optimization:** Request the transient token **asynchronously** as soon as `plex:connect` settles (since the user always connects while browsing the server before playing a video). That warms `self.transient[machine]` ahead of time, making `plex:media_token(item)` in `on_load` a **0 ms** in-memory lookup.
 
 ### 3.2. Avoid blocking the UI for up to 6 seconds in `on_unload` when stopping a Plex video without quitting
+
+> **Status: Not solved (declined)** (D40). The blocking report on stop keeps the reloaded listing and the next playlist entry in sync with the server; an asynchronous report could arrive after the listing is reloaded and show stale progress.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`save_progress` lines 146–154, `on_unload` lines 330–333)
 * **Problem:** `on_unload` calls `save_progress(true)`, which executes `plex:report(..., true)` and `plex:set_watched(..., true)` **synchronously** (`http.request_sync`, up to 3 s timeout each) every time a video stops or advances to the next playlist entry. When the user presses **B** (`Stop`) to return to the library browser (`not state.quitting and not state.external`), the mpv process is not exiting—yet synchronous HTTP calls freeze the screen on the last video frame while waiting for the Plex server.
 * **Optimization:** Only use `sync = true` when `state.quitting or state.external`. When staying in the app, update the item's state locally and run the `stopped` / `scrobble` requests asynchronously (or refresh the browser listing in the async callback).
 
 ### 3.3. Skip `utils.parse_json("")` on empty HTTP bodies and map curl exit code 63
+
+> **Status: Solved** (D40). Empty bodies are not parsed and curl exit 63 is mapped to a message.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`CURL_ERRORS` line 77, `parse_result` lines 93–96)
 * **Optimization:** `utils.parse_json(text)` is called even when `text == ""` (every file download with `req.output`, and every `/:/timeline` or `/:/scrobble` call). Guarding `local body = text ~= "" and utils.parse_json(text) or nil` avoids unnecessary JSON parse attempts, and adding `[63] = "The file is too large"` to `CURL_ERRORS` gives a clear error when `max-filesize` triggers.
 
 ---
 
 ## 4. Release Readiness & Polish (v0.3.0)
+
+> **Status: Solved** (D40). luaqrcode credited in About; version and metainfo bumped when tagging v0.3.0.
 
 1. **Version & AppStream metainfo (`dvp/version.lua`, `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`):**
    * `dvp/version.lua` is still `"0.2.0"` (sent in `X-Plex-Version`, OpenSubtitles `User-Agent`, and shown in the About panel), and `metainfo.xml` needs the `0.3.0` `<release>` entry and Plex feature bullet when tagging.
@@ -880,77 +1053,125 @@ server's watch history.
 ## 1. Security
 
 ### 1.1. HIGH — Plex account token sent in cleartext to LAN addresses on any network
+
+> **Status: Solved** (D39). No token on probes, `machineIdentifier` checked, https only by default (`allow_insecure_lan` opt-in).
+
 * **Where:** `dvp/plex.lua` `server_candidates` (adds `http://<address>:<port>` for every "local" connection) and `connect` (probes every candidate with `X-Plex-Token`).
 * **Problem:** for a server the user owns, the per-server token *is the account token* (*verified*). The app sends it unencrypted to whatever answers at the server's LAN address — on any network the Deck joins. On a hotel/café/friend's Wi-Fi that uses the same private range (e.g. 192.168.1.x), any device at that address, or anyone sniffing the network, gets full access to the user's Plex account. The `/identity` probe doesn't even need a token.
 * **Fix:** never send a token in probes (`/identity` is unauthenticated) and check the returned `machineIdentifier`; drop plain-http candidates by default (https `*.plex.direct` is certificate-checked, so it is safe on foreign networks); offer plain http only behind an explicit opt-in (`[plex] allow_insecure_lan`) for routers that block plex.direct DNS.
 
 ### 1.2. HIGH — Redirects forward the token to other hosts
+
+> **Status: Solved** (D39). No redirects by default (only the subtitle file download follows them, https only).
+
 * **Where:** `dvp/http.lua` `curl_config` (follows redirects for every GET unless `follow = false`), used by all Plex requests and the subtitle download.
 * **Problem:** curl forwards custom headers such as `X-Plex-Token` to the redirect target, even on another host (*verified*: a 302 to `localhost:18082` delivered `X-Plex-Token: SECRET` there). A malicious or impersonated server (see 1.1) can redirect any request to collect the account token.
 * **Fix:** don't follow redirects by default; enable it only for the subtitle file download, which carries no secrets.
 
 ### 1.3. MEDIUM — Server-supplied keys pasted into URLs unchecked
+
+> **Status: Solved** (D39). Server-supplied keys are validated before they go into a URL.
+
 * **Where:** `dvp/plex.lua` `entries_from`, `external_subtitles`, `list` (`base .. key` for section/metadata/part/stream keys).
 * **Problem:** a key such as `@evil.example/x` turns `https://srv:32400` + key into `https://srv:32400@evil.example/x`, which curl and mpv send to `evil.example` with the token header. Needs a malicious server (e.g. a server shared by another user) or a man in the middle (1.1).
 * **Fix:** accept only keys that start with a single `/` and contain URL-path characters (no `@`, no `//` prefix, no spaces/control characters); skip anything else.
 
 ### 1.4. MEDIUM — Any URL scheme accepted (`file://` reads local files)
+
+> **Status: Solved** (D39). curl restricted to http(s), https-only redirects; the download link must be https.
+
 * **Where:** `dvp/http.lua`; `dvp/opensubtitles.lua` `download` (`body.link` from the API is fetched as is).
 * **Problem:** curl fetches `file://` URLs (*verified*). A malicious API response could make the app copy a local file (for example `plex.json` with the account token) into the subtitle folder, from where it is loaded as a subtitle.
 * **Fix:** restrict curl to `https`/`http` (`proto`, `proto-redir = =https`); require the download link to start with `https://`.
 
 ### 1.5. LOW — `plex.json` briefly world-readable
+
+> **Status: Solved** (D39). `plex.json` is made private before the token is written.
+
 * **Where:** `dvp/plex.lua` `save` → `util.write_file_atomic` then `chmod 600`.
 * **Problem:** the temp file is created with the default mode (0644) and renamed before `chmod`; for a moment the account token is readable by other local users.
 * **Fix:** create the temp file, `chmod 600` it, then write and rename (`util.write_private`).
 
 ### 1.6. LOW — `config.ini` (OpenSubtitles password) created world-readable
+
+> **Status: Solved** (D39). `config.ini` is created with mode 600 (`umask 077` in the launcher).
+
 * **Where:** `app/bin/deckvideoplayer` (`cp` of the template).
 * **Fix:** create it with mode 600 (existing files untouched; mention in the docs).
 
 ### 1.7. LOW — OpenSubtitles `base_url` used unchecked
+
+> **Status: Solved** (D39). The OpenSubtitles `base_url` is validated.
+
 * **Where:** `dvp/opensubtitles.lua` `ensure_login` (`api_url = "https://" .. body.base_url ..`), then used for authenticated calls.
 * **Fix:** accept only hosts ending in `.opensubtitles.com`.
 
 ### 1.8. LOW — Subtitle language code and size unchecked
+
+> **Status: Solved** (D39). Subtitle language validated; 10 MB download limit.
+
 * **Where:** `dvp/subdownload.lua` `download` (`r.language` goes into the file name); `opensubtitles.lua` (no size limit).
 * **Problem:** a code containing `/` builds a path outside the video's folder (not exploitable as written: the first component would have to exist), and an endless response could fill the disk.
 * **Fix:** accept only letters and `-` (else `und`); `max-filesize` 10 MB for subtitle downloads.
 
 ### 1.9. LOW — CI supply chain
+
+> **Status: Solved** (D39). CI actions pinned by commit; read-only default permissions.
+
 * **Where:** `.github/workflows/build.yml`.
 * **Problem:** third-party actions referenced by moving tags (`flatpak-github-actions@master`, `action-gh-release@v2`, `actions/*@v4`); no top-level `permissions`. A compromised action could alter the published bundle.
 * **Fix:** pin actions to commit SHAs; `permissions: contents: read` at the top, `contents: write` only for the release job.
 
 ### 1.10. INFO — Sandbox: whole home readable, plus network
+
+> **Status: Solved** (D39). Sandbox narrowed to Videos, Downloads and removable media (`flatpak override` documented for other folders).
+
 * **Where:** Flatpak `finish-args` (`--filesystem=home:ro`, `--share=network` since v0.2).
 * **Risk:** a decoder exploit in a malicious video could read anything in the home folder (SSH keys, other apps' tokens) and send it out.
 * **Option:** narrow to `xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt`, and document `flatpak override --filesystem=…` for other folders. Trade-off: folders elsewhere in home stop working until overridden.
 
 ### 1.11. INFO — Accepted / documented
+
+> **Status: Accepted (by design)**. Listed as accepted risks, not defects: the transient token mpv receives is short-lived and only appears in `-v` logs (the account token never reaches mpv); there is no keyring in game mode, so the account token is a mode-600 file; INSTALL explains how to revoke the device at Plex (*Authorized Devices*) and Jellyfin (*Devices*); a device code can be phished by someone who sees it, which is inherent to the sign-in flow.
+
 * mpv receives a transient token, which appears in `-v` logs (D37); the account token is stored in a plain file (no keyring in game mode; mode 600); signing out doesn't revoke the token at plex.tv (INSTALL tells users how); device-code sign-in can be phished by someone who sees the code (inherent to the flow).
 
 ## 2. Bugs
 
 ### 2.1. MEDIUM — Truncated files replace good ones on a full disk
+
+> **Status: Solved** (D39). `write_file_atomic` checks the write and close and keeps the old file on failure.
+
 * **Where:** `dvp/util.lua` `write_file_atomic` ignores `write`/`close` errors, then renames the temp file over `resume.json` / `plex.json`.
 * **Fix:** check both, remove the temp file and keep the old one on failure.
 
 ### 2.2. MEDIUM — A finished Plex video may count as watched twice
+
+> **Status: Solved** (D39). Scrobbled only when finished below Plex's 90 % threshold.
+
 * **Where:** `main.lua` `save_progress(true)`: reports `stopped`, then calls `/:/scrobble` when finished.
 * **Problem:** Plex marks a video watched by itself when a timeline report passes its *Video played threshold* (90 % by default), so the explicit scrobble adds a second play. (Inferred from Plex's documented behaviour; not reproduced, to keep the owner's history untouched.)
 * **Fix:** scrobble only when the app considers the video finished but it is below 90 %.
 
 ### 2.3. LOW — Stale transient token after a server restart
+
+> **Status: Solved** (D39). The cached transient token and connection are forgotten when a Plex file fails to load.
+
 * **Where:** `dvp/plex.lua` `media_token` (cached 12 h).
 * **Problem:** a server restart invalidates the token; every Plex video then fails ("Could not play this file") until the app restarts.
 * **Fix:** forget the cached token (and connection) when a Plex file fails to load.
 
 ### 2.4. LOW — Sign-in lost if the server list fails right after linking
+
+> **Status: Solved** (D39). The token is saved as soon as it arrives.
+
 * **Where:** `dvp/plex.lua` `poll_pin` → `refresh_account` (saves only on success).
 * **Fix:** save the token as soon as it arrives.
 
 ### 2.5. LOW — Robustness
+
+> **Status: Solved** (D39) for the `provides` type check. Accepted: the worst-case ~10 s block in `on_load` only happens when a server has just become unreachable, inside a hook where playback waits anyway; an unreachable server now fails at once and clears the playlist (D45).
+
 * `parse_resources` assumes `provides` is a string; on_load can block up to ~10 s when a server has just become unreachable (metadata + transient token, 5 s each) — acceptable, could share one timeout.
 
 ## 3. v0.3.0 Summary Checklist
@@ -983,6 +1204,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 ## 1. Bugs & Functional Edge Cases (v0.2.0)
 
 ### 1.1. Floating-point precision bug in `Menu:render` prevents long menu labels (like subtitle releases) from marquee-scrolling
+
+> **Status: Solved** (D35). +0.5 slack in the scroll decision.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/menu.lua` (`Menu.split_row` lines 36–46, `Menu:render` lines 246–251)
 * **Problem:**
   ```lua
@@ -1004,6 +1228,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
   ```
 
 ### 1.2. Downloaded subtitles with identical release names collide and silently skip downloading
+
+> **Status: Solved** (D35). Files are named `<release> #<file_id>.<lang>.srt`; titles strip the id.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload.file_name` lines 22–27, `SubDownload.parse_file_name` lines 32–41, `SubDownload:download` lines 206–214)
 * **Problem:**
   * `SubDownload.file_name(release, lang)` names files `<release>.<lang>.srt` without `r.file_id`.
@@ -1022,6 +1249,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 * **Suggested Fix:** Include `file_id` in the stored filename when present (e.g., `<release>.<file_id>.<lang>.srt`) and strip the optional `.<file_id>` suffix in `SubDownload.parse_file_name(name)` so the UI track label stays clean while distinct uploads never collide.
 
 ### 1.3. Track selections (`aid`, `sid`) and sync adjustments (`sub-delay`, `audio-delay`) leak across files in a session
+
+> **Status: Solved** (D35). `aid`, `sid`, `sub-delay`, `audio-delay` are file-local defaults in `on_load`, before the saved choice.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (lines 205–315) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`on_load` lines 225–246)
 * **Problem:**
   * Picture mode (`panscan` / `keepaspect`) is reset at the start of every file in `on_load`, and surround resets on `end-file`.
@@ -1030,6 +1260,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 * **Suggested Fix:** In `on_load` (before applying `entry.aid` / `entry.sid` from `resume.json`), reset `aid` to `"auto"`, `sid` to `cfg:get("playback", "subtitles") == "off" and "no" or "auto"`, `sub-delay` to `0`, and `audio-delay` to `0` (or use `file-local-options/*`).
 
 ### 1.4. OpenSubtitles regional language codes fail priority sorting due to case mismatch
+
+> **Status: Solved** (D35). Language codes are lowercased in `parse_results`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/opensubtitles.lua` (`parse_results` line 212, `rank` lines 229 & 240)
 * **Problem:**
   * `OpenSubtitles.languages(slang)` lowercases all language tags (e.g. `pt-BR` → `"pt-br"`).
@@ -1037,6 +1270,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 * **Suggested Fix:** Normalize `language = (a.language or ""):lower()` in `OpenSubtitles.parse_results`.
 
 ### 1.5. Marquee state when menu items change in-place or when closing a menu over the browser
+
+> **Status: Solved** (D35). The marquee restarts on text change; the library re-renders when a menu over it closes.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/ui.lua` (`Marquee:draw` lines 276–280), `dvp/menu.lua` (lines 254, 267), and `main.lua` (lines 217–221)
 * **Problems:**
   1. `Menu:render` keys marquee animations by `tostring(spec) .. "#" .. idx` (or `"v"`). When a menu row's text is updated in-place at the same index via `menu:refresh()` or `menu:update(spec, ...)` (e.g., changing the active subtitle track and popping back to the Playback menu), `key == self.key` is still true in `Marquee:draw`, so `self.t0` is not reset for the new text.
@@ -1046,6 +1282,9 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
   2. In `main.lua` `Menu.new` `on_close`, also call `browser:render()` when `state.screen == "browser"`.
 
 ### 1.6. Async subtitle search/download callbacks vs. menu state
+
+> **Status: Solved** (D35). Toast only while the menu is open; `menu:refresh()` after a download.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload:open` lines 162–166, `SubDownload:download` lines 216–228)
 * **Problems:**
   1. In `SubDownload:open`, if the user closes the `"Download subtitles"` menu with **B** while the search request is still in flight and the request later errors or times out, `self.ctx.menu:update(spec, ...)` returns `false`, yet `self.ctx.toast(err)` still displays an error toast after the user backed out.
@@ -1055,12 +1294,18 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
   2. Call `self.ctx.menu:refresh()` after `select_file(dest, title, lang)` in `SubDownload:download`.
 
 ### 1.7. `/run/media/<user>` `tmpfs` mount matched as a removable drive
+
+> **Status: Partly solved** (D35). Fixed by filesystem type (`tmpfs`, `autofs`, …). Declined: dropping every source not backed by `/dev/`, which would hide network mounts under `/media`.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/library.lua` (`Library.parse_mountinfo` lines 38–51)
 * **Problem:**
   `parse_mountinfo` matches any mount point matching `^/run/media/.+` regardless of filesystem type or source (`121 30 8:1 / /run/media/deck rw - tmpfs tmpfs rw`, as seen in `tests/run.lua` line 119). On systems where `/run/media/deck` itself is a `tmpfs` mount point, `parse_mountinfo` returns `/run/media/deck` as a drive (`source = "tmpfs"`), causing `Library:roots()` to list `/run/media/deck` itself as a removable drive named `"deck"` alongside the actual drives inside `/run/media/deck/<label>`.
 * **Suggested Fix:** Filter out pseudo-filesystems (e.g. `fstype == "tmpfs"` / `autofs` or mounts whose `source` does not start with `/dev/`) in `parse_mountinfo`.
 
 ### 1.8. Minor state resets (`display-fps-override` & `state.resumed_at`)
+
+> **Status: Solved** (D35). Both resets done.
+
 * **Locations:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/display.lua` (lines 251–283) and `main.lua` (lines 225–246)
 * **Problems:**
   1. **Stale `display-fps-override` during the 2s verification window:** When switching from a 24 fps video (`display-fps-override = 48`) to a 60 fps video, `Display:match()` schedules a 2.0s `verify_timer` before updating `display-fps-override`, leaving `display-fps-override` at `48` for the first 2 seconds of the 60 fps video (or permanently if the helper fails). Reset `mp.set_property_number("display-fps-override", 0)` before starting the new rate change/verification.
@@ -1071,11 +1316,17 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 ## 2. Security, Privacy & Native Helper Robustness (v0.2.0)
 
 ### 2.1. OpenSubtitles `Api-Key` header is sent to the file download URL / CDN
+
+> **Status: Solved** (D35). `Api-Key`/`Accept` only on API calls, not on the file download.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/opensubtitles.lua` (`OpenSubtitles:http` lines 310–321, `OpenSubtitles:download` line 400)
 * **Problem:** `OpenSubtitles:http(req, cb)` unconditionally includes `"header = Api-Key: " .. self.api_key` and `"location"` (follow redirects) on every curl invocation, including Step 2 of `OpenSubtitles:download` which downloads the raw `.srt` file from `body.link` (`req.output = tmp`). Because `body.link` is a direct download URL that may live on a CDN or different host (and curl forwards custom `-H` headers across redirects), the user's `Api-Key` should not be attached to the file download request.
 * **Suggested Fix:** Only add `Accept: application/json` and `Api-Key: ...` headers when `not req.output`.
 
 ### 2.2. `strtol` argument validation in `helper/dvp-gamescope-refresh.c`
+
+> **Status: Solved** (D35). `endptr` checked; non-numeric rates rejected.
+
 * **Location:** `helper/dvp-gamescope-refresh.c` (lines 105–110)
 * **Problem:** `long hz = set ? strtol(argv[2], NULL, 10) : 0;` does not inspect `endptr` or check for an empty string. Passing a non-numeric `argv[2]` silently parses as `0` (which the protocol treats as "reset to native") instead of failing with exit code `2`.
 * **Suggested Fix:** Pass `&end` to `strtol` and reject `argv[2][0] == '\0' || *end != '\0'`.
@@ -1085,10 +1336,16 @@ All 139 Lua checks and 5 Python tests in `tests/run.sh` pass. Below are the bugs
 ## 3. Release Readiness & Metadata Mismatches (v0.2.0)
 
 ### 3.1. AppStream Metainfo still lists only `0.1.0`
+
+> **Status: Solved** (D35). The metainfo has every release since 0.2.0.
+
 * **Location:** `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` (lines 18–35)
 * **Problem:** `dvp/version.lua` is bumped to `"0.2.0"`, but `io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` only has `<release version="0.1.0" date="2026-10-23"/>` and its feature list `<ul>` does not mention headphone surround or OpenSubtitles subtitle downloads.
 
 ### 3.2. Status docs still mark v0.2.0 as "in progress"
+
+> **Status: Solved**. ROADMAP and AGENTS status are updated in each release commit.
+
 * **Location:** `AGENTS.md` (lines 76–80) and `docs/ROADMAP.md` (lines 26–38)
 * **Problem:** Both files still describe v0.2.0 as `(next — in progress)`.
 
@@ -1124,6 +1381,9 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
 ## 1. Bugs & Functional Edge Cases (v0.1.0)
 
 ### 1.1. `"Go to library start"` menu item & SD/USB hotplugging in single-source mode
+
+> **Status: Solved** (D23). Sources are re-read on show/reload/root; the single-source top folder is demoted when a drive appears.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:load` lines 41–68, `Browser:open_menu` lines 169–201)
 * **Problems:**
   1. **Missing menu option in single-source mode:** In `Browser:open_menu()`, `"Go to library start"` is only added when `#self.stack > 0 and self.sources and #self.sources > 1`. When a user has only one source configured (e.g., the default `~/Videos`), `Browser:load()` auto-enters that source (`self.stack[1] = {..., is_root = true}`). If the user navigates several subfolders deep (e.g., `~/Videos/Series/Show/Season 1`), `"Go to library start"` never appears in the menu because `#self.sources == 1`.
@@ -1134,17 +1394,26 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
   * Show `"Go to library start"` whenever `#self.stack > 1` (resetting to `self.stack = {}` and reloading) or when `#self.stack == 1 and not self.stack[1].is_root`.
 
 ### 1.2. Binary VDF serializer crashes on 64-bit integers (`0x07`)
+
+> **Status: Solved** (D22). Serialise, then temp file, then atomic replace, with a `.bak`; `0x07` kept as UInt64; covered by `tests/test_steam_shortcut.py`.
+
 * **Location:** `scripts/steam_shortcut.py` (`vdf_load` lines 44–62, `vdf_dump` lines 65–79)
 * **Problem:** `vdf_load` supports type `0x07` (unsigned 64-bit integer, `struct.unpack_from("<Q", ...)`), which becomes a standard Python `int`. However, `vdf_dump` serializes **every** `isinstance(value, int)` as type `0x02` (`struct.pack("<i", value)` — signed 32-bit integer). If a user's `shortcuts.vdf` contains a `0x07` field (or any integer outside `-2147483648..2147483647` added by Steam or another tool), `vdf_dump` will crash with `struct.error: 'i' format requires -2147483648 <= number <= 2147483647`.
 * **Suggested Fix:** Wrap `0x07` values in a small `int` subclass (e.g. `class UInt64(int): pass`) during `vdf_load` so `vdf_dump` can write them back losslessly with `b"\x07" + k + struct.pack("<Q", value)`.
 
 ### 1.3. Picture / Zoom mode (`fill` / `stretch`) is not reset or synced with `mpv`
+
+> **Status: Solved** (D20). Picture mode is per file and its label comes from mpv's properties.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player.new` line 25, `Player:set_zoom` lines 240–244)
 * **Problem:** `self.zoom` starts as `"fit"`, and `Player:set_zoom(mode)` sets mpv's global `panscan` and `keepaspect` properties.
   * If a user sets `Picture` to `Fill` or `Stretch` on one video, stops playback, and plays another video, it stays cropped/stretched (or if the user set `panscan` in `~/.config/deckvideoplayer/mpv.conf`, `self.zoom` is out of sync).
 * **Suggested Fix:** Either reset `self:set_zoom("fit")` in `Player:stop_screen()` (or use `file-local-options/panscan` and `file-local-options/keepaspect`), or derive the current zoom mode directly from mpv's `panscan` and `keepaspect` properties.
 
 ### 1.4. Command-line / `.desktop` file argument edge cases
+
+> **Status: Solved** (D21). External launches auto-resume with a toast and quit when playback ends.
+
 * **Location:** `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.desktop` (`Exec=deckvideoplayer %F`), `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (lines 217–285)
 * **Problem:** When a video file is passed directly to `deckvideoplayer` via CLI or file association:
   1. `start-file` switches `state.screen = "player"`, bypassing `browser:show()`.
@@ -1152,6 +1421,9 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
   3. When the file finishes or the user presses **B** (Stop), `idle-active` transitions to `true` and calls `browser:show()` + `browser:select_path(state.last_played)`. If the file was outside the configured library root, the user is dropped into the top-level library browser instead of either the file's directory or exiting.
 
 ### 1.5. `sed` delimiter collision in dev/test scripts
+
+> **Status: Solved**. `\`, `&` and `|` are escaped in the sed replacement.
+
 * **Location:** `scripts/dev-run.sh` (line 36) and `tools/headless-run.sh` (lines 46–49)
 * **Problem:**
   ```sh
@@ -1164,6 +1436,9 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
 ## 2. Missing Optimizations (Performance & Battery) (v0.1.0)
 
 ### 2.1. Unnecessary `stat()` (`utils.file_info`) on every file before checking extensions
+
+> **Status: Not solved (declined)** (D24). mpv's filtered `readdir` already stats every entry, so checking extensions first would double the `stat()` calls; one stat per entry is the minimum.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/library.lua` (`library.list` lines 83–105)
 * **Problem:**
   ```lua
@@ -1182,6 +1457,9 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
   * Use `utils.readdir(path, "dirs")` and `utils.readdir(path, "files")` (supported by `mp.utils.readdir`), or when `sort_mode == "name"` (the default), filter files by `exts[util.extension(name)]` **before** calling `utils.file_info(full)` (in fact, when sorting by `"name"`, `mtime` and `size` aren't even used, so `utils.file_info` isn't needed at all if `readdir` separates `"dirs"` and `"files"`!).
 
 ### 2.2. Redundant `chapter-list` and `track-list` marshaling on every 0.5s overlay tick
+
+> **Status: Solved** (D25). Title, video track and chapter list are cached per file.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`Player:render` lines 344–442) and `dvp/media.lua` (`media.hdr_state` lines 113–130)
 * **Problem:** While the playback overlay is visible (including the entire time a video is paused), `Player:tick()` runs every 0.5 seconds and calls `Player:render()`. Inside `render()`:
   1. `mp.get_property_native("chapter-list")` is called **twice** in the same function (line 400 for chapter tick marks, and line 417 for the current chapter title), marshaling the entire chapter table from C to Lua twice per tick.
@@ -1192,11 +1470,17 @@ Below are the bugs, functional edge cases, and missing optimizations identified 
   * Better yet, cache `title`, `chapter-list`, and Dolby Vision track presence on `file-loaded` (or via `mp.observe_property`), since they do not change every 0.5s.
 
 ### 2.3. Opening and closing a new X11 connection on every refresh-rate call
+
+> **Status: Not solved (declined)** (D24). About two calls per file load; a persistent X11 connection adds risk for no measurable gain.
+
 * **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/display.lua` (`with_display` lines 65–73)
 * **Problem:** Every call to `get_root_cardinal` or `set_root_cardinal` calls `XOpenDisplay(nil)`, `XInternAtom(...)`, and `XCloseDisplay(dpy)`. On the first video load, `Display:match()` calls `get_root_cardinal` (open + intern + get + close) immediately followed by `set_root_cardinal` (open + intern + change + flush + close).
 * **Optimization:** Cache the `Display*` pointer, default root `Window`, and interned `GAMESCOPE_DYNAMIC_REFRESH` `Atom` in `X` across the lifetime of the script (or combine the read-and-set into one `with_display` session).
 
 ### 2.4. Spawning `mpv --list-options` on every startup in the Flatpak
+
+> **Status: Solved** (D26). The probe is skipped when `/.flatpak-info` exists.
+
 * **Location:** `app/bin/deckvideoplayer` (lines 66–68)
 * **Problem:**
   ```sh
