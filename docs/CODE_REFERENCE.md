@@ -227,7 +227,12 @@ key.
 - `sources(cfg, extra)` → `{name, path, kind}`: configured folders that exist
   (`kind = "folder"`), plus removable media mount points when enabled
   (`kind = "sdcard" | "usb" | "removable"`, D33), then `extra` (media
-  servers, `kind = "plex"` / `"jellyfin"`).
+  servers, `kind = "plex"` / `"jellyfin"`). Folders and mount points on a
+  network filesystem or an automount point are `kind = "network"` and are
+  never stat'ed (D64).
+- `is_slow_path(mounts, path)`: on a network filesystem or an `autofs`
+  automount point (pure); `read_mounts()` parses this process's
+  `/proc/self/mountinfo`.
 - `sort_entries(entries, mode)`: folders first, natural name order or
   newest first (`mode = "date"`); uses `sort_name`, else `name`, else
   `label`, and `mtime`. Shared by folder listings and Plex.
@@ -239,12 +244,20 @@ key.
   (Label)", "USB drive", a real label, or the folder name).
 - `source_for(sources, path)` → the local source holding a file (longest
   path prefix) or nil; `source_tag(source)` → "Local" / "SD Card" /
-  "USB" / "Drive" (*Recently played* tags), `source_label(source)` →
+  "USB" / "Drive" / "Network" (*Recently played* tags), `source_label(source)` →
   "Local · Videos", "USB drive · Label"… (Video info Source row, D56).
 - `list(path, cfg, sort_mode)` → entries `{name, label, key, path, is_dir,
   mtime, size}`. Hidden files are skipped unless `show_hidden`; files are
   filtered by extension; folders come first; sorted by `natural_key` or by
-  mtime (newest first).
+  mtime (newest first). Synchronous: only for folders known to be local
+  (delete); the browser uses `list_async`.
+- `list_async(path, cfg, sort_mode, cb)` (D64): the same entries from a
+  `find -L … -printf` subprocess (`list_args(path)`), so a share that
+  doesn't answer can't block mpv; `cb(entries)` or `cb(nil, err)`;
+  returns the handle for `mp.abort_async_command`. Pure helpers:
+  `parse_listing(out, path, cfg, sort_mode)` (NUL-separated records,
+  names may hold tabs and newlines) and `listing_error(res)` (find's
+  reason, e.g. "Permission denied"; partial output counts as success).
 - `display_name(name, is_dir, clean)`: strips the extension; with `clean`,
   `.`/`_` → spaces when the name has no spaces.
 - `download_folder(cfg)` → the expanded `[library] download_folder` or
@@ -744,8 +757,9 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
 - Playback: `open_file(index, from_start)` → `start(entry, list,
   from_start)`, which shows the resume dialog when there is a position;
   `playlist_from(index)` returns the folder's files from the chosen one
-  (if `autoplay_next`); for a recent file, `recent_playlist(path)` lists
-  its own folder; a server recent goes through `open_server_recent()`
+  (if `autoplay_next`); for a recent file, `recent_playlist(path, cb)`
+  lists its own folder asynchronously (plays alone after `PLAYLIST_WAIT`
+  = 5 s, D64); a server recent goes through `open_server_recent()`
   (`backend:resolve`, D50, D55).
 - `open_menu()`: sort (only where `sortable()`), reload, go to library
   start (whenever not `at_start()`), mark watched / unwatched (both for a
@@ -754,6 +768,14 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
   (`remove_from_continue(entry)`, Plex *Continue watching* only), remove
   from recently played, video info (`video_info(entry)`, also on View),
   controls, quit.
+- Folders (D64): `load_folder(loc)` lists through `library.list_async`;
+  `render()` keeps the previous screen for `LISTING_QUIET` (0.15 s) so a
+  local folder doesn't flash "Loading…", says the folder is slow after
+  `LISTING_SLOW` (4 s) and gives up after `LISTING_GIVE_UP` (60 s);
+  `listing_done()` restores the cursor, runs `after_load` and re-sorts in
+  the current order; `cancel_listing()` (every `load()`, `hide()`) kills
+  the subprocess and its timers. *Recently played* files on a network
+  share are listed without a stat (`refresh_sources`).
 - Media servers (D37, D55): `load_server(loc)` (async listing through the
   backend, `loading` state, drops late answers, `after_load` callback,
   e.g. to restore the cursor), `entry_state(e)` / `resume_position(e)`

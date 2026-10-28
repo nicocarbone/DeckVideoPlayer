@@ -198,6 +198,16 @@ Notes and pitfalls:
   sandbox `/tmp` is private.
 - Don't run `xprop` against every X display in `/tmp/.X11-unix`: some
   servers (another session's) block waiting for authorization.
+- Network folders (D64): `EXTRA_FOLDER=<dir>` adds a second library
+  folder. A share mounted with `gio mount smb://host/share` shows up under
+  `/run/user/$UID/gvfs/…` as `fuse.gvfsd-fuse`, which the app treats as a
+  network filesystem (dev mode only: the Flatpak can't see gvfs mounts).
+  To simulate a share that doesn't answer, put a `find` wrapper that
+  sleeps for one folder name first in `PATH` (the dev-mode launcher keeps
+  `PATH`).
+- `gshot:`/`shot:` steps after the app quit (e.g. a video opened by IPC
+  stops and closes the app) don't write anything: check the file's time
+  before trusting a screenshot.
 
 ## 6. Building the Flatpak
 

@@ -43,6 +43,16 @@ local function loc_key(loc)
     return loc and loc.path or "<root>"
 end
 
+-- Folder listings run in a subprocess (library.list_async): the screen
+-- keeps its previous content for LISTING_QUIET seconds (a local folder is
+-- listed well before), then says "Loading…"; after LISTING_SLOW it says
+-- the folder is slow to answer (a network share waking up), and after
+-- LISTING_GIVE_UP it stops waiting.
+local LISTING_QUIET, LISTING_SLOW, LISTING_GIVE_UP = 0.15, 4, 60
+-- A "Recently played" video waits this long for the rest of its folder
+-- (to play next), then plays alone.
+local PLAYLIST_WAIT = 5
+
 -- Re-reads the configured folders and mounted drives, so an SD card or USB
 -- drive inserted while the app runs shows up. Cheap (reads mountinfo).
 -- Also picks the "Recently played" videos (skipping files that are gone or
@@ -51,9 +61,12 @@ end
 function M:refresh_sources()
     local servers = self.ctx.servers
     self.sources = library.sources(self.cfg, servers:sources())
+    local mounts = library.read_mounts()
     self.recents = self.ctx.resume:recent(self.cfg.interface.recently_played, function(path)
         local available = servers:recent_available(path)
         if available ~= nil then return available end
+        -- On a network share: listed without asking it (it may not answer).
+        if library.is_slow_path(mounts, path) then return true end
         return util.file_exists(path)
     end)
     local top = self.stack[1]
@@ -131,6 +144,7 @@ end
 -- Rebuilds the entry list for the current location.
 function M:load()
     local loc = self:location()
+    self:cancel_listing()   -- of the folder we are leaving
     self.error = nil
     if not loc then
         self:refresh_sources()
@@ -144,12 +158,7 @@ function M:load()
     elseif loc.server then
         return self:load_server(loc)
     else
-        local entries, err = library.list(loc.path, self.cfg, self.sort)
-        if not entries then
-            self.error = err or "cannot read folder"
-            entries = {}
-        end
-        self.entries = entries
+        return self:load_folder(loc)
     end
     self.loading = false
     local remembered = self.cursor[loc_key(loc)]
@@ -157,10 +166,67 @@ function M:load()
     self.scroll = 0
 end
 
+-- Stops waiting for a folder listing (left the folder, or gave up).
+function M:cancel_listing()
+    local job = self.listing
+    if not job then return end
+    self.listing = nil
+    for _, timer in ipairs(job.timers) do timer:kill() end
+    if job.handle then mp.abort_async_command(job.handle) end
+end
+
+-- A local folder (or a network share mounted as one), listed in a
+-- subprocess like a server listing: see LISTING_QUIET above.
+function M:load_folder(loc)
+    self:cancel_listing()
+    self.entries = {}
+    self.loading = true
+    self.slow_listing = false
+    self.selected, self.scroll = 1, 0
+    local job = {loc = loc, timers = {}}
+    self.listing = job
+    job.timers[1] = mp.add_timeout(LISTING_QUIET, function()
+        job.visible = true
+        if self.listing == job then self:render() end
+    end)
+    job.timers[2] = mp.add_timeout(LISTING_SLOW, function()
+        if self.listing ~= job then return end
+        self.slow_listing = true
+        self:render()
+    end)
+    job.timers[3] = mp.add_timeout(LISTING_GIVE_UP, function()
+        if self.listing ~= job then return end
+        self:cancel_listing()
+        self:listing_done(loc, nil, "The folder isn't answering. If it is on a network share, check that "
+                                    .. "the share is on and connected.")
+    end)
+    job.handle = library.list_async(loc.path, self.cfg, self.sort, function(entries, err)
+        if self.listing ~= job then return end
+        self:cancel_listing()
+        self:listing_done(loc, entries, err)
+    end)
+end
+
+function M:listing_done(loc, entries, err)
+    if self:location() ~= loc then return end
+    self.loading = false
+    self.slow_listing = false
+    self.error = (not entries) and (err or "cannot read folder") or nil
+    -- In the order chosen now (Y may have been pressed while it loaded).
+    self.entries = library.sort_entries(entries or {}, self.sort)
+    local remembered = self.cursor[loc_key(loc)]
+    self.selected = self:selectable(util.clamp(remembered or 1, 1, math.max(1, #self.entries)), 1)
+    local after = self.after_load
+    self.after_load = nil
+    if after then after() end
+    self:render()
+end
+
 -- Media server listings arrive asynchronously: show "Loading…", then fill
 -- in if the user is still at that location. `self.after_load` (optional)
 -- runs once the entries are there (e.g. to restore the cursor on a path).
 function M:load_server(loc)
+    self:cancel_listing()
     self.entries = {}
     self.loading = true
     self.selected, self.scroll = 1, 0
@@ -254,6 +320,7 @@ end
 
 function M:hide()
     self.active = false
+    self:cancel_listing()
     self.marquee:reset()
     self.layer:clear()
 end
@@ -305,7 +372,6 @@ end
 
 -- Files of the current folder from `index` onwards (for auto-play next).
 function M:playlist_from(index)
-    if self.entries[index].recent then return self:recent_playlist(self.entries[index].path) end
     local list = {}
     local first
     for i, e in ipairs(self.entries) do
@@ -324,23 +390,48 @@ function M:playlist_from(index)
     return out
 end
 
--- A recently played file continues with the rest of its own folder.
-function M:recent_playlist(path)
-    if not self.cfg.playback.autoplay_next then return {path} end
-    local out
+-- A recently played file continues with the rest of its own folder:
+-- cb(list). The folder is listed in a subprocess (it may be on a network
+-- share); after PLAYLIST_WAIT seconds the file plays alone.
+function M:recent_playlist(path, cb)
+    if not self.cfg.playback.autoplay_next then return cb({path}) end
+    local done, handle = false, nil
+    local function finish(list)
+        if done then return end
+        done = true
+        cb(list)
+    end
+    local timer = mp.add_timeout(PLAYLIST_WAIT, function()
+        if handle then mp.abort_async_command(handle) end
+        finish({path})
+    end)
     -- By name whatever the folder sort (not shown on the start screen), so
     -- episodes continue in order.
-    for _, e in ipairs(library.list(util.dirname(path), self.cfg, "name") or {}) do
-        if e.path == path then out = {} end
-        if out and not e.is_dir then out[#out + 1] = e.path end
-    end
-    return out or {path}
+    handle = library.list_async(util.dirname(path), self.cfg, "name", function(entries)
+        timer:kill()
+        local out
+        for _, e in ipairs(entries or {}) do
+            if e.path == path then out = {} end
+            if out and not e.is_dir then out[#out + 1] = e.path end
+        end
+        finish(out or {path})
+    end)
 end
 
 function M:open_file(index, from_start)
     local entry = self.entries[index]
     self.cursor[loc_key(self:location())] = index
     if entry.server_recent then return self:open_server_recent(entry, from_start) end
+    if entry.recent then
+        self:recent_playlist(entry.path, function(list)
+            -- Not if the user moved on meanwhile (a share slow to answer).
+            local cur = self.entries[self.selected]
+            if not self.active or self:location() or self.ctx.menu:is_open()
+                or not (cur and cur.path == entry.path) then return end
+            self:start(entry, list, from_start)
+        end)
+        return
+    end
     self:start(entry, self:playlist_from(index), from_start)
 end
 
@@ -544,10 +635,17 @@ function M:delete(path)
     while #self.stack > 0 and not self:location().server and not util.is_dir(self:location().path) do
         table.remove(self.stack)
     end
-    self:reload()
     -- Still in the same folder: the cursor stays where the video was.
-    if self:location() == loc and not self.loading and #self.entries > 0 then
-        self.selected = self:selectable(util.clamp(index, 1, #self.entries), -1)
+    local function keep_cursor()
+        if self:location() == loc and #self.entries > 0 then
+            self.selected = self:selectable(util.clamp(index, 1, #self.entries), -1)
+        end
+    end
+    self:reload()
+    if self.loading then
+        self.after_load = keep_cursor   -- instead of the deleted file's path
+    else
+        keep_cursor()
         self:render()
     end
 end
@@ -565,8 +663,8 @@ end
 function M:play_path(path)
     self.ctx.menu:close_all()
     local name = util.basename(path)
-    self:start({path = path, label = library.display_name(name, false, self.cfg.interface.clean_names)},
-               self:recent_playlist(path))
+    local entry = {path = path, label = library.display_name(name, false, self.cfg.interface.clean_names)}
+    self:recent_playlist(path, function(list) self:start(entry, list) end)
 end
 
 -- A download started or ended: new files and tags.
@@ -1011,6 +1109,9 @@ end
 
 function M:render()
     if not self.active then return end
+    -- A folder being listed: keep the previous screen for a moment (see
+    -- LISTING_QUIET), so a local folder doesn't flash "Loading…".
+    if self.listing and not self.listing.visible then return end
     self.marquee:begin()
     local t = ui.theme
     local W, H = ui.size()
@@ -1080,6 +1181,10 @@ function M:render()
         local cy = H / 2 - 30
         if self.loading then
             a:text(W / 2, cy, "Loading…", {size = 30, bold = true, align = 5, color = t.subtext})
+            if self.slow_listing then
+                a:text(W / 2, cy + 44, "The folder is slow to answer (a network share waking up?).  B goes back.",
+                    {size = 20, align = 5, color = t.subtext})
+            end
         elseif self.error then
             local backend = loc and self.ctx.servers:for_ref(loc.server)
             local what = backend and ("Cannot load from " .. backend.NAME) or "Cannot open this folder"

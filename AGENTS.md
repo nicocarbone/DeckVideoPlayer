@@ -153,6 +153,9 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   software, per video) in the Video menu, because 4K AV1 stutters with
   the Deck's hardware decoder (D62); bug hunt (D61); B closes toasts and
   the skip prompt first (D63).
+- v0.7.0 (in progress): folder listings in a subprocess, network
+  folders never stat'ed (D64); `EXTRA_FOLDER` in `tools/headless-run.sh`.
+  Owner's test NAS: details only in git-ignored `.dev/network-test.md`.
 - Planned: see `docs/ROADMAP.md`. v0.7.0: folder listings that don't
   block on network shares, network folders (shares mounted by SteamOS)
   and DLNA servers, with no credentials or new native library in the

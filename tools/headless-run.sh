@@ -8,6 +8,7 @@
 #   MODE=dev|flatpak   dev = source tree + system mpv (default),
 #                      flatpak = installed io.github.nicocarbone.DeckVideoPlayer
 #   MEDIA=DIR          library folder (default: .dev/test-media/Videos)
+#   EXTRA_FOLDER=DIR   a second library folder (e.g. a mounted network share)
 #   W=1280 H=800       virtual screen size (try W=3840 H=2160 for a TV)
 #   HDR=1              gamescope HDR output (--hdr-enabled --hdr-debug-force-output)
 #   DEVICE=deck-oled   device profile written to the test config
@@ -70,6 +71,10 @@ sed -e "s|^folder = .*|folder = $media_esc|" \
     -e "s|^removable_media = .*|removable_media = no|" \
     -e "s|^download_folder = .*|download_folder = $downloads_esc|" \
     "$root/app/share/deckvideoplayer/config.ini" > "$CFG/config/config.ini"
+if [ -n "${EXTRA_FOLDER:-}" ]; then
+    extra_esc=$(printf '%s' "$EXTRA_FOLDER" | sed 's/[\\&|]/\\&/g')
+    sed -i "0,/^folder = .*/s||&\nfolder = $extra_esc|" "$CFG/config/config.ini"
+fi
 if [ -n "${RATES:-}" ]; then
     sed -i "s|^refresh_rates = .*|refresh_rates = $RATES|" "$CFG/config/config.ini"
 fi

@@ -47,7 +47,8 @@ function M.parse_mountinfo(text)
         if mount_point and not PSEUDO_FS[fstype or ""] then
             mount_point = unescape(mount_point)
             if mount_point:match("^/run/media/.+") or mount_point:match("^/media/.+") then
-                points[#points + 1] = {path = mount_point, source = source and unescape(source) or ""}
+                points[#points + 1] = {path = mount_point, source = source and unescape(source) or "",
+                                       fstype = fstype}
             end
         end
     end
@@ -76,15 +77,17 @@ function M.removable_info(path, source)
     return "removable", base
 end
 
-local function removable_roots()
+local function removable_roots(text)
     local roots, seen, names = {}, {}, {}
-    local text = util.read_file("/proc/self/mountinfo") or ""
     local points = M.parse_mountinfo(text)
     table.sort(points, function(a, b) return a.path < b.path end)
     for _, p in ipairs(points) do
-        if not seen[p.path] and util.is_dir(p.path) then
+        -- A network share mounted there isn't stat'ed: it may not answer.
+        local network = M.is_network_fs(p.fstype)
+        if not seen[p.path] and (network or util.is_dir(p.path)) then
             seen[p.path] = true
             local kind, name = M.removable_info(p.path, p.source)
+            if network then kind, name = "network", util.basename(p.path) end
             -- Two unlabelled USB drives: "USB drive", "USB drive 2".
             names[name] = (names[name] or 0) + 1
             if names[name] > 1 then name = name .. " " .. names[name] end
@@ -108,20 +111,28 @@ end
 -- more sources appended at the end (Plex servers, see dvp/plex.lua).
 -- The download folder is a source of its own while it holds something,
 -- even inside another one: that is where offline videos are.
+-- Folders on a network share (or an automount point, which mounts one when
+-- touched) are never stat'ed here: a share that stopped answering would
+-- block the app. They are listed as kind "network"; their listing tells.
 function M.sources(cfg, extra)
     local out, seen = {}, {}
+    local text = util.read_file("/proc/self/mountinfo") or ""
+    local mounts = M.parse_mounts(text)
     local folders = util.shallow_copy(cfg.library.folder)
     local downloads = M.download_folder(cfg)
-    if downloads and #(util.readdir(downloads, "all") or {}) > 0 then folders[#folders + 1] = downloads end
+    if downloads and (M.is_slow_path(mounts, downloads) or #(util.readdir(downloads, "all") or {}) > 0) then
+        folders[#folders + 1] = downloads
+    end
     for _, folder in ipairs(folders) do
         local path = util.expand_path(folder)
-        if util.is_dir(path) and not seen[path] then
+        local slow = M.is_slow_path(mounts, path)
+        if not seen[path] and (slow or util.is_dir(path)) then
             seen[path] = true
-            out[#out + 1] = {name = util.basename(path), path = path, kind = "folder"}
+            out[#out + 1] = {name = util.basename(path), path = path, kind = slow and "network" or "folder"}
         end
     end
     if cfg.library.removable_media then
-        for _, r in ipairs(removable_roots()) do
+        for _, r in ipairs(removable_roots(text)) do
             if not seen[r.path] then
                 seen[r.path] = true
                 out[#out + 1] = r
@@ -151,6 +162,7 @@ end
 -- "USB" / "USB drive · Label". `source`: from source_for (nil: "Local"). Pure.
 function M.source_tag(source)
     local kind = source and source.kind
+    if kind == "network" then return "Network" end
     if kind == "sdcard" then return "SD Card" end
     if kind == "usb" then return "USB" end
     if kind == "removable" then return "Drive" end
@@ -160,6 +172,7 @@ end
 function M.source_label(source)
     if not source then return "Local" end
     local kind, name = source.kind, source.name
+    if kind == "network" then return "Network · " .. name end
     if kind == "sdcard" then return name end
     if kind == "usb" then return name == "USB drive" and name or ("USB drive · " .. name) end
     if kind == "removable" then return "Drive · " .. name end
@@ -206,6 +219,19 @@ local NETWORK_FS = {
 
 function M.is_network_fs(fstype)
     return NETWORK_FS[fstype or ""] == true
+end
+
+-- Whether touching `path` may wait on the network (pure): it is on a
+-- network filesystem, or on an automount point (autofs: a systemd
+-- automount mounts the share on first access, and waits for it).
+function M.is_slow_path(mounts, path)
+    local m = M.mount_for(mounts, path)
+    return m ~= nil and (m.fstype == "autofs" or M.is_network_fs(m.fstype))
+end
+
+-- Mount table of this process (read when needed: it is a small kernel file).
+function M.read_mounts()
+    return M.parse_mounts(util.read_file("/proc/self/mountinfo") or "")
 end
 
 -- Library sources that hold files of this device.
@@ -320,28 +346,23 @@ function M.sort_entries(entries, mode)
     return entries
 end
 
--- Lists a directory: folders first, then video files.
--- Returns entries {name, label, path, is_dir, mtime, size} or nil, err.
-function M.list(path, cfg, sort_mode)
-    local names, err = util.readdir(path, "all")
-    if not names then return nil, err end
+-- Entries of folder `path` from `items` ({name, is_dir, is_file, mtime,
+-- size}): folders, then video files, hidden ones only with show_hidden.
+local function build_entries(path, items, cfg, sort_mode)
     local exts = M._exts
     if not exts or M._exts_src ~= cfg.library.extensions then
         exts = ext_set(cfg.library.extensions)
         M._exts, M._exts_src = exts, cfg.library.extensions
     end
     local dirs, files = {}, {}
-    for _, name in ipairs(names) do
-        if cfg.library.show_hidden or name:sub(1, 1) ~= "." then
+    for _, it in ipairs(items) do
+        local name = it.name
+        if name ~= "" and name ~= "." and name ~= ".." and (cfg.library.show_hidden or name:sub(1, 1) ~= ".") then
             local full = util.join(path, name)
-            local info = utils.file_info(full)
-            if info then
-                if info.is_dir then
-                    dirs[#dirs + 1] = {name = name, path = full, is_dir = true, mtime = info.mtime}
-                elseif info.is_file and exts[util.extension(name)] then
-                    files[#files + 1] = {name = name, path = full, is_dir = false,
-                                         mtime = info.mtime, size = info.size}
-                end
+            if it.is_dir then
+                dirs[#dirs + 1] = {name = name, path = full, is_dir = true, mtime = it.mtime}
+            elseif it.is_file and exts[util.extension(name)] then
+                files[#files + 1] = {name = name, path = full, is_dir = false, mtime = it.mtime, size = it.size}
             end
         end
     end
@@ -356,6 +377,68 @@ function M.list(path, cfg, sort_mode)
         end
     end
     return M.sort_entries(out, sort_mode)
+end
+
+-- Lists a directory here and now: folders first, then video files.
+-- Returns entries {name, label, path, is_dir, mtime, size} or nil, err.
+-- Only for folders known to be local; the browser uses list_async().
+function M.list(path, cfg, sort_mode)
+    local names, err = util.readdir(path, "all")
+    if not names then return nil, err end
+    local items = {}
+    for _, name in ipairs(names) do
+        local info = utils.file_info(util.join(path, name))
+        if info then
+            items[#items + 1] = {name = name, is_dir = info.is_dir, is_file = info.is_file,
+                                 mtime = info.mtime, size = info.size}
+        end
+    end
+    return build_entries(path, items, cfg, sort_mode)
+end
+
+-- find(1) prints one record per entry: type, mtime, size, name, NUL. -L
+-- follows symlinks like stat() (a link to a folder is a folder).
+function M.list_args(path)
+    return {"find", "-L", path, "-mindepth", "1", "-maxdepth", "1", "-printf", "%y\\t%T@\\t%s\\t%f\\0"}
+end
+
+-- Pure: entries from list_args()' output, like list(). Records that don't
+-- parse (or other types: sockets, broken links) are skipped.
+function M.parse_listing(out, path, cfg, sort_mode)
+    local items = {}
+    for rec in tostring(out or ""):gmatch("([^%z]+)%z") do
+        local kind, mtime, size, name = rec:match("^(%a)\t([%d%.]+)\t(%d+)\t(.+)$")
+        if kind == "d" or kind == "f" then
+            items[#items + 1] = {name = name, is_dir = kind == "d", is_file = kind == "f",
+                                 mtime = math.floor(tonumber(mtime) or 0), size = tonumber(size)}
+        end
+    end
+    return build_entries(path, items, cfg, sort_mode)
+end
+
+-- Pure: the error to show for a failed listing (find's own message, e.g.
+-- "Permission denied"), or nil when it produced entries.
+function M.listing_error(res)
+    if not res then return "cannot read folder" end
+    if res.status == 0 or (res.stdout or "") ~= "" then return nil end
+    local line = tostring(res.stderr or ""):match("[^\n]+") or res.error_string or "cannot read folder"
+    return (line:gsub("^find: ", ""):gsub("^'.-': ", ""))
+end
+
+-- Lists a folder in a subprocess, so a network share that doesn't answer
+-- can't block the app. cb(entries) or cb(nil, err). Returns a handle for
+-- mp.abort_async_command().
+function M.list_async(path, cfg, sort_mode, cb)
+    if path:sub(1, 1) ~= "/" then
+        cb(nil, "not an absolute path")
+        return nil
+    end
+    return mp.command_native_async({name = "subprocess", args = M.list_args(path), capture_stdout = true,
+                                    capture_stderr = true, playback_only = false}, function(_, res)
+        local err = M.listing_error(res)
+        if err then return cb(nil, err) end
+        cb(M.parse_listing(res.stdout, path, cfg, sort_mode))
+    end)
 end
 
 return M

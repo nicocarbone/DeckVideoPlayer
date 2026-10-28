@@ -1154,6 +1154,71 @@ do
     os.remove(tmp)
 end
 
+-- Folder listings in a subprocess (v0.7 work)
+do
+    local lcfg = config.defaults()
+    local rec = function(t, m, sz, n) return t .. "\t" .. m .. "\t" .. sz .. "\t" .. n .. "\0" end
+    local out = rec("d", "1700000000.5", "4096", "Season 1") .. rec("f", "1700000001.25", "1234", "Film.mkv")
+        .. rec("f", "1", "10", "notes.txt") .. rec("d", "1", "4096", ".hidden") .. rec("l", "1", "9", "broken.mkv")
+        .. rec("f", "2", "20", "Tab\tand\nnewline.mp4") .. "garbage-without-nul"
+    local entries = library.parse_listing(out, "/v", lcfg, "name")
+    eq("listing: dirs, videos only, no hidden", #entries, 3)
+    eq("listing: folder first", entries[1].name, "Season 1")
+    check("listing: folder flag", entries[1].is_dir and entries[1].path == "/v/Season 1")
+    eq("listing: mtime floored", entries[1].mtime, 1700000000)
+    local film
+    for _, e in ipairs(entries) do if e.name == "Film.mkv" then film = e end end
+    check("listing: file with size", film and film.size == 1234 and not film.is_dir)
+    local odd
+    for _, e in ipairs(entries) do if e.name:find("newline") then odd = e end end
+    check("listing: tab and newline in a name", odd ~= nil and odd.name == "Tab\tand\nnewline.mp4")
+    eq("listing: empty output", #library.parse_listing("", "/v", lcfg, "name"), 0)
+    eq("listing error: none on success", library.listing_error({status = 0, stdout = ""}), nil)
+    eq("listing error: partial output wins", library.listing_error({status = 1, stdout = out, stderr = "x"}), nil)
+    eq("listing error: find's reason", library.listing_error({status = 1, stdout = "",
+        stderr = "find: '/mnt/x': Permission denied\n"}), "Permission denied")
+    check("listing error: no result", library.listing_error(nil) ~= nil)
+    eq("list args: absolute path kept", library.list_args("/a b")[3], "/a b")
+
+    local mounts = library.parse_mounts(table.concat({
+        "22 1 0:21 / / rw - ext4 /dev/nvme0n1p8 rw",
+        "40 22 0:40 / /mnt/nas rw - autofs systemd-1 rw",
+        "41 40 0:41 / /mnt/nas rw - cifs //nas/share rw",
+        "50 22 0:50 / /home/deck/net rw - nfs4 nas:/export rw",
+        "60 22 179:1 / /run/media/deck/SD rw - ext4 /dev/mmcblk0p1 rw",
+    }, "\n"))
+    check("slow: cifs share", library.is_slow_path(mounts, "/mnt/nas/Movies/a.mkv"))
+    check("slow: automount point", library.is_slow_path(mounts, "/mnt/nas"))
+    check("slow: nfs", library.is_slow_path(mounts, "/home/deck/net/x"))
+    check("not slow: SD card", not library.is_slow_path(mounts, "/run/media/deck/SD/a.mkv"))
+    check("not slow: internal", not library.is_slow_path(mounts, "/home/deck/Videos/a.mkv"))
+    eq("network tag", library.source_tag({kind = "network", name = "Movies"}), "Network")
+    eq("network label", library.source_label({kind = "network", name = "Movies"}), "Network · Movies")
+    local pts = library.parse_mountinfo("70 22 0:70 / /media/nas rw - cifs //nas/share rw")
+    eq("removable list keeps fstype", pts[1] and pts[1].fstype, "cifs")
+
+    -- The same real folder, listed here and through find(1).
+    local tmp = os.tmpname()
+    os.remove(tmp)
+    util.mkdir_p(tmp .. "/Sub")
+    local function touch(p) local f = io.open(p, "w") f:write("x") f:close() end
+    touch(tmp .. "/b.mkv")
+    touch(tmp .. "/A.mp4")
+    touch(tmp .. "/skip.txt")
+    touch(tmp .. "/.hidden.mkv")
+    local utils = require "mp.utils"
+    local res = utils.subprocess({args = library.list_args(tmp), cancellable = false})
+    local via_find = library.parse_listing(res.stdout, tmp, lcfg, "name")
+    local direct = library.list(tmp, lcfg, "name")
+    local function names(list) local o = {} for _, e in ipairs(list) do o[#o + 1] = e.name end return table.concat(o, "|") end
+    eq("find listing = direct listing", names(via_find), names(direct))
+    eq("find listing contents", names(via_find), "Sub|A.mp4|b.mkv")
+    check("find listing sizes", via_find[2].size == 1 and via_find[2].mtime == direct[2].mtime)
+    for _, f in ipairs({"b.mkv", "A.mp4", "skip.txt", ".hidden.mkv"}) do os.remove(tmp .. "/" .. f) end
+    os.remove(tmp .. "/Sub")
+    os.remove(tmp)
+end
+
 -- Video menu decoding choice (D62)
 do
     local Player = require "dvp.player"

@@ -1585,3 +1585,51 @@ Flatpak's mpv); skipped elsewhere.
   back when the next marker starts or when playback re-enters this one.
 - **Library:** unchanged. Toasts there don't block anything (B goes back
   a folder as before).
+
+## D64. Folder listings in a subprocess; network folders never stat'ed (v0.7.0 work)
+
+- **Problem:** the browser listed folders with `utils.readdir` and one
+  `stat` per entry on mpv's main thread, and checked sources and
+  *Recently played* files with `stat` too. On a local disk that is
+  instant; on a network share that stopped answering (a NAS asleep, Wi-Fi
+  gone, a hard NFS/CIFS mount) each call can wait for seconds or minutes,
+  and the whole app froze. The first step of v0.7.0 (network shares,
+  ROADMAP).
+- **Listings:** `library.list_async` runs `find -L <dir> -mindepth 1
+  -maxdepth 1 -printf '%y\t%T@\t%s\t%f\0'` as an mpv subprocess: one
+  process gives type, mtime and size for every entry (what `list()`
+  stat'ed), NUL-separated so any file name survives, `-L` so symlinks
+  count as their targets like before. GNU findutils is in the Freedesktop
+  runtime. The browser shows it like a server listing (`load_folder`):
+  the old screen stays for 0.15 s (a local folder is listed in a few
+  milliseconds, so no "Loading…" flash), then "Loading…", after 4 s a
+  hint that the folder is slow to answer (B goes back at any time), and
+  after 60 s it gives up with an error. Leaving the folder kills the
+  subprocess; a process stuck in the kernel on a dead mount can't be
+  killed, but it no longer holds anything of the app.
+- **No stat on network paths:** `/proc/self/mountinfo` tells which
+  filesystem a path is on. Configured folders and mount points on a
+  network filesystem (the D60 list) or an `autofs` automount point (a
+  systemd automount mounts the share on first access and waits for it)
+  are listed as sources of kind `network` without checking them;
+  *Recently played* files there are listed without a stat (if the share is
+  gone, opening the file says so). Tagged "Network" in *Recently played*
+  and Video info.
+- ***Recently played* playlists** (the rest of the folder, to play next)
+  come from the same asynchronous listing; after 5 s the video plays
+  alone.
+- **Kept synchronous:** listings for delete (local only, refused on
+  network filesystems before any stat), the download folder and the
+  app's own data. The OpenSubtitles hash still reads the start and end of
+  a file when it plays, where mpv reads the file anyway.
+- **Cost:** one process start per folder opened (a few milliseconds on a
+  Deck); no timers while idle (the three timers live only while a listing
+  is pending).
+- **Tested:** unit tests (parser, errors, slow-path detection, the same
+  real folder listed directly and through `find`); headless gamescope with
+  the owner's test share mounted through gvfs (listing, playback with a
+  sidecar subtitle, "Network" tag in *Recently played*), a simulated share
+  that never answers (hint after 4 s, B back, other folders keep
+  working, no leftover process), auto-play from *Recently played*, delete
+  keeping the cursor, and the Flatpak.
+
