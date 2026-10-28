@@ -68,6 +68,14 @@ function M:open(spec)
     self:render()
 end
 
+-- Whether `spec` is still open (on top, or under another menu).
+function M:shows(spec)
+    for _, s in ipairs(self.stack) do
+        if s == spec then return true end
+    end
+    return false
+end
+
 function M:close_top()
     local spec = table.remove(self.stack)
     if spec and spec.on_cancel then spec.on_cancel() end

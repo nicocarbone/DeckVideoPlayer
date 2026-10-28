@@ -56,6 +56,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.6.0" date="2026-10-28">
+      <description>
+        <p>Downloads for offline playback.</p>
+        <ul>
+          <li>Download Plex and Jellyfin videos and seasons, with their subtitles, to watch without the server; stop, resume and cancel downloads</li>
+          <li>Delete local videos from the device (never server or network-share files)</li>
+          <li>Hardware or software decoding per video in the Video menu, suggested when frames are dropped</li>
+          <li>B closes messages and the skip prompt before stopping a video</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-10-27">
       <description>
         <p>Jellyfin, and where each video comes from.</p>

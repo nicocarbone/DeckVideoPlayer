@@ -13,10 +13,11 @@ in `dvp/config.lua`.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `folder` | path, repeatable | `~/Videos` | A library folder. Repeat the line for more; a single line may also hold several separated by `;`. `~` and `$VARS` are expanded. Missing folders are skipped. Alias: `folders`. The Flatpak reads only `~/Videos`, `~/Downloads`, `/run/media`, `/media` and `/mnt`; other folders need a `flatpak override` ([INSTALL](INSTALL.md#troubleshooting)). |
+| `folder` | path, repeatable | `~/Videos` | A library folder. Repeat the line for more; a single line may also hold several separated by `;`. `~` and `$VARS` are expanded. Missing folders are skipped. Alias: `folders`. The Flatpak sees only `~/Videos`, `~/Downloads`, `/run/media`, `/media` and `/mnt`; other folders need a `flatpak override` ([INSTALL](INSTALL.md#troubleshooting)). |
 | `removable_media` | bool | `yes` | Also list mounted drives under `/run/media` and `/media` (microSD card, USB). |
 | `show_hidden` | bool | `no` | Show dot-files and dot-folders. |
 | `extensions` | csv | built-in list | File extensions treated as video. |
+| `download_folder` | absolute path | `~/Videos/Downloaded` | Where *Download* saves Plex and Jellyfin videos (D60); a library source while it holds something. Must be inside a folder the Flatpak can write to (`~/Videos`, `~/Downloads`, `/run/media` for the microSD card, `/media`, `/mnt`). Empty: no downloads. |
 
 ## `[playback]`
 
@@ -32,7 +33,7 @@ in `dvp/config.lua`.
 | `volume` | 0–max | `100` | Start volume. |
 | `volume_max` | ≥100 | `130` | Maximum volume (above 100 amplifies). |
 | `audio_passthrough` | csv | empty | mpv `audio-spdif`, e.g. `ac3,eac3,dts-hd,truehd` for AV receivers. |
-| `hwdec` | string | `auto` | `auto` = `vaapi,vulkan,auto-safe`; `no`; or any mpv `--hwdec` value. |
+| `hwdec` | string | `auto` | `auto` = `vaapi,vulkan,auto-safe`; `no`; or any mpv `--hwdec` value. *Decoding* in the Video menu switches a video between this and software, remembered per video (D62). |
 | `headphone_surround` | bool | `no` | Start with headphone surround on: 5.1/7.1 audio rendered binaurally for headphones (D27). Stereo sources are unchanged. Also toggled in the audio menu (Y). Ignored when `audio_passthrough` is set. |
 | `night_mode` | bool | `no` | Start with night mode on: a compressor and limiter even out loud and quiet passages (+5 dB for quiet ones, up to −8 dB for loud ones), for low volume or the Deck's speakers; any channel layout (D46). Also toggled in the audio menu (Y). Ignored when `audio_passthrough` is set. |
 | `skip_intro` | `ask` \| `auto` \| `off` | `ask` | Intro markers (Plex): show *R2 Skip intro* while an intro plays, skip it by itself, or nothing (D47). |

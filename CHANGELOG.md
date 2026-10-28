@@ -5,6 +5,51 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.6.0 (2026-10-28)
+
+Downloads for offline playback, and a decoding choice for demanding
+videos.
+
+### New
+
+- **Downloads for offline playback**: *Menu → Download* on a Plex or
+  Jellyfin video (or *Download season* on a season) saves the original
+  file, with the server's subtitle files, in `~/Videos/Downloaded`
+  (`download_folder` in `config.ini`, e.g. a folder on the microSD card).
+  It shows up as a source on the start screen and plays like any local
+  video, without the server. *Menu → Downloads* shows progress; downloads
+  can be stopped, resumed (also after closing the app) and cancelled.
+  Only where the server's owner allows downloads.
+- **Delete from this device…** in the library menu removes a local video
+  (and its subtitle files) after asking. Only files on the Deck, the
+  microSD card or a USB drive: never anything on Plex, Jellyfin or a
+  network share.
+- **Decoding** in the Video menu switches the current video between
+  hardware and software decoding, and remembers the choice for that
+  video. On a Steam Deck, 4K AV1 videos can stutter with the hardware
+  decoder; software decoding plays them smoother but uses about twice the
+  power. When a video keeps dropping frames with hardware decoding, the
+  player suggests trying it.
+
+### Fixed
+
+- Jellyfin servers listed in `config.ini` after one that doesn't answer
+  are found again.
+- With `show_hidden = yes`, the library no longer lists `.` and `..`.
+- *Speed* in the playback menu shows 1.25× and 1.75× correctly.
+- *Playback info* labelled all dropped frames as "decoder" drops; the
+  *Dropped* row now shows what mpv actually counts.
+- Starting a local video no longer reads part of the file for online
+  subtitles when none were ever downloaded.
+
+### Changed
+
+- **B** during playback first closes a message (like "Resumed at …") or
+  the *Skip intro* / *Skip credits* prompt, instead of stopping the video.
+- The app can now write to the library folders (`~/Videos`,
+  `~/Downloads`, removable drives), which downloads and deleting need. It
+  still can't see the rest of your home folder.
+
 ## v0.5.0 (2026-10-27)
 
 ### New

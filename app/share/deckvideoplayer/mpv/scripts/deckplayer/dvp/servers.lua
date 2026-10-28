@@ -5,7 +5,8 @@
 -- signed_in(), server(id), list(loc, cb), connect(id, cb), video_info(ref,
 -- cb), resolve(id, key, siblings, cb), item_for(path), prepare(item),
 -- header_fields(item), report(...), set_watched(...), describe(path),
--- fetch_range(...), forget_session(id), forget_token(id), and the pure
+-- fetch_range(...), forget_session(id), forget_token(id), download_info(item,
+-- cb) (dvp/downloads.lua, D60), and the pure
 -- recent_key(item) / parse_recent_key(path) / recent_ref(id, key).
 -- Library entries refer to their item with `server` (listings) or
 -- `server_recent` ("Recently played"); `backend` in that table names the

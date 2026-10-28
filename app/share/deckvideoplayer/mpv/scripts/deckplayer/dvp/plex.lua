@@ -593,6 +593,71 @@ function M:remove_from_continue(item, cb)
     end)
 end
 
+-- Text subtitle codecs that can be saved next to a downloaded video.
+local SUB_FILES = {srt = "srt", subrip = "srt", ass = "ass", ssa = "ass", vtt = "vtt", webvtt = "vtt"}
+
+-- Pure: whether Plex allows downloading from a metadata response: always
+-- on the user's own server, else when the owner allows downloads
+-- (allowSync).
+function M.download_allowed(container, owned)
+    local a = type(container) == "table" and container.allowSync
+    return owned == true or a == true or a == 1 or a == "1"
+end
+
+-- Pure: what to download for item metadata `md`: the original file (the
+-- part URL with download=1, so the server applies its download rules) and
+-- its external text subtitles. {url, size, file, subs = {{url, lang, ext}}}.
+function M.download_parts(md, base)
+    local media = md and md.Media and md.Media[1]
+    local part = media and media.Part and media.Part[1]
+    if type(part) ~= "table" or not M.safe_key(part.key) or part.key:find("?", 1, true) then return nil end
+    local subs = {}
+    for _, st in ipairs(part.Stream or {}) do
+        local ext = SUB_FILES[tostring(st.codec or ""):lower()]
+        if st.streamType == 3 and ext and M.safe_key(st.key) then
+            subs[#subs + 1] = {url = base .. st.key, lang = st.languageTag or st.languageCode, ext = ext}
+        end
+    end
+    return {url = base .. part.key .. "?download=1", size = tonumber(part.size),
+            file = type(part.file) == "string" and part.file or tostring(part.container or ""), subs = subs}
+end
+
+-- What to download for an item (dvp/downloads.lua, D60). The server token
+-- goes in a header, on curl's stdin (never to mpv). cb(info or nil, err,
+-- fatal): info = download_parts() plus `headers`; `fatal` when trying
+-- again won't help (refused, gone), as opposed to an unreachable server.
+function M:download_info(item, cb)
+    if not M.safe_key(item.key) then return cb(nil, "Not a Plex item") end
+    self:connect(item.machine, function(base, err)
+        if not base then return cb(nil, err) end
+        local server = self:server(item.machine)
+        if not server then return cb(nil, "Unknown Plex server") end
+        http.request({url = base.url .. item.key, headers = self:headers(server.token), tag = "plex",
+                      timeout = 15}, function(code, body)
+            if code == 401 then return cb(nil, "Plex sign-in is no longer valid (sign in again)", true) end
+            local mc = code == 200 and type(body) == "table" and type(body.MediaContainer) == "table"
+                and body.MediaContainer
+            local md = mc and type(mc.Metadata) == "table" and mc.Metadata[1]
+            if type(md) ~= "table" then
+                if not code or code >= 500 then
+                    -- The connection may have gone away: find the server again next time.
+                    self.bases[item.machine] = nil
+                    return cb(nil, code and ("Plex error " .. code) or tostring(body))
+                end
+                return cb(nil, code == 404 and "No longer on the server" or ("Plex error " .. code), true)
+            end
+            if not M.download_allowed(mc, server.owned) then
+                return cb(nil, "The server's owner doesn't allow downloads", true)
+            end
+            local info = M.download_parts(md, base.url)
+            if not info then return cb(nil, "Nothing to download", true) end
+            info.headers = self:headers(server.token)
+            info.headers["Accept"] = nil
+            cb(info)
+        end)
+    end)
+end
+
 -- Pure: the key of a Plex item in "Recently played" (resume.json):
 -- "plex://<machine>/library/metadata/<id>". Stable, unlike the stream URL
 -- (which holds the address the server was reached at).

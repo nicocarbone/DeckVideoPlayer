@@ -37,6 +37,14 @@ done
 if [ ! -f "$DVP_CONFIG_DIR/config.ini" ]; then
     cp "$root/app/share/deckvideoplayer/config.ini" "$DVP_CONFIG_DIR/config.ini"
 fi
+# Downloads go to .dev/downloads, not ~/Videos (also in dev configs made
+# before v0.6, which have no download_folder line).
+dl_esc=$(printf '%s' "$root/.dev/downloads" | sed 's/[\\&|]/\\&/g')
+if grep -q '^download_folder' "$DVP_CONFIG_DIR/config.ini"; then
+    sed -i "s|^download_folder = .*|download_folder = $dl_esc|" "$DVP_CONFIG_DIR/config.ini"
+else
+    sed -i "s|^\[library\]\$|[library]\ndownload_folder = $dl_esc|" "$DVP_CONFIG_DIR/config.ini"
+fi
 if [ -n "$media" ]; then
     # Point the dev config at the requested folder.
     # Escape characters special in a sed replacement (\, &, and the | delimiter).

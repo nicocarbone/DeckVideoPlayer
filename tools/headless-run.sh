@@ -64,9 +64,11 @@ if [ "${KEEP:-0}" = 1 ]; then rm -rf "$CFG/config" "$SOCK"; else rm -rf "$CFG" "
 mkdir -p "$CFG/config" "$CFG/data" "$(dirname "$LOG")"
 # Escape characters special in a sed replacement (\, &, and the | delimiter).
 media_esc=$(printf '%s' "$MEDIA" | sed 's/[\\&|]/\\&/g')
+downloads_esc=$(printf '%s' "$CFG/downloads" | sed 's/[\\&|]/\\&/g')
 sed -e "s|^folder = .*|folder = $media_esc|" \
     -e "s|^device = .*|device = $DEVICE|" \
     -e "s|^removable_media = .*|removable_media = no|" \
+    -e "s|^download_folder = .*|download_folder = $downloads_esc|" \
     "$root/app/share/deckvideoplayer/config.ini" > "$CFG/config/config.ini"
 if [ -n "${RATES:-}" ]; then
     sed -i "s|^refresh_rates = .*|refresh_rates = $RATES|" "$CFG/config/config.ini"

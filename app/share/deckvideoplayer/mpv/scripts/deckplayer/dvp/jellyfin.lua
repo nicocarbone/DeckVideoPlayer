@@ -256,6 +256,45 @@ function M.external_subtitles(it, base)
     return subs
 end
 
+-- Pure: what to download for a full item: the original file through
+-- /Items/<id>/Download (the server checks the user may download) and its
+-- external text subtitles. {url, size, file, subs = {{url, lang, ext}}},
+-- or nil and the reason.
+function M.download_parts(it, base)
+    if type(it) ~= "table" or not M.safe_id(it.Id) then return nil, "Not a Jellyfin item" end
+    if it.IsFolder == true or (it.MediaType ~= nil and it.MediaType ~= "Video") then return nil, "Not a video" end
+    if it.CanDownload == false then return nil, "Downloads are turned off for your Jellyfin user" end
+    local ms = type(it.MediaSources) == "table" and it.MediaSources[1] or {}
+    local subs = {}
+    for _, sub in ipairs(M.external_subtitles(it, base)) do
+        subs[#subs + 1] = {url = sub.url, lang = sub.lang, ext = sub.url:match("%.(%a+)$")}
+    end
+    local file = type(ms.Path) == "string" and ms.Path or (type(it.Path) == "string" and it.Path)
+        or tostring(ms.Container or ""):match("^[^,]*")
+    return {url = base .. "/Items/" .. it.Id .. "/Download", size = tonumber(ms.Size), file = file, subs = subs}
+end
+
+-- What to download for an item (dvp/downloads.lua, D60); the token goes
+-- in a header, on curl's stdin. cb(info or nil, err, fatal): info =
+-- download_parts() plus `headers`; `fatal` when trying again won't help.
+function M:download_info(item, cb)
+    self:metadata(item.machine, item.key, function(it, err, _, code)
+        if not it then
+            if code == 401 then return cb(nil, "Jellyfin sign-in is no longer valid (sign in again)", true) end
+            if code == 404 or code == 400 then return cb(nil, "No longer on the server", true) end
+            if not code or code >= 500 then self.bases[item.machine] = nil end
+            return cb(nil, err, code ~= nil and code < 500)
+        end
+        local base, server = self.bases[item.machine], self:server(item.machine)
+        if not base or not server then return cb(nil, "Can't reach the Jellyfin server") end
+        local info, why = M.download_parts(it, base.url)
+        if not info then return cb(nil, why, true) end
+        info.headers = self:headers(server)
+        info.headers["Accept"] = nil
+        cb(info)
+    end)
+end
+
 -- Pure: the key of a Jellyfin item in "Recently played" (resume.json):
 -- "jellyfin://<server id>/<item id>". Stable, unlike the stream URL.
 function M.recent_key(item)
@@ -381,14 +420,15 @@ function M:discover(cb)
         pending = pending - 1
         if pending > 0 then return end
         local found, seen = {}, {}
-        for _, list in ipairs({from_config, from_lan}) do
-            for _, s in ipairs(list) do
-                if not seen[s.id] then
-                    seen[s.id] = true
-                    found[#found + 1] = s
-                end
+        local function take(s)
+            if s and not seen[s.id] then
+                seen[s.id] = true
+                found[#found + 1] = s
             end
         end
+        -- (from_config has holes where a server didn't answer: no ipairs.)
+        for i = 1, #self.config_urls do take(from_config[i]) end
+        for _, s in ipairs(from_lan) do take(s) end
         cb(found)
     end
     for i, raw in ipairs(self.config_urls) do
@@ -610,7 +650,7 @@ function M:list(loc, cb)
 end
 
 -- Full item (MediaSources with streams, user data). cb(item or nil, err,
--- server_name).
+-- server_name, code): `code` is the HTTP status of a failed answer.
 function M:metadata(id, item_id, cb)
     if not M.safe_id(item_id) then return cb(nil, "Not a Jellyfin item") end
     self:connect(id, function(base, err)
@@ -619,7 +659,7 @@ function M:metadata(id, item_id, cb)
         http.request({url = base.url .. "/Items/" .. item_id .. "?userId=" .. server.user_id,
                       headers = self:headers(server), tag = "jellyfin", timeout = 15}, function(code, body)
             if code ~= 200 or type(body) ~= "table" or not M.safe_id(body.Id) then
-                return cb(nil, code and ("Jellyfin error " .. code) or tostring(body))
+                return cb(nil, code and ("Jellyfin error " .. code) or tostring(body), nil, code)
             end
             cb(body, nil, server.name)
         end)

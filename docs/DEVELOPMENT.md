@@ -342,6 +342,13 @@ DECISIONS.md or the README "Known limitations".
     source; play a movie and an episode; stop halfway and check the
     Jellyfin web app resumes at the same point; mark watched / unwatched;
     with an intro plugin on the server, *Skip intro* appears.
+15. Downloads (v0.6): *Download* a film and *Download season* on Plex and
+    Jellyfin; *Menu → Downloads* shows progress; leave game mode or let
+    the Deck sleep mid-download, then *Resume all* continues; the
+    *Downloaded* source plays offline (Wi-Fi off) with subtitles; with
+    `download_folder` on the microSD card too. *Delete from this
+    device…* removes a downloaded film (and its season folder when it
+    was the last episode).
 
 ## 9. Recipes for common changes
 

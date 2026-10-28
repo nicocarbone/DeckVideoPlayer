@@ -47,6 +47,29 @@ do
         check("parses " .. f:match("[^/]+/[^/]+$"), ok ~= nil, err)
     end
     check("modules found", #files > 20)
+    -- No accidental globals (a typo or a local declared after its use reads
+    -- a global nil): checked in the bytecode where LuaJIT's jit.bc exists
+    -- (the Flatpak's mpv); skipped elsewhere.
+    local has_bc, bc = pcall(require, "jit.bc")
+    if has_bc then
+        local allowed = {}
+        for n in ([[mp require string table math os io tostring tonumber type pairs ipairs select pcall error
+            setmetatable getmetatable print collectgarbage next unpack rawget rawset rawequal debug package
+            jit assert xpcall bit load loadfile loadstring _G _VERSION testing]]):gmatch("%S+") do
+            allowed[n] = true
+        end
+        for _, f in ipairs(files) do
+            local fn = loadfile(f)
+            if fn then
+                local out, bad = {}, {}
+                bc.dump(fn, {write = function(_, t) out[#out + 1] = t end, flush = function() end}, true)
+                for op, name in table.concat(out):gmatch("(G[GS]ET)%s+%d+%s+%d+%s*;%s*\"([^\"]+)\"") do
+                    if op ~= "GGET" or not allowed[name] then bad[#bad + 1] = op .. " " .. name end
+                end
+                check("no stray globals in " .. f:match("[^/]+$"), #bad == 0, table.concat(bad, ", "))
+            end
+        end
+    end
 end
 
 -- util ------------------------------------------------------------------
@@ -919,6 +942,249 @@ check("router recent available", router:recent_available("jellyfin://srv/k1") ==
     and router:recent_available("jellyfin://gone/k1") == false and router:recent_available("/v/a.mkv") == nil)
 eq("router get", router:get("plex"), fp)
 eq("router for_ref", router:for_ref({backend = "jellyfin"}), fj)
+
+-- Downloads and deleting (D60) -------------------------------------------
+local DL = require "dvp.downloads"
+eq("dl clean_name", DL.clean_name(' a/b:c*?"<>| d '), "a b c d")
+eq("dl clean_name dots", DL.clean_name(".."), nil)
+eq("dl clean_name hidden", DL.clean_name("  .hidden. "), "hidden")
+eq("dl clean_name control", DL.clean_name("a\nb\0c"), "a b c")
+local long = DL.clean_name(string.rep("ñ", 100))
+check("dl clean_name bytes", #long <= 120 and #long % 2 == 0 and util.utf8_len(long) == #long / 2)
+eq("dl safe_ext path", DL.safe_ext("/media/Films/Film.MKV"), "mkv")
+eq("dl safe_ext container", DL.safe_ext("mp4"), "mp4")
+eq("dl safe_ext odd", DL.safe_ext("/x/film.weird+ext"), "mkv")
+eq("dl safe_ext none", DL.safe_ext(nil), "mkv")
+eq("dl movie path", DL.relative_path({kind = "movie", name = "Film: Part 1", year = 2001}, "mkv"),
+   "Film Part 1 (2001).mkv")
+eq("dl movie no name", DL.relative_path({kind = "movie", title = "T"}, "mp4"), "T.mp4")
+eq("dl episode path", DL.relative_path({kind = "episode", show = "Show/X", name = "Pilot", season = 1, episode = 2},
+   "mkv"), "Show X/Season 01/Show X - S01E02 - Pilot.mkv")
+eq("dl special", DL.relative_path({kind = "episode", show = "S", season = 0, episode = 3}, "mkv"),
+   "S/Specials/S - S00E03.mkv")
+eq("dl no season", DL.relative_path({kind = "episode", show = "S", name = "N"}, "mkv"), "S/S - N.mkv")
+eq("dl dotdot show", DL.relative_path({kind = "episode", name = "N", show = ".."}, "mkv"),
+   "Unknown show/Unknown show - N.mkv")
+local sp = DL.subtitle_paths("/d/Film (2001).mkv", {
+    {url = "u1", lang = "en", ext = "srt"}, {url = "u2", lang = "en", ext = "srt"},
+    {url = "u3", lang = "../x", ext = "srt"}, {url = "u4", lang = "es", ext = "sup"}, {url = "u5", ext = "ass"}})
+eq("dl subs count", #sp, 4)
+eq("dl subs first", sp[1].path, "/d/Film (2001).en.srt")
+eq("dl subs second", sp[2].path, "/d/Film (2001).2.en.srt")
+eq("dl subs bad lang", sp[3].path, "/d/Film (2001).und.srt")
+eq("dl subs no lang", sp[4].path, "/d/Film (2001).und.ass")
+local spf = DL.subtitle_paths("/d/F.mkv", {{url = "u", lang = "en", ext = "srt"}, {file = "/s/x.srt", lang = "en", ext = "srt"}})
+check("dl subs copy", spf[2].file == "/s/x.srt" and spf[2].path == "/d/F.2.en.srt" and spf[2].url == nil)
+do
+    local c = config.defaults()
+    c.library.download_folder = "Downloaded"
+    eq("download folder relative", library.download_folder(c), nil)
+    c.library.download_folder = ""
+    eq("download folder off", library.download_folder(c), nil)
+    c.library.download_folder = "/x/Downloaded/"
+    eq("download folder abs", library.download_folder(c), "/x/Downloaded")
+end
+eq("dl job id", DL.job_id({backend = "plex", machine = "m", key = "/library/metadata/1"}), "plex:m:/library/metadata/1")
+eq("dl outcome ok", DL.outcome(200, 0), "done")
+eq("dl outcome partial ok", DL.outcome(206, 0), "done")
+eq("dl outcome complete", DL.outcome(416, 22), "done")
+eq("dl outcome no ranges", DL.outcome(200, 33), "restart")
+eq("dl outcome refused", DL.outcome(403, 22), "fail")
+eq("dl outcome gone", DL.outcome(404, 22), "fail")
+eq("dl outcome disk", DL.outcome(nil, 23), "fail")
+eq("dl outcome 500", DL.outcome(503, 22), "retry")
+eq("dl outcome net", DL.outcome(nil, 7), "retry")
+eq("dl outcome stall", DL.outcome(206, 28), "retry")
+eq("dl outcome redirect", DL.outcome(302, 0), "fail")
+check("dl space ok", DL.enough_space(DL.SPACE_MARGIN + 100, 150, 50))
+check("dl space short", not DL.enough_space(DL.SPACE_MARGIN + 99, 150, 50))
+eq("dl status pct", DL.status_text({status = "downloading", size = 200}, 50, 2e6), "25% · 2 MB/s")
+eq("dl status start", DL.status_text({status = "downloading", size = 200}, 0), "Starting…")
+eq("dl status paused", DL.status_text({status = "paused", error = "x"}), "Stopped: x")
+eq("dl status done", DL.status_text({status = "done", size = 1.5e9}), "1.5 GB")
+
+-- curl options for long downloads
+local dlcfg = http.curl_config({url = "u", timeout = 0, resume = true, fail = true, output = "/f.part"})
+check("curl dl no max-time", dlcfg:find("max-time", 1, true) == nil)
+check("curl dl stall limit", dlcfg:find("speed-time = 60", 1, true) ~= nil and dlcfg:find("speed-limit", 1, true) ~= nil)
+check("curl dl resume fail", dlcfg:find('continue-at = "-"', 1, true) ~= nil and dlcfg:find("\nfail\n", 1, true) ~= nil)
+check("curl default max-time", http.curl_config({url = "u"}):find("max-time = 25", 1, true) ~= nil)
+check("curl default no resume", http.curl_config({url = "u"}):find("continue-at", 1, true) == nil)
+
+-- Server side: what gets downloaded, and only when allowed
+check("plex dl allowed owned", Plex.download_allowed({}, true))
+check("plex dl allowed shared", Plex.download_allowed({allowSync = true}, false)
+    and Plex.download_allowed({allowSync = "1"}, false))
+check("plex dl refused shared", not Plex.download_allowed({allowSync = false}, false)
+    and not Plex.download_allowed({}, false))
+local pdl = Plex.download_parts({Media = {{Part = {{key = "/library/parts/5/1/file.mkv", size = 1234,
+    file = "/srv/Film.mkv", Stream = {{streamType = 3, codec = "srt", key = "/library/streams/9", languageTag = "en"},
+    {streamType = 3, codec = "pgs", key = "/library/streams/8"}, {streamType = 2, key = "/x"}}}}}}}, "https://s")
+eq("plex dl url", pdl and pdl.url, "https://s/library/parts/5/1/file.mkv?download=1")
+eq("plex dl size", pdl and pdl.size, 1234)
+eq("plex dl subs", pdl and #pdl.subs, 1)
+eq("plex dl sub url", pdl and pdl.subs[1].url, "https://s/library/streams/9")
+eq("plex dl bad key", Plex.download_parts({Media = {{Part = {{key = "//evil/x"}}}}}, "https://s"), nil)
+local jid, jms = string.rep("a", 32), string.rep("b", 32)
+local jdl = JF.download_parts({Id = jid, CanDownload = true, MediaSources = {{Id = jms, Size = 99, Path = "/m/F.mp4",
+    MediaStreams = {{Type = "Subtitle", IsExternal = true, Codec = "subrip", Index = 3, Language = "spa"}}}}}, "http://j")
+eq("jf dl url", jdl and jdl.url, "http://j/Items/" .. jid .. "/Download")
+eq("jf dl ext", jdl and DL.safe_ext(jdl.file), "mp4")
+eq("jf dl sub ext", jdl and jdl.subs[1] and jdl.subs[1].ext, "srt")
+local jno, jwhy = JF.download_parts({Id = jid, CanDownload = false}, "http://j")
+check("jf dl refused", jno == nil and jwhy ~= nil)
+
+-- Media servers are never asked to delete anything. The one DELETE
+-- request clears a watched mark (Jellyfin's /UserPlayedItems).
+do
+    for _, name in ipairs({"plex.lua", "jellyfin.lua", "http.lua", "servers.lua", "downloads.lua", "library.lua",
+                           "browser.lua"}) do
+        local src = util.read_file(root .. "/dvp/" .. name) or ""
+        local n, ok = 0, true
+        for line in src:gmatch("[^\n]+") do
+            if line:find('"DELETE"', 1, true) then
+                n = n + 1
+                ok = ok and name == "jellyfin.lua" and line:find('watched and "POST" or "DELETE"', 1, true) ~= nil
+            end
+        end
+        check("no DELETE requests in " .. name, ok and n <= 1)
+    end
+    local jsrc = util.read_file(root .. "/dvp/jellyfin.lua") or ""
+    local at = jsrc:find('watched and "POST" or "DELETE"', 1, true)
+    check("jellyfin DELETE only for watched marks", at ~= nil
+        and jsrc:sub(math.max(1, at - 300), at):find("/UserPlayedItems/", 1, true) ~= nil)
+end
+
+-- Queue: one at a time, stop/resume/cancel, stale answers ignored
+do
+    local pending = {}
+    local fake = {ID = "plex", NAME = "Plex"}
+    function fake:download_info(item, cb) pending[#pending + 1] = {item = item, cb = cb} end
+    function fake:signed_in() return true end
+    function fake:server(m) return m == "m" and {} or nil end
+    function fake:sources() return {} end
+    local q = DL.new({cfg = config.defaults(), servers = Servers.new({fake})}, nil)
+    local a = {backend = "plex", machine = "m", key = "/library/metadata/1", kind = "movie", name = "A"}
+    local b = {backend = "plex", machine = "m", key = "/library/metadata/2", kind = "movie", name = "B"}
+    eq("queue add", q:add({a, b}), 2)
+    eq("queue add again", q:add({a}), 0)
+    eq("queue tag running", q:tag(a), "Downloading")
+    eq("queue tag waiting", q:tag(b), "Waiting to download")
+    eq("queue one request", #pending, 1)
+    q:pause(q:find(a))
+    eq("queue stopped", q:tag(a), "Download stopped")
+    eq("queue next starts", q:tag(b), "Downloading")
+    q:cancel(q:find(b))
+    eq("queue cancel", q:find(b), nil)
+    pending[1].cb(nil, "late")   -- answer for the stopped download: ignored
+    eq("queue stale answer", q:find(a).status, "paused")
+    q:resume(q:find(a))
+    eq("queue resumed", q:tag(a), "Downloading")
+    local act, other, done = q:counts()
+    check("queue counts", act == 1 and other == 0 and done == 0)
+    check("queue other backend", not q:can_download({backend = "jellyfin", machine = "m", key = "x"}))
+    local off = config.defaults()
+    off.library.download_folder = ""
+    check("queue no folder", not DL.new({cfg = off, servers = Servers.new({fake})}, nil):can_download(a))
+    q:shutdown()
+    eq("queue shutdown", q:find(a).status, "paused")
+end
+
+-- Deleting: only video files of this device
+do
+    local lcfg = config.defaults()
+    local mounts = library.parse_mounts(table.concat({
+        "22 1 0:21 / / rw - ext4 /dev/nvme0n1p8 rw",
+        "30 22 179:1 / /run/media/deck/SD\\040Card rw - exfat /dev/mmcblk0p1 rw",
+        "31 22 0:50 / /home/deck/Videos/NAS rw - cifs //nas/share rw",
+        "32 22 0:51 / /mnt/ssh rw - fuse.sshfs u@h: rw",
+    }, "\n"))
+    eq("mounts parsed", #mounts, 4)
+    eq("mount unescaped", mounts[2].path, "/run/media/deck/SD Card")
+    eq("mount_for", library.mount_for(mounts, "/home/deck/Videos/NAS/a.mkv").fstype, "cifs")
+    eq("mount_for root", library.mount_for(mounts, "/home/deck/Videos/a.mkv").fstype, "ext4")
+    check("network fs", library.is_network_fs("cifs") and library.is_network_fs("fuse.sshfs")
+        and not library.is_network_fs("exfat") and not library.is_network_fs("fuseblk"))
+    local srcs = {{path = "/home/deck/Videos", kind = "folder"}, {path = "/run/media/deck/SD Card", kind = "sdcard"},
+                  {path = "plex://m/", kind = "plex"}, {path = "/mnt/ssh", kind = "folder"}}
+    eq("delete ok", library.delete_refusal("/home/deck/Videos/a.mkv", srcs, mounts, lcfg), nil)
+    eq("delete sd ok", library.delete_refusal("/run/media/deck/SD Card/M/b.mp4", srcs, mounts, lcfg), nil)
+    check("delete url", library.delete_refusal("https://s/library/parts/1/file.mkv", srcs, mounts, lcfg) ~= nil)
+    check("delete plex key", library.delete_refusal("plex://m/library/metadata/1", srcs, mounts, lcfg) ~= nil)
+    check("delete outside", library.delete_refusal("/home/deck/.ssh/id.mkv", srcs, mounts, lcfg) ~= nil)
+    check("delete source itself", library.delete_refusal("/home/deck/Videos", srcs, mounts, lcfg) ~= nil)
+    check("delete dotdot", library.delete_refusal("/home/deck/Videos/../x.mkv", srcs, mounts, lcfg) ~= nil)
+    check("delete relative", library.delete_refusal("Videos/a.mkv", srcs, mounts, lcfg) ~= nil)
+    check("delete not video", library.delete_refusal("/home/deck/Videos/notes.txt", srcs, mounts, lcfg) ~= nil)
+    check("delete network share", library.delete_refusal("/home/deck/Videos/NAS/a.mkv", srcs, mounts, lcfg) ~= nil)
+    check("delete sshfs", library.delete_refusal("/mnt/ssh/a.mkv", srcs, mounts, lcfg) ~= nil)
+    local side = library.sidecar_subtitles("Film.mkv", {"Film.mkv", "Film.srt", "Film.en.srt", "Film.Extended.mkv",
+        "Film.Extended.en.srt", "Other.srt", "Film.nfo", "Filmography.srt"})
+    eq("sidecars", table.concat(side, ","), "Film.en.srt,Film.srt")
+    check("is_video", library.is_video("a.MKV", lcfg) and not library.is_video("a.srt", lcfg))
+end
+
+-- Deleting for real, in a temporary download folder: the video, its
+-- subtitles, then the season and show folders it leaves empty.
+do
+    local tmp = os.tmpname()
+    os.remove(tmp)
+    local dl = tmp .. "/Downloaded"
+    local season = dl .. "/Show/Season 01"
+    util.mkdir_p(season)
+    local function touch(p) local f = io.open(p, "w") f:write("x") f:close() end
+    touch(season .. "/Show - S01E01.mkv")
+    touch(season .. "/Show - S01E01.en.srt")
+    touch(dl .. "/Film.mkv")
+    eq("readdir skips dots", #util.readdir(dl, "all"), 2)
+    local dcfg = config.defaults()
+    dcfg.library.download_folder = dl
+    dcfg.library.folder = {}
+    dcfg.library.removable_media = false
+    local srcs = library.sources(dcfg)
+    eq("download folder source", #srcs, 1)
+    local ok, err = library.delete_video(season .. "/Show - S01E01.mkv", srcs, dcfg)
+    check("delete episode", ok, err)
+    check("season and show folders gone", not util.is_dir(dl .. "/Show"))
+    check("subtitle gone", not util.file_exists(season .. "/Show - S01E01.en.srt"))
+    check("download folder kept", util.is_dir(dl))
+    check("delete film", library.delete_video(dl .. "/Film.mkv", srcs, dcfg))
+    eq("empty download folder hidden", #library.sources(dcfg), 0)
+    os.remove(dl)
+    os.remove(tmp)
+end
+
+-- Video menu decoding choice (D62)
+do
+    local Player = require "dvp.player"
+    eq("software decoding", Player.hwdec_choice(true, config.HWDEC_AUTO), "no")
+    eq("hardware = configured", Player.hwdec_choice(false, "vaapi-copy"), "vaapi-copy")
+    eq("hardware when config says no", Player.hwdec_choice(false, "no"), config.HWDEC_AUTO)
+    eq("hardware without a value", Player.hwdec_choice(false, nil), config.HWDEC_AUTO)
+    local samples = {{t = 0, count = 0}, {t = 3, count = 6}, {t = 6, count = 12}}
+    check("drops below the threshold", not Player.sustained_drops(samples, 6, 10, 15))
+    samples[#samples + 1] = {t = 8, count = 16}
+    check("steady drops", Player.sustained_drops(samples, 8, 10, 15))
+    -- A burst long ago doesn't count: old samples are dropped.
+    local old_burst = {{t = 0, count = 0}, {t = 1, count = 20}, {t = 30, count = 22}}
+    check("old burst ignored", not Player.sustained_drops(old_burst, 30, 10, 15))
+    eq("old samples removed (baseline kept)", #old_burst, 2)
+    check("no samples", not Player.sustained_drops({}, 5, 10, 15))
+    eq("remember software", Player.remembered_decoder(true, config.HWDEC_AUTO), "software")
+    eq("hardware is the default", Player.remembered_decoder(false, config.HWDEC_AUTO), nil)
+    eq("remember hardware when config says no", Player.remembered_decoder(false, "no"), "hardware")
+    eq("software is the default with hwdec = no", Player.remembered_decoder(true, "no"), nil)
+    local r = Resume.new(nil)
+    r:set_decoder("/v/a.mkv", "software")
+    eq("no entry, nothing stored", r:get("/v/a.mkv"), nil)
+    r:update("/v/a.mkv", 100, 1000, "1", "no")
+    r:set_decoder("/v/a.mkv", "software")
+    eq("decoder stored", r:get("/v/a.mkv").decoder, "software")
+    r:update("/v/a.mkv", 200, 1000, "1", "no")
+    eq("decoder kept by update", r:get("/v/a.mkv").decoder, "software")
+    r:set_decoder("/v/a.mkv", nil)
+    eq("back to default clears it", r:get("/v/a.mkv").decoder, nil)
+end
 
 print(string.format("%d checks, %d failures", count, failures))
 mp.commandv("quit", failures == 0 and "0" or "1")

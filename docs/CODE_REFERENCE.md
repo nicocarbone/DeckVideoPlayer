@@ -104,7 +104,7 @@ Responsibilities:
   | `quit()` | restore refresh rate, `quit` (progress is saved by on_unload) |
   | `quit_dialog()` | "Quit?" dialog |
   | `help()` | controls list |
-  | `toast(text)` | 1.8 s notification |
+  | `toast(text, seconds)` | notification, 1.8 s unless `seconds` is given |
 
 - Input dispatch (see ARCHITECTURE §4).
 - Lifecycle hooks:
@@ -154,8 +154,8 @@ libass, same technique as mpv's osc), `utf8_len`, `utf8_truncate(s, n)`
 `read_file`, `write_file_atomic(path, data, private)` (tmp + rename;
 returns `false, err` and keeps the old file if the write fails; `private`
 makes the tmp file mode 600 before writing), `write_private(path, data)`,
-`is_dir`, `file_exists`,
-`mkdir_p` (mpv subprocess), `shallow_copy`.
+`is_dir`, `file_exists`, `readdir(path, filter)` (mpv's, without `.` and
+`..`, D61), `mkdir_p` (mpv subprocess), `shallow_copy`.
 
 ## `dvp/version.lua`
 
@@ -247,6 +247,18 @@ key.
   mtime (newest first).
 - `display_name(name, is_dir, clean)`: strips the extension; with `clean`,
   `.`/`_` → spaces when the name has no spaces.
+- `download_folder(cfg)` → the expanded `[library] download_folder` or
+  nil (empty or not absolute); `sources()` adds it as a `folder` source
+  while it holds something (D60).
+- Deleting (D60): `parse_mounts(text)` → `{path, fstype}` for every mount,
+  `mount_for(mounts, path)` (longest mount point), `is_network_fs(fstype)`,
+  `is_video(name, cfg)`, `delete_refusal(path, sources, mounts, cfg)` →
+  nil or why not (absolute plain path inside a local source, not the source
+  itself, a video extension, not on a network filesystem),
+  `sidecar_subtitles(video, names)` (its subtitle files; ones matching a
+  longer video name belong to that one), `delete_video(path, sources,
+  cfg)` → true or false, message (checks again, removes the file, its
+  subtitles and folders left empty inside the download folder).
 
 ## `dvp/resume.lua`: playback state store
 
@@ -254,7 +266,8 @@ key.
 `position(path)` (≥ 30 s or nil), `is_watched`, `is_finished(pos, dur)`
 (static), `update(path, pos, dur, aid, sid, title?)` (decides pos /
 watched; `title` names Plex entries, whose key is no file name, D50),
-`mark_watched`, `mark_unwatched` (keeps a played file in the recent list), `flush()` (writes only when dirty, prunes to 1000
+`mark_watched`, `mark_unwatched` (keeps a played file in the recent list), `forget(path)`
+(a deleted file, D60), `flush()` (writes only when dirty, prunes to 1000
 entries). Thresholds are `M.MIN_POSITION`, `M.END_MARGIN_MIN` and
 `M.END_MARGIN_FRAC`.
 
@@ -267,6 +280,10 @@ migrates `t` to `played` first, so it keeps its place, D45).
 `mark_unwatched(path)` keeps a played entry (timestamps) and drops others.
 `sync(path, state)` copies a Plex server's progress into an existing entry,
 keeping its timestamps (D53).
+`set_decoder(path, decoder)` stores the Video menu's *Decoding* choice
+(`"software"` / `"hardware"`, nil = `config.ini`'s) in an existing entry;
+`main.lua` saves it with the progress (`Player.remembered_decoder()`) and
+sets `file-local-options/hwdec` from it in `on_load` (D62).
 
 ## `dvp/cropdetect.lua`: black bars encoded in the video
 
@@ -386,7 +403,8 @@ Center dialogs also take `code` (a big, letter-spaced code to type
 elsewhere) and `qr` (a QR matrix from `dvp/qrencode.lua`, drawn left of the
 message lines and the code; Plex sign-in, D38).
 
-`menu:update(spec, fields)` changes fields (usually `items`) of a menu that
+`menu:shows(spec)`: whether a menu is still open (on top or under
+another). `menu:update(spec, fields)` changes fields (usually `items`) of a menu that
 may still be open, resets the cursor and redraws it if it is on top;
 returns false when the menu was closed meanwhile. Used by asynchronous
 work (subtitle search) to fill a menu in place.
@@ -404,6 +422,15 @@ body)`: HTTP status, or nil + error text; body is decoded JSON when
 possible. Pure: `curl_config(req)` (the `-K -` text: secrets never in
 argv), `curl_quote`, `query_string(params, lower)`, `parse_result(res)`,
 `CURL_ERRORS`.
+
+Media server backends' `download_info(item, cb)` call `cb(info, err,
+fatal)`: `fatal` when trying again can't help (refused, gone, D61).
+
+Long downloads (D60): `download(req, cb)` → a handle for `abort(handle)`;
+`cb(code, status, killed)` (HTTP status, curl exit status, stopped by
+`abort`). Extra `req` fields: `timeout = 0` (no time limit; aborts below
+1 KB/s for 60 s), `resume` (`continue-at -`), `fail` (an HTTP error writes
+nothing to `output`).
 
 ## `dvp/plex.lua`: Plex Media Server
 
@@ -423,7 +450,10 @@ movies/episodes with `path` = direct-play URL and `server = {backend =
 "plex", machine, rating_key, key, duration, kind, title}`);
 `external_subtitles(md, base)`. Backend of `dvp/servers.lua` (D55):
 `ID = "plex"`, `NAME = "Plex"`, `video_info(ref, cb)`, `recent_ref(machine,
-key)`.
+key)`. Downloads (D60): `download_info(item, cb)`, pure
+`download_allowed(container, owned)` (own server, or `allowSync`) and
+`download_parts(md, base)` (part URL with `download=1`, size, file name,
+text subtitles).
 
 Instance `Plex.new(data_dir, {allow_insecure})` (account in `plex.json`,
 written with `util.write_private`):
@@ -457,6 +487,34 @@ season). Pure: `recent_key(item)` / `parse_recent_key(path)`
 *Continue watching* hub; `list()` falls back to `/library/onDeck` on
 400/404. `readonly` (development) turns reports, marks and removals into
 log lines.
+
+## `dvp/downloads.lua`: downloads for offline playback (D60)
+
+Pure: `clean_name(s)` (one FAT/exFAT-safe name, ≤ 120 bytes, nil if
+empty), `safe_ext(file)`, `relative_path(item, ext)` (`Title (Year).ext`,
+`Show/Season NN/Show - SNNEMM - Title.ext`), `subtitle_paths(video,
+subs)` → `{url, path}` (`<name>.<lang>.<ext>`, numbered per language),
+`job_id(item)`, `format_size`, `enough_space(avail, size, have)`,
+`outcome(code, status)` → "done" / "restart" / "retry" / "fail", why,
+`status_text(job, have, speed)`.
+
+`new(ctx, data_dir)` loads `downloads.json` (finished ones whose file is
+gone are dropped; unfinished ones become "paused": nothing starts by
+itself). Jobs: `id`, the item fields (backend, machine, key, kind, title,
+name, year, show, season, episode), `status` (queued / downloading /
+paused / failed / done), `error`, `size`, `path`. `add(items)` → how many
+were new; `pump()` starts the next queued one; `start(job)` asks the
+backend's `download_info`, picks the path (`free_path`), checks space,
+runs `http.download` into `<path>.part`; `transferred()` decides by
+`outcome()` and the size, `retry()` (3 times, 15 s), `fetch_subtitles()`,
+`finish(job, "done" | "pause" | "fail", why)`. `pause`, `resume`,
+`pause_all`, `resume_all`, `cancel` (deletes the partial file),
+`forget_path(path)` (file deleted), `shutdown()`, `counts()` → active,
+stopped/failed, done; `find(item)`, `can_download(item)`, `tag(item)`
+(the label on server rows). Menu: `open_menu()` (progress once a second
+while open: `sample()` measures speed), `job_menu(job)`, `done_menu(job)`.
+`ctx.changed(job)`, `ctx.play_path`, `ctx.browse`, `ctx.delete` are set by
+`main.lua`.
 
 ## `dvp/servers.lua`: media servers behind one interface (D55)
 
@@ -502,7 +560,9 @@ resets the item's "playing" report state), `header_fields(item)` (empty unless t
 server needs the token), `report(item, state, time, duration, sync)`
 (`/Sessions/Playing`, `…/Progress`, `…/Stopped`), `set_watched(item,
 watched, cb, sync)` (`/UserPlayedItems`), `describe(path)`,
-`fetch_range(…)`, `forget_session(id)`, `forget_token(id)`. `readonly`
+`fetch_range(…)`, `forget_session(id)`, `forget_token(id)`,
+`download_info(item, cb)` / pure `download_parts(it, base)`
+(`/Items/<id>/Download`, honours `CanDownload`, D60). `readonly`
 (development) turns reports and marks into log lines.
 
 ## `helper/dvp-discover.c` (D55)
@@ -642,12 +702,19 @@ D28. `SubDownload.new(ctx, data_dir, api_url)`.
 - Server videos (Plex D38, Jellyfin D55): `key` is `server_key(item)`
   (`plex-…` / `jellyfin-…`, no network), search terms `server_info(item)`
   (both pure), `hash_for(path, cb)` fetches the first and last 64 KiB from
-  the server (`fetch_range`) for the exact-match hash.
+  the server (`fetch_range`) for the exact-match hash. `server_files(item)`
+  lists a server video's stored files, which a download copies next to
+  the video (D61).
 - Pure: `safe_lang(lang)` (letters and `-`, else `und`), `file_name(release, lang, file_id)`, `parse_file_name(name)` (→
   `{title, lang, file_id}`),
   `video_key(path)` (moviehash, or `small-<size>` for tiny files).
 
 ## `dvp/browser.lua`: library screen
+
+Downloads and deleting (D60): `download(entries)`, `download_season(entry)`,
+`deletable(entry)`, `delete_dialog(path, label)` (defaults to *Cancel*),
+`delete(path)`, `open_folder(path, select)`, `play_path(path)`,
+`downloads_changed()`; server rows show `downloads:tag()` as a pill.
 
 State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `selected`, `scroll`, `cursor[path]` (remembered selection per folder),
@@ -740,7 +807,15 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   `open_video_menu` (D52: video tracks when there is more than one,
   picture (fit / fill = `panscan 1` / stretch = `keepaspect no`), match
   refresh rate (`toggle_refresh()`, shown when `display.refresh_possible`),
-  then `hdr_items()` from `ctx.hdr`),
+  decoding (`toggle_decoding()`: `file-local-options/hwdec` from the pure
+  `hwdec_choice(software, configured)`, D62), then `hdr_items()` from
+  `ctx.hdr`),
+- Drop hint (D62): `on_frame_drops(count)` (observer of
+  `frame-drop-count`, hardware decoding and speed ≤ 1× only) suggests
+  *Decoding: Software* once per file when the pure
+  `sustained_drops(samples, now, window, min)` sees 15 drops in 10 s;
+  `watch_drops()` restarts counting (start, seek, speed above 1×) after a
+  5 s grace.
   `open_main_menu` (live values through `rebuild`): tracks, *Video*
   (`video_summary()`), subtitle size/brightness/position/delay
   (`set_sub_brightness(level)`, 30–100 %, D58), audio delay, volume,
@@ -752,7 +827,8 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 - `render_info()` / `info_lines()`: codec, resolution, fps, decoder, HDR
   source and output, mastering peak, display Hz, audio, audio output
   (plus "· headphone surround" while the filter is active),
-  dropped/late/mistimed frames, cache.
+  dropped frames (video output; decoder drops when any; late/mistimed
+  only in display-resample mode), cache.
 - `refresh_hz` is set by `main.lua` after `display:match()`.
 
 ---

@@ -126,7 +126,7 @@ of deleting them.
 | Action | Library | Playback | Reason |
 |---|---|---|---|
 | A | open/play | pause | universal "confirm" |
-| B | back / quit | hide controls/info; else stop (saves position) | back = dismiss what is on screen, then leave (v0.3.1: B used to stop even with the controls up); resume makes it safe |
+| B | back / quit | close a toast, controls, info, stats, the skip prompt (D63); else stop (saves position) | back = dismiss what is on screen, then leave (v0.3.1: B used to stop even with the controls up); resume makes it safe |
 | X | play from start | subtitles | X/Y next to A: frequently used playback functions |
 | Y | sort | audio | |
 | D-pad ←→ | page | seek ±10 s | |
@@ -1409,3 +1409,179 @@ All findings checked against the code; fixed unless noted.
   inserted while browsing) keep the folder, as before.
 - **2.3 Version and metainfo:** done at release time, as for every
   release (version.lua, metainfo `<release>`, CHANGELOG heading).
+
+## D60. Downloads for offline playback, and deleting local videos (v0.6)
+
+**Downloads.** *Menu → Download* on a Plex or Jellyfin video (*Download
+season* on a season, *Download all episodes* inside one) saves the
+original file in `[library] download_folder` (default
+`~/Videos/Downloaded`), which is a library source of its own while it
+holds something. Original file, no transcoding: same quality, HDR and tracks as
+streaming, and the file is what the server has (sizes can be large).
+
+- **Names** as a media library: `Title (Year).ext`,
+  `Show/Season 01/Show - S01E02 - Title.ext` (`Specials` for season 0),
+  cleaned for FAT/exFAT microSD cards (no `/\:*?"<>|`, control
+  characters, leading dots or trailing dots/spaces; 120 bytes per name), a
+  " (2)" when the name is taken. The server's external text subtitles go
+  next to it as `<name>.<lang>.<ext>` (mpv's `sub-auto=fuzzy` loads them).
+- **Permission:** Plex: the part URL with `download=1`, refused unless the
+  server is the user's own or its metadata has `allowSync` (the owner
+  allows downloads). Jellyfin: `/Items/<id>/Download` (the server checks
+  the user's download permission) and `CanDownload` is honoured.
+- **Transfer:** one at a time, `curl` with the token in a header on stdin
+  (never in argv or mpv, never stored in `downloads.json`; a fresh request
+  for the URL at every start), into `<file>.part`, `--fail` (an error page
+  never lands in the file), `--continue-at -` (stopping, network loss or
+  quitting continue where they ended), no time limit but abort below
+  1 KB/s for 60 s. Complete when the size matches the server's; then
+  renamed. A server that can't continue (exit 33) starts over once. Free
+  space is checked first (`df`; size + 256 MB).
+- **When it runs:** network errors are retried 3 times, 15 s apart (any
+  progress resets the count), then the download stops and waits. After
+  closing the app, unfinished downloads are listed as stopped and resume
+  only when asked (*Resume all*): no network work the user didn't start.
+  mpv ends curl when the app quits (verified; `shutdown()` also stops it
+  and saves the state).
+- **Downloads menu** (library menu, once there is any download):
+  progress and speed, refreshed once a second only while it is open;
+  stop, resume, cancel (deletes the partial file); finished ones to play,
+  show in the library or delete. Server rows carry a tag (*Downloaded*,
+  *Downloading*…). Finishing is announced in the library, not over a
+  playing video.
+- Not in v0.6: progress of a downloaded copy is local (not reported to
+  the server); keeping the Deck awake during long downloads.
+
+**Deleting.** *Menu → Delete from this device…* on a local video, with a
+confirmation that defaults to *Cancel*. Only when `delete_refusal()`
+finds nothing against it: an absolute path without `.`/`..` parts, inside
+a local library source (folder, SD card, USB drive; never the source
+itself), a configured video extension, and not on a network filesystem
+(the mount's type from mountinfo: cifs, nfs, sshfs, rclone, gvfs…),
+so a NAS mounted into a library folder is never touched. Media servers
+are never asked to delete anything: server videos are URLs, and a unit
+test checks that the only DELETE request in the code is Jellyfin's
+"unmark watched". Subtitle files that belong to the video go too (those
+that match a longer video name belong to that one); folders left empty
+inside the download folder are removed, up to it. Its resume entry and
+download record are dropped.
+
+**Sandbox:** both need write access, so the library folders
+(`xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt`) are no
+longer `:ro`. The point of D39 stays: no access to the rest of the home
+folder (SSH keys, other apps' data). A folder can be made read-only again
+with `flatpak override … --filesystem=/path:ro`.
+
+Verified against the owner's test servers (read requests only): Jellyfin
+films and an episode with its subtitle, a Plex film, exact sizes; stop at
+8 %, resume, file identical to the server's (SHA-256); cancel; quitting
+mid-download; in headless gamescope: Download, tags, Downloads menu with
+progress, resume, Show in the library, delete with confirmation.
+
+## D61. Bug hunt (v0.6.0 work)
+
+A review of the new download and delete code and of the older modules,
+with end-to-end runs against the owner's test servers (reads only), local
+test servers for the error paths, headless gamescope, and a new bytecode
+check for stray globals. Found and fixed:
+
+- **Downloads: permanent refusals were retried.** "The owner doesn't
+  allow downloads", an expired sign-in or an item gone from the server
+  were retried 3 times like a network error and ended as "Stopped". The
+  backends' `download_info` now says when an error is final (`fatal`):
+  the download fails at once with the reason. Jellyfin also refuses
+  folders and non-videos ("Not a video").
+- **Downloads: cancel during the subtitle step** left the finished video
+  on disk, no longer tracked; the job now records `saved`, and cancel
+  removes the video and its subtitle files.
+- **Downloads lost OpenSubtitles subtitles:** subtitles downloaded while
+  streaming a server video are stored under that item; they are now
+  copied next to the downloaded copy too.
+- **Downloads without a download folder:** an empty `download_folder`
+  (documented as "no downloads") still offered *Download*; it no longer
+  does. A relative path is ignored instead of downloading relative to
+  mpv's working folder.
+- **`utils.readdir` lists `.` and `..`**, which broke four things: the
+  download folder never looked empty (shown on the start screen after its
+  last video was deleted), folders left empty by a delete were never
+  removed, `show_hidden = yes` listed `.` and `..` as folders (`..` led
+  out of the library folder), and the "nothing downloaded yet, skip
+  hashing" shortcut of online subtitles never applied (every local file
+  was hashed when it started). `util.readdir` drops them; all callers use
+  it.
+- **Jellyfin servers from config.ini:** discovery kept the answers in a
+  table indexed by line and read it with `ipairs`, which stops at the
+  first hole: if the first listed server didn't answer, the ones after it
+  were never found.
+- **Speed** in the playback menu showed 1.25× as "1.2x" (`%.2g`).
+- **Idle work:** the 30 s progress save timer ran while the library was
+  idle; it now runs only while a file is open.
+- **Delete** kept the cursor at the top of the folder; it now stays where
+  the deleted video was.
+- **Downloads menu:** opening a download's own menu closed the Downloads
+  menu (menus close their parent before an action unless `keep_open`).
+
+New test: `tests/run.lua` checks every module's bytecode for globals
+other than the standard ones (a typo, or a local used before its
+declaration, reads a nil global), where LuaJIT's `jit.bc` exists (the
+Flatpak's mpv); skipped elsewhere.
+
+## D62. Decoding choice in the Video menu (v0.6.0 work)
+
+- **Problem:** a 4K60 AV1 HLG video stuttered on a Deck OLED (3–5 dropped
+  frames per second, a regular "EKG" in Steam's frame-time graph) with
+  hardware decoding (VA-API), in HDR and SDR alike. Tests with versions
+  of the same clip: 4K60 HEVC and 1080p60 AV1 were smooth, 4K30 AV1 was
+  better but not smooth. So the Deck's hardware decoder is the limit for
+  4K AV1, not drawing, frame timing or HDR. A larger decode-ahead queue
+  (`vd-queue-enable`) didn't help; Vulkan decoding isn't available there
+  (mpv falls back to software).
+- **Software decoding** (dav1d on the CPU) played it noticeably smoother,
+  at about twice the power. That is a trade-off the owner wants to make
+  per video, so the app doesn't switch by itself.
+- **Choice:** *Decoding* (Hardware / Software) in the Video menu sets
+  `file-local-options/hwdec`: "no", or back to the configured `hwdec`
+  (the `auto` list when `config.ini` says `no`). mpv swaps the decoder in
+  place, keeping the position; other files start with `config.ini`'s
+  value. The choice is remembered per video: `decoder` ("software" /
+  "hardware", only when it differs from `config.ini`) in the video's
+  `resume.json` entry (the local copy's key for Plex / Jellyfin videos),
+  saved with the position and set file-locally in `on_load` before the
+  decoder starts. Independent of `resume = no`, which is about positions
+  and tracks. The row shows "Hardware (unavailable)" when mpv found no
+  hardware decoder for the video; `hwdec-current` is observed so the row
+  follows the switch.
+- **Suggestion:** with hardware decoding, at least 15 frames dropped
+  within 10 s show "Dropping frames? Try Menu → Video → Decoding:
+  Software" for 6 s, once per file (`sustained_drops()`; never after the
+  user changed *Decoding*). `frame-drop-count` is observed rather than
+  polled, so Lua runs only when a frame is dropped. The 5 s after a start
+  or seek are ignored (they drop a few frames by themselves, as does the
+  refresh-rate switch), and so is faster playback (*Speed* above 1×
+  drops frames on purpose); counting restarts at normal speed. It suggests
+  software for any codec: whether it helps depends on the video, and the
+  user can switch back.
+- **Also fixed:** *Playback info* labelled mpv's `frame-drop-count`
+  "decoder" drops; it counts frames dropped by the video output for any
+  reason. The row now shows that count, decoder drops only when there are
+  any, and late / mistimed frames only in `display-resample` mode (the
+  only mode that counts them).
+- **Note for tests:** `--vo=null` with `--hwdec=vaapi` silently decodes
+  in software (mpv can't open VA-API without a video output), so a
+  `--vo=null` benchmark doesn't measure the hardware decoder.
+
+## D63. B closes toasts and the skip prompt before stopping (v0.6.0 work)
+
+- **Problem:** B during playback stopped the video while a toast was on
+  screen (e.g. the *Decoding* suggestion, "Resumed at …"), and with the
+  *Skip intro* / *Skip credits* prompt showing. The owner expected B to
+  close what is shown first, as it does for the controls (D42).
+- **Order:** a toast, then the controls, the info panel, mpv's stats,
+  then the skip prompt; only with nothing on screen does B stop.
+  `ctx.dismiss_toast()` (main.lua) clears the toast and its timer and
+  says whether one was showing.
+- **Skip prompt:** B hides it for the current marker; R2 still skips while
+  inside it (the action is unchanged, only the prompt is gone). It comes
+  back when the next marker starts or when playback re-enters this one.
+- **Library:** unchanged. Toasts there don't block anything (B goes back
+  a folder as before).

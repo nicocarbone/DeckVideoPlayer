@@ -118,6 +118,23 @@ function M:hide_recent(path)
     end
 end
 
+-- Decoding chosen in the Video menu (D62): "software", "hardware" or nil
+-- (config.ini's hwdec). Only for an existing entry: update() creates it.
+function M:set_decoder(path, decoder)
+    local e = self.entries[path]
+    if not e or e.decoder == decoder then return end
+    e.decoder = decoder
+    self.dirty = true
+end
+
+-- Forgets everything about `path` (the file was deleted).
+function M:forget(path)
+    if self.entries[path] then
+        self.entries[path] = nil
+        self.dirty = true
+    end
+end
+
 -- Up to `n` most recently played paths, newest first. `exists(path)`
 -- filters out files that are gone or on a drive that isn't mounted; it is
 -- called on the newest entries only, until `n` are found.

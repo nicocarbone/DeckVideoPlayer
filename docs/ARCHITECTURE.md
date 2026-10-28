@@ -256,8 +256,8 @@ rename).
   SDL2 gamepad support.
 - Sandbox permissions: X11 + Wayland, PulseAudio + PipeWire, `--device=all`
   (GPU, VA-API, `/dev/input` for SDL), `xdg-run/gamescope-0` (HDR layer),
-  read-only `xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt`
-  (not the whole home, D39), read-write `xdg-config/deckvideoplayer`,
+  `xdg-videos`, `xdg-download`, `/run/media`, `/media`, `/mnt` (not the
+  whole home, D39; writable since v0.6 for downloads and deleting, D60), read-write `xdg-config/deckvideoplayer`,
   network (online subtitles D28, Plex D37), and talking to
   `org.freedesktop.ScreenSaver` (keep the screen awake during playback,
   D43).

@@ -4,8 +4,10 @@
 -- Timers only run while something is visible, so steady playback with the
 -- overlay hidden costs no Lua work at all.
 
+local msg = require "mp.msg"
 local ui = require "dvp.ui"
 local util = require "dvp.util"
+local config = require "dvp.config"
 local media = require "dvp.media"
 local library = require "dvp.library"
 local Menu = require "dvp.menu"
@@ -40,6 +42,13 @@ function M.new(ctx)
         keepaspect = mp.get_property_bool("keepaspect", true),
     }
     self.zoom_touched = false
+    -- Decoding choice of the Video menu (D62) is file-local too: every file
+    -- starts with the configured hwdec (already set by main.lua).
+    self.hwdec_config = mp.get_property("hwdec")
+    mp.observe_property("hwdec-current", "string", function()
+        -- The decoder switches a moment after the choice: update the row.
+        if self.video_menu and self.ctx.menu:shows(self.video_menu) then self.ctx.menu:refresh() end
+    end)
     self.timer = mp.add_periodic_timer(0.5, function() self:tick() end)
     self.timer:kill()
     self.hide_timer = nil
@@ -55,9 +64,17 @@ function M.new(ctx)
         if self.overlay_visible then self:render() end
         if self.info_visible then self:render_info() end
     end)
+    -- Steady dropped frames with hardware decoding: suggest software
+    -- decoding once per file (D62). Observed, not polled: the callback only
+    -- runs when a frame is dropped.
+    self.drops = {}
+    mp.observe_property("frame-drop-count", "number", function(_, count)
+        if count then self:on_frame_drops(count) end
+    end)
     mp.register_event("playback-restart", function()
         self:update_marker_timer()   -- stopped by skip_marker()
         self:check_marker()
+        self:watch_drops()   -- start and seeks drop a few frames by themselves
     end)
     return self
 end
@@ -78,6 +95,8 @@ function M:start()
         self.zoom_touched = false
     end
     self.crop_bars = false   -- true, "none" (none found) or false; video-crop itself is file-local
+    self.drop_hint_shown = false
+    self:watch_drops()
     self:show_overlay()
 end
 
@@ -160,6 +179,7 @@ end
 function M:set_markers(list)
     self.markers = list or {}
     self.marker = nil
+    self.dismissed_marker = nil
     self.auto_skipped = {}
     self.marker_layer:clear()
     self:update_marker_timer()
@@ -188,6 +208,7 @@ function M:check_marker()
     local mk = self:marker_wanted(Markers.at(self.markers, mp.get_property_number("time-pos")))
     if mk == self.marker then return false end
     self.marker = mk
+    if not mk then self.dismissed_marker = nil end   -- the prompt shows again next time
     if mk and mk.kind == "intro" and self.cfg.playback.skip_intro == "auto" and not self.auto_skipped[mk] then
         self.auto_skipped[mk] = true   -- once: seeking back into it shows the prompt
         self:skip_marker()
@@ -225,7 +246,7 @@ end
 
 -- "R2 Skip intro" at the bottom right, above the controls when they show.
 function M:render_marker()
-    if not (self.active and self.marker) then
+    if not (self.active and self.marker) or self.marker == self.dismissed_marker then
         self.marker_layer:clear()
         return
     end
@@ -302,12 +323,18 @@ function M:handle(action)
         self:show_overlay()
     elseif action == "back" then
         -- B dismisses what is on screen first; with nothing shown, it stops.
-        if self.overlay_visible then
+        if self.ctx.dismiss_toast() then
+            return
+        elseif self.overlay_visible then
             self:hide_overlay()
         elseif self.info_visible then
             self:toggle_info()
         elseif self.stats_visible then
             self:toggle_stats()
+        elseif self.marker and self.marker ~= self.dismissed_marker then
+            -- Hides the "Skip intro" prompt; R2 still skips while inside.
+            self.dismissed_marker = self.marker
+            self:render_marker()
         else
             self.ctx.stop()
         end
@@ -515,6 +542,73 @@ function M:toggle_refresh()
     self:render()
 end
 
+-- Pure: the hwdec value for the Video menu's Decoding choice. Hardware is
+-- the configured value, or the default list when config.ini says hwdec = no.
+function M.hwdec_choice(software, configured)
+    if software then return "no" end
+    if configured == nil or configured == "" or configured == "no" then return config.HWDEC_AUTO end
+    return configured
+end
+
+-- Pure: what to remember for a video (D62): "software" or "hardware" when
+-- the choice differs from config.ini's hwdec, nil when it is the default.
+function M.remembered_decoder(software, configured)
+    if software == (configured == "no") then return nil end
+    return software and "software" or "hardware"
+end
+
+function M:software_decoding()
+    return mp.get_property("hwdec") == "no"
+end
+
+-- Per video (D62): 4K AV1 plays smoother in software on a Steam Deck, at
+-- about twice the power, so the user decides for each one. main.lua saves
+-- the choice with the video's resume entry and restores it next time.
+function M:toggle_decoding()
+    local software = not self:software_decoding()
+    mp.set_property("file-local-options/hwdec", M.hwdec_choice(software, self.hwdec_config))
+    self.drop_hint_shown = true   -- the user has seen the choice
+    self.ctx.toast(software and "Software decoding: uses more battery" or "Hardware decoding")
+end
+
+-- Dropped frames that suggest software decoding: at least DROP_HINT_MIN
+-- within DROP_HINT_WINDOW seconds, ignoring the first DROP_GRACE seconds
+-- after a start or seek (and the refresh-rate switch then).
+local DROP_HINT_MIN, DROP_HINT_WINDOW, DROP_GRACE = 15, 10, 5
+
+-- Pure: `samples` is a list of {t, count} (frame-drop-count over time,
+-- oldest first). Drops old samples in place; true when the drops of the
+-- last `window` seconds reach `min`.
+function M.sustained_drops(samples, now, window, min)
+    while #samples > 1 and samples[2].t <= now - window do table.remove(samples, 1) end
+    local first, last = samples[1], samples[#samples]
+    return first ~= nil and last.count - first.count >= min
+end
+
+function M:watch_drops()
+    self.drops = {}
+    self.drops_from = mp.get_time() + DROP_GRACE
+end
+
+function M:on_frame_drops(count)
+    if self.drop_hint_shown or not self.active then return end
+    local now = mp.get_time()
+    if now < (self.drops_from or 0) then return end
+    local hw = mp.get_property("hwdec-current") or ""
+    if hw == "" or hw == "no" then return end
+    -- Faster playback drops frames on purpose (more frames than the screen
+    -- shows): start counting again once back at normal speed.
+    if mp.get_property_number("speed", 1) > 1 then
+        self:watch_drops()
+        return
+    end
+    self.drops[#self.drops + 1] = {t = now, count = count}
+    if not M.sustained_drops(self.drops, now, DROP_HINT_WINDOW, DROP_HINT_MIN) then return end
+    self.drop_hint_shown = true
+    msg.info(string.format("dropping frames with hardware decoding (%d so far): suggesting software", count))
+    self.ctx.toast("Dropping frames? Try Menu → Video → Decoding: Software", 6)
+end
+
 -- Short state for the main menu's Video row: picture mode and output.
 function M:video_summary()
     local source, output_hdr = media.hdr_state(self.video_track)
@@ -590,14 +684,24 @@ function M:video_items()
             value = function() return display.refresh_on and "On" or "Off" end,
             adjust = function() self:toggle_refresh() end}
     end
+    items[#items + 1] = {label = "Decoding",
+        value = function()
+            if self:software_decoding() then return "Software" end
+            local hw = mp.get_property("hwdec-current") or ""
+            -- e.g. a codec this GPU can't decode
+            if hw == "" or hw == "no" then return "Hardware (unavailable)" end
+            return "Hardware"
+        end,
+        adjust = function() self:toggle_decoding() end}
     self:hdr_items(items)
     return items
 end
 
 function M:open_video_menu()
     local items = self:video_items()
-    self.ctx.menu:open({title = "Video", style = "side", items = items, selected = selected_index(items),
-                        rebuild = function() return self:video_items() end})
+    self.video_menu = {title = "Video", style = "side", items = items, selected = selected_index(items),
+                       rebuild = function() return self:video_items() end}
+    self.ctx.menu:open(self.video_menu)
     self:show_overlay()
 end
 
@@ -653,7 +757,7 @@ function M:main_menu_items()
                 util.clamp(prop_num("volume", 100) + d * 5, 0, self.cfg.playback.volume_max))
         end}
     items[#items + 1] = {label = "Speed",
-        value = function() return string.format("%.2gx", prop_num("speed", 1)) end,
+        value = function() return string.format("%.4gx", prop_num("speed", 1)) end,
         adjust = function(d)
             mp.set_property_number("speed", util.clamp(prop_num("speed", 1) + d * 0.25, 0.25, 3))
         end}
@@ -865,10 +969,18 @@ function M:info_lines()
             .. (self.ctx.surround.active and " · headphone surround" or ""))
     end
     for _, l in ipairs(self.ctx.keepawake:info_lines()) do add(l[1], l[2]) end
-    local drop = mp.get_property_number("frame-drop-count", 0)
-    local vo_drop = mp.get_property_number("vo-delayed-frame-count", 0)
-    local mistimed = mp.get_property_number("mistimed-frame-count", 0)
-    add("Dropped", string.format("%d decoder · %d late · %d mistimed", drop or 0, vo_drop or 0, mistimed or 0))
+    -- frame-drop-count is the video output's drops (video behind audio, from
+    -- slow decoding or slow presenting alike); the decoder only drops with
+    -- framedrop=decoder. Late and mistimed exist only in display-sync modes.
+    local dropped = string.format("%d", mp.get_property_number("frame-drop-count", 0) or 0)
+    local dec_drop = mp.get_property_number("decoder-frame-drop-count", 0) or 0
+    if dec_drop > 0 then dropped = dropped .. string.format(" · %d by decoder", dec_drop) end
+    if (mp.get_property("video-sync") or ""):match("^display") then
+        dropped = dropped .. string.format(" · %d late · %d mistimed",
+            mp.get_property_number("vo-delayed-frame-count", 0) or 0,
+            mp.get_property_number("mistimed-frame-count", 0) or 0)
+    end
+    add("Dropped", dropped)
     local cache = mp.get_property_number("demuxer-cache-duration")
     if cache then add("Buffered", string.format("%.0f s", cache)) end
     return lines

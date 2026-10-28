@@ -21,15 +21,17 @@ finish-args:
   # inhibitions on the screensaver service (the portal needs no permission).
   - --talk-name=org.freedesktop.ScreenSaver
   # Video library: Videos and Downloads, microSD card / USB drives, mounts.
-  # Read-only, and not the whole home folder: a malicious video exploiting
-  # a decoder bug must not be able to read SSH keys or other apps' data and
-  # send it out (the app has network access). Other folders:
-  #   flatpak override --user --filesystem=/path:ro io.github.nicocarbone.DeckVideoPlayer
-  - --filesystem=xdg-videos:ro
-  - --filesystem=xdg-download:ro
-  - --filesystem=/run/media:ro
-  - --filesystem=/media:ro
-  - --filesystem=/mnt:ro
+  # Not the whole home folder: a malicious video exploiting a decoder bug
+  # must not be able to read SSH keys or other apps' data and send it out
+  # (the app has network access). Writable since v0.6 (D60): downloads for
+  # offline playback, and deleting videos from the library. Other folders:
+  #   flatpak override --user --filesystem=/path io.github.nicocarbone.DeckVideoPlayer
+  # (add :ro to a folder the app should only read: no downloads or deleting there).
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-download
+  - --filesystem=/run/media
+  - --filesystem=/media
+  - --filesystem=/mnt
   # App settings live in ~/.config/deckvideoplayer so they are easy to edit.
   - --filesystem=xdg-config/deckvideoplayer:create
   - --env=LC_NUMERIC=C

@@ -112,8 +112,14 @@ See the controls table in the [README](../README.md#controls). Notes:
   beginning*. **X** starts from the beginning directly.
 - Videos after the chosen one in the same folder play automatically
   (`autoplay_next`).
-- **Video menu** (*Menu → Video*) holds *Picture*, *Match refresh rate*
-  and, on HDR screens, the HDR settings below.
+- **Video menu** (*Menu → Video*) holds *Picture*, *Match refresh rate*,
+  *Decoding* and, on HDR screens, the HDR settings below.
+- **Decoding** (Video menu): hardware (default, saves battery) or
+  software for the current video. On a Steam Deck, 4K AV1 videos can
+  stutter with the hardware decoder; software plays them smoother at
+  about twice the power. The choice is remembered for that video only. When
+  a video keeps dropping frames with hardware decoding, the player
+  suggests this once.
 - **Picture** (Fit / Crop black bars / Fill / Stretch) in the Video menu
   applies to the current video only; the next one starts with your normal
   setting. **Crop black bars** is for bars that are part of the video file
@@ -284,9 +290,13 @@ Notes:
 | HDR video looks washed out / badge says `HDR10 → SDR` | HDR is off in Steam display settings, or the gamescope layer extension is missing: `flatpak list --runtime \| grep VulkanLayer.gamescope`. Install it with the command above (branch must be `25.08`). |
 | HDR works in other games but not here | Check that `gpu_context = auto` (it must resolve to `x11vk` in game mode). Run from Konsole inside a nested gamescope and look for `[Gamescope WSI] … hdr formats exposed to client: true`. |
 | Refresh rate doesn't change | Only in game mode, only on Deck panels, not while VRR is on. Check Steam's **performance overlay** (it shows the real panel rate); the Quick Access Menu's refresh slider always shows Steam's own setting, not ours. The info panel (View) shows `48 Hz (requested)` on a Deck (gamescope's confirmation isn't visible to games there), `48 Hz (matched)` where it can confirm, `90 Hz (asked for 48 Hz)` if gamescope refused. Moving Steam's slider takes the rate back; the app asks again on the next file or when you unpause. Logs: `refresh rate: …` lines. To turn matching off: playback menu → *Match refresh rate*. |
+| 4K AV1 video stutters on a Steam Deck (*Dropped* in the info panel keeps rising) | The Deck's hardware decoder can't keep up with some 4K AV1 videos. *Menu → Video → Decoding: Software* plays them smoother, at about twice the power. HEVC and 1080p AV1 are fine in hardware. |
 | Software decoding (`Decoder: Software`) | Some formats have no hardware decoder (e.g. H.264 4:4:4, 10-bit H.264, MPEG-4 ASP). That's expected; it costs more battery. |
-| Folder missing from the library | The path in `config.ini` must exist. The Flatpak can only read `~/Videos`, `~/Downloads`, the microSD card / USB drives (`/run/media`, `/media`) and `/mnt` (since v0.3, so a malicious video can't read the rest of your files). For another folder, run once in Konsole: `flatpak override --user --filesystem=/home/deck/Movies:ro io.github.nicocarbone.DeckVideoPlayer` (your path). |
-| Need logs | Desktop Mode: `flatpak run io.github.nicocarbone.DeckVideoPlayer --msg-level=all=v --log-file=$HOME/dvp.log`. In game mode, add `--log-file=/home/deck/dvp.log` to the shortcut's launch options (after the app id). |
+| Folder missing from the library | The path in `config.ini` must exist. The Flatpak can only see `~/Videos`, `~/Downloads`, the microSD card / USB drives (`/run/media`, `/media`) and `/mnt` (since v0.3, so a malicious video can't read the rest of your files). For another folder, run once in Konsole: `flatpak override --user --filesystem=/home/deck/Movies io.github.nicocarbone.DeckVideoPlayer` (your path; add `:ro` at the end of the path to keep the app from downloading to or deleting there). |
+| *Download* fails with "Can't create …" | `download_folder` in `config.ini` must be inside one of the folders above. |
+| No *Download* entry | Only on Plex and Jellyfin videos. Plex: a shared server must allow downloads (the owner's setting); Jellyfin: the user needs download permission. |
+| No *Delete from this device…* entry | Only for video files in a library folder or on a drive of this device; never for server videos or network shares. |
+| Need logs | Desktop Mode: `flatpak run io.github.nicocarbone.DeckVideoPlayer --msg-level=all=v --log-file=$HOME/Downloads/dvp.log`. In game mode, add `--msg-level=all=v --log-file=/home/deck/Downloads/dvp.log` to the end of the shortcut's launch options (after the app id). The log must go in Downloads or Videos: the app can't write to the home folder itself. |
 | No *Download subtitles…* entry | No API key yet (see [above](#online-subtitles-opensubtitles)), or the video isn't a local file. |
 | "No internet connection" when searching subtitles | The Deck is offline, or the Flatpak lacks network access: `flatpak info --show-permissions io.github.nicocarbone.DeckVideoPlayer` must list `network`. |
 | "OpenSubtitles rejected the API key" / "login failed" | Check `api_key`, and use your username (not e-mail) with the right password. |

@@ -93,6 +93,17 @@ Also: where each video is, in *Recently played* and Video info (D56); 5.1
 headphone surrounds behind the listener (D57); subtitle brightness (D58);
 eighth audit fixed (D59).
 
+## v0.6.0: downloads for offline playback (released 2026-10-28)
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Downloads** | Done; on-device test pending (checklist 15) | Plex and Jellyfin videos and seasons to `download_folder`, with subtitles; stop, resume (also after closing), cancel; a *Downloaded* source (D60). Network shares later, once they exist. |
+| **Delete from this device** | Done | Local videos only, never server or network-share files (D60). |
+| **Decoding per video** | Done | Hardware / software in the Video menu, remembered per video, suggested when frames keep dropping; 4K AV1 stutters with the Deck's hardware decoder (D62). |
+
+Also: a bug hunt (D61), and B closes toasts and the skip prompt before
+stopping (D63).
+
 ## Next, in this order
 
 1. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing

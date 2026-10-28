@@ -10,6 +10,9 @@ local util = require "dvp.util"
 
 local M = {}
 
+-- hwdec = auto: VA-API, then Vulkan, then mpv's safe fallbacks.
+M.HWDEC_AUTO = "vaapi,vulkan,auto-safe"
+
 M.DEFAULT_EXTENSIONS = "mkv,mp4,m4v,avi,mov,wmv,flv,webm,ts,m2ts,mts,mpg,mpeg,mpe,vob,ogv,ogm,3gp,3g2,divx,xvid,rm,rmvb,asf,f4v,hevc,h264,264,265,av1,ivf,y4m,dv,mxf,nut"
 
 -- Each entry: default value and parser type.
@@ -19,6 +22,7 @@ local SCHEMA = {
         removable_media  = {default = true, type = "bool"},
         extensions       = {default = M.DEFAULT_EXTENSIONS, type = "string"},
         show_hidden      = {default = false, type = "bool"},
+        download_folder  = {default = "~/Videos/Downloaded", type = "string"},
     },
     playback = {
         audio_languages    = {default = "", type = "string"},

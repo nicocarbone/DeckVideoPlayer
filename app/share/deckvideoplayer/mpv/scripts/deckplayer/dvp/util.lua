@@ -164,6 +164,19 @@ function M.file_exists(path)
     return info ~= nil and info.is_file
 end
 
+-- mpv's utils.readdir without "." and ".." (which it lists, also with the
+-- "dirs" filter). nil, err when the folder can't be read.
+function M.readdir(path, filter)
+    local utils = require "mp.utils"
+    local names, err = utils.readdir(path, filter)
+    if not names then return nil, err end
+    local out = {}
+    for _, n in ipairs(names) do
+        if n ~= "." and n ~= ".." then out[#out + 1] = n end
+    end
+    return out
+end
+
 function M.mkdir_p(path)
     if M.is_dir(path) then return true end
     local r = mp.command_native({

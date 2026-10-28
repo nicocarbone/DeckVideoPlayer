@@ -26,6 +26,7 @@ non-trivial.
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
 | HDR choices (Video menu) | `…/dvp/hdr.lua` (D52), rows in `player:hdr_items()` |
 | Video info panel (library) | `…/dvp/videoinfo.lua` (ffprobe / Plex / Jellyfin metadata, D50) |
+| Downloads for offline playback, deleting local videos | `…/dvp/downloads.lua` (queue, curl transfers, Downloads menu), `download_info` in `…/dvp/plex.lua` / `…/dvp/jellyfin.lua`, `delete_refusal` / `delete_video` in `…/dvp/library.lua` (D60) |
 | Online subtitles | `…/dvp/opensubtitles.lua` (API), `…/dvp/subdownload.lua` (menu, storage), `tools/mock-opensubtitles.py` |
 | Flatpak build | `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`, `scripts/build-flatpak.sh` |
 | Steam integration | `scripts/install-steamos.sh`, `scripts/steam_shortcut.py`, `packaging/steam/` |
@@ -68,7 +69,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-27, v0.5.0)
+## Current state (2026-10-28, v0.6.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -143,6 +144,15 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   Source row in Video info (D56), 5.1 headphone surrounds at 120° (D57),
   subtitle brightness (D58). Eighth audit (ISSUES.md Part VIII) fixed in
   D59.
+- v0.6.0 (2026-10-28, D60): downloads for offline playback (Plex,
+  Jellyfin) to `[library] download_folder`, and *Delete from this
+  device…* for local videos (never server or network-share files); the
+  library folders in the Flatpak are writable for this. Tested against
+  the owner's test servers (reads only) and in headless gamescope;
+  on-device checklist item 15 pending. Also *Decoding* (hardware /
+  software, per video) in the Video menu, because 4K AV1 stutters with
+  the Deck's hardware decoder (D62); bug hunt (D61); B closes toasts and
+  the skip prompt first (D63).
 - Planned: see `docs/ROADMAP.md`. Next, in order: next episode from
   *Continue watching*, SMB/NFS;
   Flathub publication floating.

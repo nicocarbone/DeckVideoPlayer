@@ -4,8 +4,8 @@
 --
 -- Downloads are kept per video in <data_dir>/subtitles/<key>/ as
 -- "<release>.<lang>.srt". <key> is the OpenSubtitles hash of the video, so
--- renaming or moving the file keeps its subtitles (video folders are
--- read-only in the Flatpak anyway). They are added again, before track
+-- renaming or moving the file keeps its subtitles, and the video folder
+-- stays as the user keeps it. They are added again, before track
 -- selection, every time that video plays. See docs/DECISIONS.md D28.
 
 local utils = require "mp.utils"
@@ -147,13 +147,13 @@ function M:stored(path)
     -- Nothing downloaded yet (the usual case): no hashing at all. Server
     -- items and known keys cost no hashing, so they skip this check.
     if self.keys[path] == nil and not self:server_item(path) then
-        local top = utils.readdir(self.dir, "dirs")
+        local top = util.readdir(self.dir, "dirs")
         if not top or #top == 0 then return {} end
     end
     local key = self:key(path)
     if not key then return {} end
     local dir = util.join(self.dir, key)
-    local names = utils.readdir(dir, "files") or {}
+    local names = util.readdir(dir, "files") or {}
     table.sort(names)
     local out = {}
     for _, name in ipairs(names) do
@@ -161,6 +161,23 @@ function M:stored(path)
             local f = M.parse_file_name(name)
             f.path = util.join(dir, name)
             out[#out + 1] = f
+        end
+    end
+    return out
+end
+
+-- Subtitles downloaded while streaming a media server video (`item`), so
+-- a downloaded copy of it (dvp/downloads.lua) keeps them: {{file, lang,
+-- ext}}.
+function M:server_files(item)
+    if not self.dir then return {} end
+    local dir = util.join(self.dir, M.server_key(item))
+    local names = util.readdir(dir, "files") or {}
+    table.sort(names)
+    local out = {}
+    for _, name in ipairs(names) do
+        if name:match("%.srt$") then
+            out[#out + 1] = {file = util.join(dir, name), lang = M.parse_file_name(name).lang, ext = "srt"}
         end
     end
     return out

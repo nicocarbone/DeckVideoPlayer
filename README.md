@@ -40,6 +40,9 @@ there is a single process and nothing between the video and the screen.
 - **Jellyfin**: find your server on the network, sign in with Quick
   Connect, browse Continue watching, Next up, movies and shows, play the
   original files, and keep progress in sync with your other Jellyfin apps.
+- **Downloads** for offline playback: Plex and Jellyfin videos or whole
+  seasons, with their subtitles, to a folder of your choice (also the
+  microSD card). Local videos can be deleted from the library menu.
 - **Download subtitles** from OpenSubtitles.com from the subtitle menu
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).
@@ -189,7 +192,7 @@ Uninstall with `./scripts/install-steamos.sh --uninstall`.
 | Button | Library | Playback |
 | --- | --- | --- |
 | **A** | Open folder / play | Play / pause |
-| **B** | Back (quit at top level) | Hide the controls; with nothing on screen, stop and go back to the library |
+| **B** | Back (quit at top level) | Close a message or the controls (also the info panel and the *Skip intro* prompt); with nothing on screen, stop and go back to the library |
 | **X** | Play from the beginning | Subtitles menu |
 | **Y** | Sort by name / date | Audio menu |
 | **D-pad ↑ ↓** | Move | Volume |
@@ -205,7 +208,7 @@ PgUp/PgDn, Home/End).
 ## Configuration
 
 `~/.config/deckvideoplayer/config.ini` is commented and covers library
-folders, preferred audio/subtitle languages, subtitle behaviour, resume,
+folders, the download folder, preferred audio/subtitle languages, subtitle behaviour, resume,
 seek steps, audio passthrough (for AV receivers), hardware decoding, device
 profile, rendering quality, HDR, refresh-rate matching and UI scale.
 

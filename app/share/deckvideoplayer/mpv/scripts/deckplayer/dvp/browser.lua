@@ -16,7 +16,8 @@ local ROW_H = 60
 local ROW_GAP = 4
 local FS = 26
 
--- ctx: cfg, resume, menu, plex, servers, play(list, start), quit(), quit_dialog(), help(), toast(text)
+-- ctx: cfg, resume, menu, plex, servers, downloads, play(list, start), quit(), quit_dialog(), help(),
+-- toast(text)
 function M.new(ctx)
     local self = setmetatable({}, M)
     self.ctx = ctx
@@ -470,6 +471,111 @@ function M:video_info(entry)
     VideoInfo.open(self.ctx, entry, library.source_label(library.source_for(self.sources, entry.path)))
 end
 
+---------------------------------------------------------------------------
+-- Downloads and deleting (D60)
+---------------------------------------------------------------------------
+
+local SEASON_KINDS = {episodes = true, series_episodes = true}
+
+-- Queues server videos (entries) for download.
+function M:download(entries)
+    local items = {}
+    for _, e in ipairs(entries) do
+        if e.server and not e.is_dir then items[#items + 1] = e.server end
+    end
+    local added = self.ctx.downloads:add(items)
+    if added == 0 then
+        self.ctx.toast("Already in Downloads")
+    else
+        self.ctx.toast(added == 1 and "Added to Downloads" or (added .. " videos added to Downloads"))
+    end
+    self:render()
+end
+
+-- Queues every episode of a season (a folder entry of a server listing).
+function M:download_season(entry)
+    local backend = self.ctx.servers:for_ref(entry.server)
+    self.ctx.toast("Getting the episodes…")
+    backend:list(entry.server, function(entries, err)
+        if not entries then
+            self.ctx.toast(err or ("Can't reach the " .. backend.NAME .. " server"))
+            return
+        end
+        self:download(entries)
+    end)
+end
+
+-- Whether the entry is a video file of this device that may be deleted.
+function M:deletable(entry)
+    if not entry or entry.is_dir or entry.server or entry.server_recent then return false end
+    local mounts = library.parse_mounts(util.read_file("/proc/self/mountinfo") or "")
+    return library.delete_refusal(entry.path, self.sources, mounts, self.cfg) == nil
+end
+
+-- Asks, then deletes a video of this device (and its subtitle files).
+-- Media servers are never asked to delete anything.
+function M:delete_dialog(path, label)
+    self.ctx.menu:open({
+        title = "Delete this video?",
+        message = label,
+        style = "center",
+        items = {
+            {label = "Delete from this device", action = function() self:delete(path) end},
+            {label = "Cancel", action = function() end},
+        },
+        selected = 2,
+    })
+end
+
+function M:delete(path)
+    self.sources = self.sources or library.sources(self.cfg, self.ctx.servers:sources())
+    local ok, err = library.delete_video(path, self.sources, self.cfg)
+    if not ok then
+        self.ctx.toast(err)
+        return
+    end
+    self.ctx.resume:forget(path)
+    self.ctx.resume:flush()
+    self.ctx.downloads:forget_path(path)
+    self.ctx.toast("Deleted")
+    if not self.active then return end
+    -- A folder left empty is gone (a season in the download folder): go up.
+    local loc, index = self:location(), self.selected
+    while #self.stack > 0 and not self:location().server and not util.is_dir(self:location().path) do
+        table.remove(self.stack)
+    end
+    self:reload()
+    -- Still in the same folder: the cursor stays where the video was.
+    if self:location() == loc and not self.loading and #self.entries > 0 then
+        self.selected = self:selectable(util.clamp(index, 1, #self.entries), -1)
+        self:render()
+    end
+end
+
+-- Opens a local folder (from the Downloads menu), the cursor on `select`.
+function M:open_folder(path, select)
+    self.ctx.menu:close_all()
+    if not util.is_dir(path) then return end
+    self.cursor[loc_key(self:location())] = self.selected
+    self.stack = {{path = path, label = util.basename(path)}}
+    self:show(select)
+end
+
+-- Plays a local file as from its folder (resume question, next files).
+function M:play_path(path)
+    self.ctx.menu:close_all()
+    local name = util.basename(path)
+    self:start({path = path, label = library.display_name(name, false, self.cfg.interface.clean_names)},
+               self:recent_playlist(path))
+end
+
+-- A download started or ended: new files and tags.
+function M:downloads_changed()
+    if not self.active or self.ctx.menu:is_open() then return end
+    local loc = self:location()
+    if loc and loc.server then self:render() else self:reload() end
+end
+
 function M:open_menu()
     local items = {}
     if self:sortable() then
@@ -514,6 +620,38 @@ function M:open_menu()
     end
     if cur and not cur.is_dir then
         table.insert(items, {label = "Video info", action = function() self:video_info(cur) end})
+    end
+    local downloads = self.ctx.downloads
+    if cur and cur.server and not cur.is_dir and downloads:can_download(cur.server) then
+        local tag = downloads:tag(cur.server)
+        if tag then
+            table.insert(items, {label = tag, action = function() downloads:open_menu() end})
+        else
+            table.insert(items, {label = "Download", action = function() self:download({cur}) end})
+        end
+    elseif cur and cur.server and cur.is_dir and SEASON_KINDS[cur.server.kind] and downloads:can_download(cur.server) then
+        table.insert(items, {label = "Download season", action = function() self:download_season(cur) end})
+    end
+    if loc and loc.server and SEASON_KINDS[loc.server.kind] and downloads:can_download(loc.server) then
+        local n = 0
+        for _, e in ipairs(self.entries) do
+            if e.server and not e.is_dir and not downloads:tag(e.server) then n = n + 1 end
+        end
+        if n > 1 then
+            table.insert(items, {label = "Download all episodes", value = tostring(n), action = function()
+                self:download(self.entries)
+            end})
+        end
+    end
+    if self:deletable(cur) then
+        table.insert(items, {label = "Delete from this device…", action = function()
+            self:delete_dialog(cur.path, cur.label)
+        end})
+    end
+    local active, other, done = downloads:counts()
+    if active + other + done > 0 then
+        local value = active > 0 and (active .. " in progress") or (other > 0 and (other .. " stopped")) or nil
+        table.insert(items, {label = "Downloads", value = value, action = function() downloads:open_menu() end})
     end
     local plex = self.ctx.plex
     if plex and plex:signed_in() then
@@ -847,9 +985,11 @@ function M:draw_row(a, e, x0, x1, y, sel)
                 status_w = ui.text_width("Resume " .. label, 18)
             end
         end
-        -- Where a "Recently played" video is (Local, SD Card, Plex…).
-        if e.tag then
-            local tag = ui.fit_text(e.tag, 16, 240)
+        -- Where a "Recently played" video is (Local, SD Card, Plex…), or
+        -- whether a server video is downloaded.
+        local tag = e.tag or (e.server and self.ctx.downloads:tag(e.server))
+        if tag then
+            tag = ui.fit_text(tag, 16, 240)
             local tw = ui.text_width(tag, 16) + 20
             local tx1 = rx - status_w - (status_w > 0 and 18 or 0)
             a:rect(tx1 - tw, cy - 14, tw, 28, {radius = 14, color = sel and t.text or t.dim,

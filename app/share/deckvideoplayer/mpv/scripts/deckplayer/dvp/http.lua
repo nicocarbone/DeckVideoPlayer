@@ -44,17 +44,29 @@ end
 -- follow (bool, follow redirects; default false: curl forwards custom
 -- headers such as tokens to the redirect target, even on another host),
 -- max_size (bytes, abort larger downloads).
+-- Long downloads (dvp/downloads.lua): timeout = 0 (no time limit; a
+-- transfer slower than 1 KB/s for a minute is aborted instead), resume
+-- (continue `output` where it ends), fail (an HTTP error writes nothing).
 -- Only http(s) URLs are fetched, and redirects only to https (D39).
 function M.curl_config(req)
     local q = M.curl_quote
+    local timeout = req.timeout or 25
     local lines = {
         "silent", "show-error",
         "proto = " .. q("=http,https"),
         "proto-redir = " .. q("=https"),
-        "max-time = " .. tostring(req.timeout or 25),
-        "connect-timeout = " .. tostring(math.min(req.timeout or 25, 10)),
-        "write-out = " .. q("\n%{http_code}"),
     }
+    if timeout == 0 then
+        lines[#lines + 1] = "connect-timeout = 15"
+        lines[#lines + 1] = "speed-limit = 1000"
+        lines[#lines + 1] = "speed-time = 60"
+    else
+        lines[#lines + 1] = "max-time = " .. tostring(timeout)
+        lines[#lines + 1] = "connect-timeout = " .. tostring(math.min(timeout, 10))
+    end
+    lines[#lines + 1] = "write-out = " .. q("\n%{http_code}")
+    if req.fail then lines[#lines + 1] = "fail" end
+    if req.resume then lines[#lines + 1] = "continue-at = " .. q("-") end
     if req.max_size then lines[#lines + 1] = "max-filesize = " .. tostring(req.max_size) end
     local headers = {}
     for k, v in pairs(req.headers or {}) do
@@ -106,6 +118,28 @@ function M.request(req, cb)
         stdin_data = M.curl_config(req),
         capture_stdout = true, capture_stderr = true, playback_only = false,
     }, function(_, res) cb(M.parse_result(res, req.tag)) end)
+end
+
+-- A long download to `req.output` (see curl_config). cb(code, status,
+-- killed): the HTTP status (nil if none arrived), curl's exit status, and
+-- whether it was stopped with M.abort. Returns the handle for M.abort.
+function M.download(req, cb)
+    return mp.command_native_async({
+        name = "subprocess", args = {"curl", "-K", "-"},
+        stdin_data = M.curl_config(req),
+        capture_stdout = true, capture_stderr = true, playback_only = false,
+    }, function(_, res)
+        res = res or {}
+        if res.status ~= 0 and res.stderr then
+            msg.verbose((req.tag or "http") .. ": curl " .. tostring(res.status) .. ": " .. util.trim(res.stderr))
+        end
+        local code = tonumber(tostring(res.stdout or ""):match("(%d%d%d)%s*$"))
+        cb(code ~= 0 and code or nil, res.status, res.killed_by_us == true)
+    end)
+end
+
+function M.abort(handle)
+    if handle then mp.abort_async_command(handle) end
 end
 
 -- Same, blocking. Only for short calls where mpv must wait anyway.

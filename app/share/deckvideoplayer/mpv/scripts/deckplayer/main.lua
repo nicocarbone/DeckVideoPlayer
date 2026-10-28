@@ -31,6 +31,7 @@ local About = require "dvp.about"
 local Plex = require "dvp.plex"
 local Servers = require "dvp.servers"
 local Jellyfin = require "dvp.jellyfin"
+local Downloads = require "dvp.downloads"
 
 local opts = {
     config_file = "",
@@ -59,6 +60,8 @@ if opts.data_dir ~= "" then util.mkdir_p(opts.data_dir) end
 -- mpv options derived from config.ini
 ---------------------------------------------------------------------------
 
+local configured_hwdec   -- config.ini's hwdec as given to mpv
+
 local function apply_playback_options()
     local pb = cfg.playback
     if pb.audio_languages ~= "" then mp.set_property("alang", pb.audio_languages) end
@@ -84,7 +87,8 @@ local function apply_playback_options()
         mp.set_property("audio-spdif", pb.audio_passthrough)
     end
     local hwdec = pb.hwdec
-    if hwdec == "auto" then hwdec = "vaapi,vulkan,auto-safe" end
+    if hwdec == "auto" then hwdec = config.HWDEC_AUTO end
+    configured_hwdec = hwdec
     mp.set_property("hwdec", hwdec)
 end
 
@@ -119,7 +123,8 @@ local state = {
 
 local toast_layer = ui.layer(60)
 local toast_timer
-local function toast(text)
+-- `seconds`: how long it stays (default 1.8 s).
+local function toast(text, seconds)
     local t = ui.theme
     local W, H = ui.size()
     local a = ui.ass()
@@ -130,7 +135,19 @@ local function toast(text)
     a:text(W / 2, y, text, {size = fs, align = 5})
     toast_layer:set(a:build())
     if toast_timer then toast_timer:kill() end
-    toast_timer = mp.add_timeout(1.8, function() toast_layer:clear() end)
+    toast_timer = mp.add_timeout(seconds or 1.8, function()
+        toast_layer:clear()
+        toast_timer = nil
+    end)
+end
+
+-- B during playback closes a toast first. Returns true if one was showing.
+local function dismiss_toast()
+    if not toast_timer then return false end
+    toast_timer:kill()
+    toast_timer = nil
+    toast_layer:clear()
+    return true
 end
 
 -- After apply_profile(): its option values are the ones restored. When it
@@ -181,10 +198,22 @@ local function save_progress(ending)
         -- A local copy for "Recently played" (D50); the server stays the
         -- source of truth for the position.
         local key = backend.recent_key(item)
-        if key then resume:update(key, pos, duration, nil, nil, item.title) end
+        if key then
+            resume:update(key, pos, duration, nil, nil, item.title)
+            resume:set_decoder(key, Player.remembered_decoder(mp.get_property("hwdec") == "no", configured_hwdec))
+        end
         return
     end
     resume:update(path, pos, duration, track_id("audio"), track_id("sub"))
+    resume:set_decoder(path, Player.remembered_decoder(mp.get_property("hwdec") == "no", configured_hwdec))
+end
+
+-- Decoding chosen in the Video menu for this video last time (D62).
+local function restore_decoder(key)
+    local e = key and resume:get(key)
+    if e and e.decoder then
+        mp.set_property("file-local-options/hwdec", Player.hwdec_choice(e.decoder == "software", configured_hwdec))
+    end
 end
 
 -- `start`: seconds, or nil for "the saved position, if any" (on_load).
@@ -245,7 +274,7 @@ local function help()
             row("X / Y", "Subtitles / audio"),
             row("View", "Playback info"),
             row("Menu", "Playback menu"),
-            row("B", "Hide controls, then stop"),
+            row("B", "Close messages and controls, then stop"),
             {label = "Close", action = function() end},
         },
     })
@@ -254,15 +283,31 @@ end
 local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
-    help = help, toast = toast, surround = surround, night = night, keepawake = keepawake,
+    help = help, toast = toast, dismiss_toast = dismiss_toast, surround = surround, night = night, keepawake = keepawake,
     hdr = hdr,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, servers = servers,
     finished = function() state.finished_path = state.current_path end,
 }
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
+ctx.downloads = Downloads.new(ctx, opts.data_dir)
 local browser = Browser.new(ctx)
 local player = Player.new(ctx)
+
+-- Downloads (D60): the library follows them; finishing is announced there,
+-- not over a playing video.
+ctx.changed = function(job)
+    if state.screen ~= "browser" then return end
+    if job and job.status == "done" then
+        toast("Downloaded: " .. job.title)
+    elseif job and job.status == "failed" then
+        toast("Download failed: " .. tostring(job.error))
+    end
+    browser:downloads_changed()
+end
+ctx.play_path = function(path) browser:play_path(path) end
+ctx.browse = function(folder, select) browser:open_folder(folder, select) end
+ctx.delete = function(path, label) browser:delete_dialog(path, label) end
 
 ---------------------------------------------------------------------------
 -- Input routing
@@ -332,6 +377,7 @@ mp.add_hook("on_load", 50, function()
             mp.set_property("stream-open-filename", "dvp-server-unreachable://")
         end
         mp.set_property("file-local-options/force-media-title", item.title or "")
+        restore_decoder(backend.recent_key(item))
         state.server_subs = prep.subs
         player:set_markers(prep.markers)
         if start == nil and cfg.playback.resume and prep.pos
@@ -343,6 +389,7 @@ mp.add_hook("on_load", 50, function()
         return
     end
     local entry = resume:get(path)
+    restore_decoder(path)
     if start == nil and cfg.playback.resume then
         -- Auto-advanced playlist entries and files opened from outside the
         -- library continue where they were left (announced with a toast).
@@ -385,8 +432,19 @@ mp.register_event("start-file", function()
     player:start()
 end)
 
+-- Periodic save so progress survives Steam force-closing the app. Runs
+-- only while a file is open (started on file-loaded, stopped when idle).
+local save_timer = mp.add_periodic_timer(30, function()
+    if state.current_path and not mp.get_property_native("pause") then
+        save_progress()
+        resume:flush()
+    end
+end)
+save_timer:kill()
+
 mp.register_event("file-loaded", function()
     state.current_path = mp.get_property("path")
+    if not save_timer:is_enabled() then save_timer:resume() end
     state.last_played = state.current_path
     local fps = mp.get_property_number("container-fps")
     display:match(fps, function() player:render() end)
@@ -417,14 +475,6 @@ mp.register_event("end-file", function(ev)
     state.current_path = nil
 end)
 
--- Periodic save so progress survives Steam force-closing the app.
-local save_timer = mp.add_periodic_timer(30, function()
-    if state.current_path and not mp.get_property_native("pause") then
-        save_progress()
-        resume:flush()
-    end
-end)
-
 mp.observe_property("idle-active", "bool", function(_, idle)
     if not idle or state.quitting then return end
     if state.external then
@@ -432,6 +482,7 @@ mp.observe_property("idle-active", "bool", function(_, idle)
         return
     end
     state.screen = "browser"
+    save_timer:kill()
     keepawake:set_playing(false)
     menu:close_all()
     player:stop_screen()
@@ -461,6 +512,7 @@ end)
 
 mp.register_event("shutdown", function()
     save_timer:kill()
+    ctx.downloads:shutdown()
     keepawake:set_playing(false)
     save_progress()
     resume:flush()
