@@ -205,6 +205,12 @@ Notes and pitfalls:
   To simulate a share that doesn't answer, put a `find` wrapper that
   sleeps for one folder name first in `PATH` (the dev-mode launcher keeps
   `PATH`).
+- DLNA (D66): `tools/mock-dlna.py [--page N] [--slow S] [--hang] DIR`
+  answers SSDP searches on this machine's LAN address and serves `DIR` as
+  a ContentDirectory (object ids are relative paths, so they hold `/` and
+  spaces) and its videos with Range. In the app: *Menu → Add a DLNA
+  server…*. `--page 3` exercises paging, `--hang` a server that never
+  answers. While it runs, `DIR` is readable from the LAN.
 - `gshot:`/`shot:` steps after the app quit (e.g. a video opened by IPC
   stops and closes the app) don't write anything: check the file's time
   before trusting a screenshot.

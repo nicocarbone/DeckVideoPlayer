@@ -366,23 +366,43 @@ end
 
 -- cb(description or nil, err). Two quick runs: streams and container, then
 -- the first video frame (one frame decoded: colours, HDR10+, brightness).
-function M.probe_local(path, cb)
-    -- Paths in the library are absolute, so never taken for an option.
-    if path:sub(1, 1) ~= "/" then return cb(nil, "not a local file") end
-    ffprobe({"-show_format", "-show_streams", path}, function(probe, err)
-        if not probe then return cb(nil, (err and err ~= "") and util.trim(err) or "Can't read this file") end
+-- `input` (optional): ffprobe options for the input, before the path.
+local function probe(path, input, cb)
+    local function args(list)
+        local out = {}
+        for _, a in ipairs(input or {}) do out[#out + 1] = a end
+        for _, a in ipairs(list) do out[#out + 1] = a end
+        out[#out + 1] = path
+        return out
+    end
+    ffprobe(args({"-show_format", "-show_streams"}), function(probe_out, err)
+        if not probe_out then return cb(nil, (err and err ~= "") and util.trim(err) or "Can't read this file") end
         local video
-        for _, s in ipairs(probe.streams or {}) do
+        for _, s in ipairs(probe_out.streams or {}) do
             if s.codec_type == "video" and not (s.disposition and s.disposition.attached_pic == 1) then
                 video = s.index
                 break
             end
         end
-        if not video then return cb(M.from_ffprobe(probe, nil, path)) end
-        ffprobe({"-select_streams", tostring(video), "-read_intervals", "%+#1", "-show_frames", path}, function(frame)
-            cb(M.from_ffprobe(probe, frame, path))
+        if not video then return cb(M.from_ffprobe(probe_out, nil, path)) end
+        ffprobe(args({"-select_streams", tostring(video), "-read_intervals", "%+#1", "-show_frames"}), function(frame)
+            cb(M.from_ffprobe(probe_out, frame, path))
         end)
     end)
+end
+
+function M.probe_local(path, cb)
+    -- Paths in the library are absolute, so never taken for an option.
+    if path:sub(1, 1) ~= "/" then return cb(nil, "not a local file") end
+    probe(path, nil, cb)
+end
+
+-- A video on a DLNA server (D66): http(s) only, and ffprobe may only use
+-- network protocols for it (no file:, no other protocols a playlist could
+-- point to).
+function M.probe_url(url, cb)
+    if not tostring(url):match("^https?://") then return cb(nil, "not a web address") end
+    probe(url, {"-protocol_whitelist", "http,https,tcp,tls"}, cb)
 end
 
 -- Opens the panel for a library entry: a local file, or a media server

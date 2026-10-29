@@ -40,6 +40,12 @@ there is a single process and nothing between the video and the screen.
 - **Jellyfin**: find your server on the network, sign in with Quick
   Connect, browse Continue watching, Next up, movies and shows, play the
   original files, and keep progress in sync with your other Jellyfin apps.
+- **DLNA**: find the media servers on your network (NAS units, PCs,
+  routers) and play their videos; progress and *Recently played* are
+  kept on the device.
+- **Network shares** (SMB): a NAS or PC share mounted by SteamOS plays
+  like a local folder; a share that is asleep never freezes the app
+  ([setup guide](docs/INSTALL.md#network-shares-smb)).
 - **Downloads** for offline playback: Plex and Jellyfin videos or whole
   seasons, with their subtitles, to a folder of your choice (also the
   microSD card). Local videos can be deleted from the library menu.

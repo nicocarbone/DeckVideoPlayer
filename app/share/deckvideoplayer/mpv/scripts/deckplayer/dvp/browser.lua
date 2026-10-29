@@ -767,6 +767,15 @@ function M:open_menu()
     elseif jf then
         table.insert(items, {label = "Add a Jellyfin server…", action = function() self:jellyfin_add() end})
     end
+    local dlna = self.ctx.dlna
+    if dlna and dlna:signed_in() then
+        local names = {}
+        for _, s in ipairs(dlna:servers()) do names[#names + 1] = s.name end
+        table.insert(items, {label = "DLNA servers", value = table.concat(names, ", "),
+                             action = function() self:dlna_menu() end})
+    elseif dlna then
+        table.insert(items, {label = "Add a DLNA server…", action = function() self:dlna_add() end})
+    end
     table.insert(items, {label = "Controls", action = function() self.ctx.help() end})
     table.insert(items, {label = "About", action = function() self.ctx.about() end})
     table.insert(items, {label = "Quit Deck Video Player", action = function() self.ctx.quit() end})
@@ -967,6 +976,59 @@ function M:jellyfin_server_menu(s)
     }})
 end
 
+-- DLNA servers (found on the LAN; no sign-in, D66)
+---------------------------------------------------------------------------
+
+-- Searches the network and lists the media servers found, to add one.
+function M:dlna_add()
+    local dlna, menu = self.ctx.dlna, self.ctx.menu
+    local spec = {title = "Add a DLNA server", subtitle = "On your network",
+                  style = "side", items = {{label = "Looking for servers…", disabled = true}}}
+    menu:open(spec)
+    dlna:discover(function(found)
+        local items = {}
+        for _, s in ipairs(found) do
+            local host = s.location:match("^https?://([^/:]+)")
+            items[#items + 1] = {label = s.name, value = dlna:server(s.id) and "Added" or host,
+                                 action = function()
+                                     dlna:add(s)
+                                     menu:close_all()
+                                     self.ctx.toast("Added " .. s.name)
+                                     self:reload_to_start()
+                                 end}
+        end
+        if #items == 0 then items[1] = {label = "No servers found", disabled = true} end
+        items[#items + 1] = {separator = true}
+        items[#items + 1] = {label = "Search again", action = function() self:dlna_add() end}
+        menu:update(spec, {items = items})
+    end)
+end
+
+function M:dlna_menu()
+    local dlna = self.ctx.dlna
+    local items = {}
+    for _, s in ipairs(dlna:servers()) do
+        items[#items + 1] = {label = s.name, action = function() self:dlna_server_menu(s) end}
+    end
+    items[#items + 1] = {separator = true}
+    items[#items + 1] = {label = "Add a server…", action = function() self:dlna_add() end}
+    self.ctx.menu:open({title = "DLNA", style = "side", items = items})
+end
+
+function M:dlna_server_menu(s)
+    local dlna = self.ctx.dlna
+    self.ctx.menu:open({title = s.name, style = "side", items = {
+        {label = "Address", value = s.location:match("^https?://([^/]+)") or s.location, disabled = true},
+        {label = "Remove from the library", action = function()
+            dlna:remove(s.id)
+            self.stack = {}
+            self:load()
+            self:render()
+            self.ctx.toast("Removed " .. s.name)
+        end},
+    }})
+end
+
 function M:visible_rows()
     local _, H = ui.size()
     return math.max(1, math.floor((H - HEADER_H - FOOTER_H + ROW_GAP) / (ROW_H + ROW_GAP)))
@@ -1034,7 +1096,7 @@ function M:draw_row(a, e, x0, x1, y, sel)
     local icon_color = sel and t.text or (e.is_dir and t.accent or t.subtext)
     local inner = sel and t.accent or t.bg
     local ix = x0 + 20
-    if e.source == "plex" or e.source == "jellyfin" then
+    if e.source == "plex" or e.source == "jellyfin" or e.source == "dlna" then
         a:icon_server(ix, cy, 30, {color = icon_color, inner = inner})
     elseif e.source == "sdcard" then
         a:icon_sdcard(ix, cy, 30, {color = icon_color, inner = inner})

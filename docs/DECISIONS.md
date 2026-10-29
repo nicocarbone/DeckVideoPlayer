@@ -1659,18 +1659,84 @@ Flatpak's mpv); skipped elsewhere.
   the drop-ins themselves kept). The default list keeps `.service` units
   and `.wants` links but not `.mount` / `.automount`, so the guide adds a
   drop-in listing both units.
-- **Mount point `~/NAS` + `flatpak override --filesystem=…:ro`:** not
-  inside `~/Videos` (opening the library's Videos folder would stat it and
-  wake the NAS each time), not `/mnt` (read-only root on SteamOS), not
-  `/run/media` (udisks' place for drives, and an unmounted automount
-  point isn't listed there). The override is the existing documented way
-  to add a folder outside the sandbox.
+- **Mount point `~/NAS/share`, override on `~/NAS`:** the override is
+  the existing documented way to add a folder outside the sandbox. It
+  must name the parent, not the automount point: bubblewrap sets the
+  override's path up when the app starts, and on the automount point
+  that mounts the share at every launch (seen in the test: launch alone
+  mounted it), which wakes the NAS and, with the NAS off, would make the
+  launch wait for the mount timeout. With the parent bound, the automount
+  point comes along unmounted and the share mounts only when the app
+  opens it (tested). Not inside `~/Videos` (opening the library's Videos
+  folder would stat it and wake the NAS each time), not `/mnt`
+  (read-only root on SteamOS), not `/run/media` (udisks' place for
+  drives, and an unmounted automount point isn't listed there).
 - **Old NAS units:** servers that only speak SMB 2.0 need `vers=2.0`
   (Linux's default negotiation starts at SMB 2.1).
 - **NFS** isn't covered: SteamOS lacks `nfs-utils`.
+- **Desktop file indexers** keep an automounted share busy: on the test
+  desktop, GNOME's indexer read `~/NAS` often enough that the share was
+  never released. The guide says to exclude the folder from Desktop
+  Mode's file search (KDE's indexer).
 - **Tested** on a desktop without `mount.cifs` (like SteamOS), against the
   owner's test NAS (SMB 2.0.2, guest share): the units as written (paths
   adapted), kernel mount through the automount, the Flatpak with the
-  override (listing, network icon, playback with a sidecar subtitle).
+  override (listing, network icon, playback with a sidecar subtitle), and
+  with the share released: launching the app leaves it unmounted, opening
+  it mounts it from inside the sandbox.
   Not yet on a Deck: the keep-list across a real SteamOS update.
+
+## D66. DLNA servers: a third backend, nothing secret (v0.7.0 work)
+
+- **What:** `dvp/dlna.lua`, behind `dvp/servers.lua` like Plex and
+  Jellyfin. *Menu → Add a DLNA server…* searches (SSDP), lists what
+  answered, and keeps the chosen server in `dlna.json` (name and
+  description address). Browsing is ContentDirectory `Browse` over
+  `dvp/http.lua` (a SOAP body: new `raw_body` option), playback is the
+  video's HTTP URL in mpv. No sign-in, no token, no download_info (no
+  downloads from DLNA in v0.7.0), no progress sync: DLNA has no standard
+  one, so position, watched marks and *Recently played* live in
+  resume.json under `dlna://<server id>/<object id>`, like local files.
+- **Search only on request** (network code runs on user request, AGENTS):
+  `dvp-discover --ssdp` sends `M-SEARCH` for `MediaServer:1` to
+  239.255.255.250:1900, twice (UDP can be lost), on the default route and
+  each multicast interface, and prints the sender's address with the
+  answer.
+- **Untrusted answers** (anyone on the LAN can answer, and a server can
+  send anything):
+  - an answer counts only if its LOCATION is http(s) on the address that
+    sent it, a private IPv4; at most 16;
+  - the description (256 KB cap) must be a MediaServer whose UDN matches
+    the answer's USN; its ContentDirectory control URL must be on the
+    description's host (`resolve_url` refuses other hosts and schemes);
+  - Browse answers are capped at 8 MB, 200 entries per request and 5000
+    per listing; a SOAP fault shows its description;
+  - XML is read by a small pattern-based reader: no DTD processing, only
+    the five predefined entities and numeric references (one pass, so
+    `&amp;lt;` stays `&lt;`); a full XML parser isn't in the runtime's
+    Lua, and DIDL-Lite answers are flat;
+  - a video's `<res>` is used only if it is http(s) on the server's host
+    and a video type; the original before a converted copy
+    (`DLNA.ORG_CI=1`), then the largest; Video info runs ffprobe on it
+    with `-protocol_whitelist http,https,tcp,tls`.
+- **Order and names:** listings keep the server's order (merged across
+  pages; the root isn't sortable, folders inside are); titles are often
+  file names, so `clean_names` applies (without cutting an "extension").
+- **Server gone or moved:** the control URL comes from the saved
+  description; if that address stops answering, a search finds the
+  server again by id and saves the new address. A server that accepts
+  connections but doesn't answer (seen with the owner's NAS while it
+  indexed) is a 20 s timeout with an error; B goes back at any time.
+- **Known limits:** object ids are the server's and may change when it
+  rebuilds its index (then a *Recently played* entry can't be opened:
+  "no longer on the server"); on a machine with several networks (VM or
+  container bridges) the first answer of a server wins, which may be an
+  address only that machine reaches (not an issue on a Deck).
+- **Tested:** unit tests (parsers, forged answers, other hosts, entities,
+  CDATA, faults, paging order, keys); `tools/mock-dlna.py` (paging, ids
+  with `/` and spaces, Range) in headless gamescope and through the
+  Flatpak (discovery from the sandbox, browse, play with auto-play,
+  *Recently played* reopened through BrowseMetadata, Video info's Stream
+  row, a hanging server); the owner's NAS (found and described; its
+  browse requests hang, the timeout path).
 

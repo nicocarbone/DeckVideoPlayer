@@ -1219,6 +1219,86 @@ do
     os.remove(tmp)
 end
 
+-- DLNA (D66)
+do
+    local D = require "dvp.dlna"
+    eq("xml unescape", D.xml_unescape("a &amp;lt; b &#233; &#xE9; &quot;x&quot; &bogus;"),
+       "a &lt; b \195\169 \195\169 \"x\" &bogus;")
+    eq("xml escape", D.xml_escape([[a<b>&"c"]]), "a&lt;b&gt;&amp;&quot;c&quot;")
+    eq("element with prefix", D.element_text("<x><dc:title>Hi &amp; bye</dc:title></x>", "title"), "Hi & bye")
+    eq("element without prefix", D.element_text("<UDN>uuid:abc-123</UDN>", "UDN"), "uuid:abc-123")
+    eq("no match inside a longer name", D.element_text("<subtitle>no</subtitle>", "title"), nil)
+    eq("cdata", D.element_text("<dc:title><![CDATA[A & <B>]]></dc:title>", "title"), "A & <B>")
+    eq("safe id from usn", D.safe_id("uuid:1234-abcd::urn:schemas-upnp-org:device:MediaServer:1"), "1234-abcd")
+    eq("ssdp: spoofed location ignored", #D.parse_ssdp(
+        "192.168.1.9\thttp://192.168.1.50:8200/desc.xml\tuuid:aaaa-1\tX\n"), 0)
+    eq("ssdp: public address ignored", #D.parse_ssdp("8.8.8.8\thttp://8.8.8.8/d.xml\tuuid:aaaa-1\tX\n"), 0)
+    local ssdp = D.parse_ssdp("192.168.1.50\thttp://192.168.1.50:8200/desc.xml\tuuid:aaaa-1::urn:x\tminidlna\n"
+        .. "192.168.1.50\thttp://192.168.1.50:8200/desc.xml\tuuid:aaaa-1::urn:x\tminidlna\n"
+        .. "192.168.1.50\tfile:///etc/passwd\tuuid:aaaa-1\tX\n")
+    check("ssdp: one answer per location", #ssdp == 1 and ssdp[1].id == "aaaa-1")
+    eq("url: relative control", D.resolve_url("http://192.168.1.50:8200/rootDesc.xml", "ctl/ContentDir"),
+       "http://192.168.1.50:8200/ctl/ContentDir")
+    eq("url: absolute path", D.resolve_url("http://192.168.1.50:8200/a/b.xml", "/c"), "http://192.168.1.50:8200/c")
+    eq("url: other host refused", D.resolve_url("http://192.168.1.50/", "http://192.168.1.66/c"), nil)
+    eq("url: other scheme refused", D.resolve_url("http://192.168.1.50/", "file:///etc/passwd"), nil)
+    local desc = [[<?xml version="1.0"?><root><URLBase>http://192.168.1.50:9000/</URLBase><device>
+        <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+        <friendlyName>Home NAS: media</friendlyName><UDN>uuid:aaaa-1</UDN><serviceList>
+        <service><serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>
+        <controlURL>/cm</controlURL></service>
+        <service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>
+        <controlURL>/cd/control</controlURL></service></serviceList></device></root>]]
+    local info = D.parse_description(desc, "http://192.168.1.50:8200/desc.xml")
+    check("description", info and info.id == "aaaa-1" and info.name == "Home NAS: media"
+        and info.control == "http://192.168.1.50:9000/cd/control")
+    local evil = desc:gsub("http://192.168.1.50:9000/", "http://192.168.1.66/")
+    eq("description: control on another host refused", D.parse_description(evil, "http://192.168.1.50:8200/d"), nil)
+    eq("description: not a media server", D.parse_description("<root><UDN>uuid:x1234</UDN></root>", "http://192.168.1.50/"), nil)
+    local body = D.browse_body("64$1$<2>", "BrowseDirectChildren", 0, 200)
+    check("browse body escapes the id", body:find("<ObjectID>64$1$&lt;2&gt;</ObjectID>", 1, true) ~= nil)
+    local didl = [[<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+      <container id="Video/Films" parentID="Video" childCount="2"><dc:title>Films &amp; Shows</dc:title>
+        <upnp:class>object.container.storageFolder</upnp:class></container>
+      <item id="v$1" parentID="Video/Films"><dc:title>A Film</dc:title><dc:date>2024-05-01</dc:date>
+        <upnp:class>object.item.videoItem.movie</upnp:class>
+        <res protocolInfo="http-get:*:video/mp4:DLNA.ORG_CI=1" size="100">http://192.168.1.50:9000/t/v1.mp4</res>
+        <res protocolInfo="http-get:*:video/x-matroska:DLNA.ORG_OP=01;DLNA.ORG_CI=0" size="9000" duration="1:02:03.500" resolution="1920x1080">http://192.168.1.50:9000/m/v1.mkv?a=1&amp;b=2</res>
+        <res protocolInfo="http-get:*:video/x-matroska:*" size="99999">http://192.168.1.66/evil.mkv</res></item>
+      <item id="a1" parentID="Video/Films"><dc:title>A Song</dc:title><upnp:class>object.item.audioItem</upnp:class>
+        <res protocolInfo="http-get:*:audio/mpeg:*">http://192.168.1.50:9000/a.mp3</res></item>
+      <item id="v2" parentID="Video/Films"><dc:title>Generic</dc:title><upnp:class>object.item</upnp:class>
+        <res protocolInfo="http-get:*:video/mp4:*">http://192.168.1.50:9000/v2.mp4</res></item>
+      <item id="v3" parentID="Video/Films"><dc:title>Elsewhere</dc:title><upnp:class>object.item.videoItem</upnp:class>
+        <res protocolInfo="http-get:*:video/mp4:*">http://192.168.1.66/v3.mp4</res></item>
+    </DIDL-Lite>]]
+    local containers, videos = D.parse_didl(didl)
+    check("didl: container", #containers == 1 and containers[1].id == "Video/Films"
+        and containers[1].title == "Films & Shows" and containers[1].count == 2)
+    eq("didl: videos only (audio skipped)", #videos, 3)
+    local r = D.pick_res(videos[1].res, "192.168.1.50")
+    eq("res: original, same host, query unescaped", r and r.url, "http://192.168.1.50:9000/m/v1.mkv?a=1&b=2")
+    check("res: duration and size", r.duration == 3723.5 and r.size == 9000)
+    eq("res: by video mime in a generic item", D.pick_res(videos[2].res, "192.168.1.50").url,
+       "http://192.168.1.50:9000/v2.mp4")
+    eq("res: other host only -> none", D.pick_res(videos[3].res, "192.168.1.50"), nil)
+    eq("didl: date", videos[1].date, 20240501000000)
+    check("didl: document order kept", containers[1].pos < videos[1].pos and videos[1].pos < videos[2].pos)
+    local wrapped = "<s:Envelope><s:Body><u:BrowseResponse><Result>" .. D.xml_escape(didl)
+        .. "</Result><NumberReturned>4</NumberReturned><TotalMatches>9</TotalMatches></u:BrowseResponse></s:Body></s:Envelope>"
+    local page = D.parse_browse(wrapped)
+    check("browse answer", page and page.returned == 4 and page.total == 9 and #({D.parse_didl(page.didl)})[2] == 3)
+    local _, ferr = D.parse_browse("<s:Envelope><s:Body><s:Fault><detail><UPnPError><errorCode>701</errorCode>"
+        .. "<errorDescription>No such object</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>")
+    eq("browse fault", ferr, "No such object")
+    local key = D.recent_key({machine = "aaaa-1", key = "64$1/2 x"})
+    eq("recent key", key, "dlna://aaaa-1/64%241%2F2%20x")
+    local id, k = D.parse_recent_key(key)
+    check("recent key round trip", id == "aaaa-1" and k == "64$1/2 x")
+    eq("not a dlna key", D.parse_recent_key("jellyfin://x/y"), nil)
+    eq("duration parse", D.parse_duration("0:00:07"), 7)
+end
+
 -- Video menu decoding choice (D62)
 do
     local Player = require "dvp.player"

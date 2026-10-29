@@ -282,6 +282,31 @@ Notes:
   removes it and ends the session on the server; it is also listed under
   Dashboard → Devices in Jellyfin.
 
+## DLNA servers
+
+Many NAS units, PCs and routers share videos over DLNA (often called a
+"media server" in their settings).
+
+1. Library → **Menu** → **Add a DLNA server…**. The media servers on
+   your home network are listed; choose one. It appears next to your
+   folders.
+2. Open it and browse its folders (each server organizes them its own
+   way, e.g. *Video → Folders*).
+
+Notes:
+- There is no sign-in: anyone on your home network can browse a DLNA
+  server, and so can the app.
+- Progress, watched marks and *Recently played* are kept on this device
+  (DLNA has no shared progress), tagged *DLNA*.
+- Videos play in their original form: when a server also offers a
+  converted copy, the app picks the original.
+- A server that is busy (e.g. indexing new files) may not answer for a
+  while: the library says so after 20 s, and B goes back at any time.
+- Not listed? The server must be on the same network, with its media
+  server (DLNA) turned on; some routers block the search between Wi-Fi
+  and wired devices.
+- **Menu → DLNA servers → server → Remove from the library** forgets it.
+
 ## Network shares (SMB)
 
 Videos on a NAS or a shared folder of a PC play once SteamOS mounts the
@@ -294,16 +319,17 @@ You need the server's **IP address** (give it a fixed one in your
 router), the **share name**, and a **user name and password** that can
 read it. A user that can only read the videos is the safest choice.
 
-1. A folder for the share:
+1. Folders for the share (the share itself goes one level down, in
+   `~/NAS/share`, so starting the app doesn't wake the NAS):
 
    ```sh
-   mkdir -p ~/NAS
+   mkdir -p ~/NAS/share
    ```
 
 2. How to mount it (your address, share, user and password):
 
    ```sh
-   sudo tee /etc/systemd/system/home-deck-NAS.mount >/dev/null <<'EOF'
+   sudo tee /etc/systemd/system/home-deck-NAS-share.mount >/dev/null <<'EOF'
    [Unit]
    Description=NAS share for Deck Video Player
    Wants=network-online.target
@@ -311,31 +337,31 @@ read it. A user that can only read the videos is the safest choice.
 
    [Mount]
    What=//192.168.1.50/Videos
-   Where=/home/deck/NAS
+   Where=/home/deck/NAS/share
    Type=cifs
    Options=ro,username=USER,password=PASSWORD,uid=1000,gid=1000,iocharset=utf8
    TimeoutSec=30
    EOF
-   sudo chmod 600 /etc/systemd/system/home-deck-NAS.mount
+   sudo chmod 600 /etc/systemd/system/home-deck-NAS-share.mount
    ```
 
 3. Mount it when it is opened, and let go of it after 10 idle minutes (so
    a NAS can sleep):
 
    ```sh
-   sudo tee /etc/systemd/system/home-deck-NAS.automount >/dev/null <<'EOF'
+   sudo tee /etc/systemd/system/home-deck-NAS-share.automount >/dev/null <<'EOF'
    [Unit]
    Description=Mount the NAS share when it is opened
 
    [Automount]
-   Where=/home/deck/NAS
+   Where=/home/deck/NAS/share
    TimeoutIdleSec=10min
 
    [Install]
    WantedBy=multi-user.target
    EOF
    sudo systemctl daemon-reload
-   sudo systemctl enable --now home-deck-NAS.automount
+   sudo systemctl enable --now home-deck-NAS-share.automount
    ```
 
 4. Keep both files through SteamOS updates (since SteamOS 3.6 an update
@@ -343,14 +369,14 @@ read it. A user that can only read the videos is the safest choice.
 
    ```sh
    sudo tee /etc/atomic-update.conf.d/deckvideoplayer-nas.conf >/dev/null <<'EOF'
-   /etc/systemd/system/home-deck-NAS.mount
-   /etc/systemd/system/home-deck-NAS.automount
+   /etc/systemd/system/home-deck-NAS-share.mount
+   /etc/systemd/system/home-deck-NAS-share.automount
    EOF
    ```
 
-5. Check: `ls ~/NAS` should list the share (the first access mounts it,
-   which can take a few seconds). If it doesn't, `journalctl -u
-   home-deck-NAS.mount -n 20` says why.
+5. Check: `ls ~/NAS/share` should list the share (the first access
+   mounts it, which can take a few seconds). If it doesn't, `journalctl
+   -u home-deck-NAS-share.mount -n 20` says why.
 
 6. Let the app read it, and add it to the library:
 
@@ -361,8 +387,12 @@ read it. A user that can only read the videos is the safest choice.
    and in `~/.config/deckvideoplayer/config.ini`, under `[library]`:
 
    ```ini
-   folder = ~/NAS
+   folder = ~/NAS/share
    ```
+
+   (or a folder inside it, e.g. `~/NAS/share/Movies`). The permission is
+   for `~/NAS`, not the share itself: the app gets access to it when it
+   starts, and the share would be mounted then.
 
 The share appears on the start screen with a network icon, and its
 videos show a *Network* tag in *Recently played*.
@@ -380,13 +410,18 @@ Notes:
   the mount options through `systemctl`, so use an account that can only
   read the videos. A password with a comma can't be written this way.
 - **Another folder name:** unit files are named after the folder they
-  mount: `/home/deck/NAS` → `home-deck-NAS.mount` / `.automount`. For
-  another path, `systemd-escape -p --suffix=mount /home/deck/My Share`
-  prints the name to use.
-- **To remove it:** `sudo systemctl disable --now home-deck-NAS.automount`,
-  then delete the three files above and run `sudo systemctl daemon-reload`.
+  mount: `/home/deck/NAS/share` → `home-deck-NAS-share.mount` /
+  `.automount`. For another path, `systemd-escape -p --suffix=mount
+  "/home/deck/NAS/My Share"` prints the name to use. A second share: a
+  second folder in `~/NAS` with its own pair of units.
+- **To remove it:** `sudo systemctl disable --now
+  home-deck-NAS-share.automount`, then delete the three files above and
+  run `sudo systemctl daemon-reload`.
 - The app never writes to the share: it is mounted read-only (`ro`),
   and downloads and *Delete* refuse network folders anyway.
+- **Desktop file search** (KDE's file indexer in Desktop Mode) may keep
+  reading `~/NAS/share`, so the share is never released and the NAS doesn't
+  sleep: exclude that folder from file search in Desktop Mode's settings.
 - NFS shares aren't covered yet: SteamOS lacks the tools to mount them.
 
 ## Troubleshooting

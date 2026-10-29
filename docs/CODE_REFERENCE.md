@@ -429,7 +429,8 @@ Shared by OpenSubtitles and Plex. `request(req, cb)` (async) and
 `method`, `headers` (`{Name = value}`), `body` (table → JSON), `output`
 (file), `timeout` (s), `follow` (redirects; off by default because curl
 forwards custom headers to the redirect target), `max_size` (bytes), `tag`
-(log prefix). Every request is limited to http(s), redirects to https
+(log prefix), `raw_body` + `content_type` (a text body as is: DLNA's SOAP,
+D66). Every request is limited to http(s), redirects to https
 (D39). `cb(code,
 body)`: HTTP status, or nil + error text; body is decoded JSON when
 possible. Pure: `curl_config(req)` (the `-K -` text: secrets never in
@@ -578,12 +579,46 @@ watched, cb, sync)` (`/UserPlayedItems`), `describe(path)`,
 (`/Items/<id>/Download`, honours `CanDownload`, D60). `readonly`
 (development) turns reports and marks into log lines.
 
-## `helper/dvp-discover.c` (D55)
+## `helper/dvp-discover.c` (D55, D66)
 
 `dvp-discover [TIMEOUT_MS]`: sends Jellyfin's discovery broadcast (UDP
 7359) on every IPv4 interface and to 255.255.255.255, prints each answer
 on its own line (control characters replaced) until the time is up, at
-most 64 answers.
+most 64 answers. `dvp-discover --ssdp [TIMEOUT_MS]` (default 2500): an
+SSDP `M-SEARCH` for `MediaServer:1` to 239.255.255.250:1900, twice, on
+the default route and every multicast interface; prints `sender address
+<TAB> LOCATION <TAB> USN <TAB> SERVER` per answer.
+
+## `dvp/dlna.lua`: DLNA / UPnP media servers (D66)
+
+Same interface as the other backends (`ID = "dlna"`, `NAME = "DLNA"`),
+without sign-in or `download_info`. Pure (unit-tested): `xml_unescape`
+(predefined entities and numeric references, one pass), `xml_escape`,
+`element_text(xml, name)` (with or without a namespace prefix, CDATA),
+`attr(attrs, name)`, `safe_id` (UUID of a UDN/USN), `split_url`,
+`parse_ssdp(text)` (answers whose LOCATION host is the sender, a private
+IPv4, one per location, at most 16), `resolve_url(base, ref)` (same host
+only), `parse_description(xml, location)` → `{id, name, control}` (the
+ContentDirectory control URL on the description's host),
+`browse_body(id, flag, start, count)`, `parse_browse(xml)` → `{didl,
+returned, total}` or nil + the SOAP fault, `parse_didl(didl)` →
+containers and video items (by class or video MIME type) with `pos`
+(document order), `pick_res(res, host)` (http(s) on the server's host, a
+video type, the original before a converted copy, then the largest),
+`parse_duration`, `recent_key` / `parse_recent_key` / `recent_ref`
+(`dlna://<id>/<percent-encoded object id>`).
+Instance (`new(data_dir, {resume, clean_names})`, `dlna.json`):
+`servers()`, `server(id)`, `signed_in()` (any added), `sources()`,
+`discover(cb)` (dvp-discover, then each description), `add(info)`,
+`remove(id)`, `connect(id, cb)` (control URL from the saved description;
+if that address is gone, a search finds the server by id),
+`browse(...)` (20 s, 8 MB per answer), `list(loc, cb)` (pages of 200, at
+most 5000 entries, in the server's order; titles cleaned like file names),
+`metadata`, `resolve(id, key, siblings, cb)` (BrowseMetadata, then the
+parent container for auto-play), `prepare(item)` (the local position),
+`header_fields()` = "", `report()` (nothing: main.lua saves progress in
+resume.json under `recent_key`), `set_watched` (local), `describe`,
+`fetch_range`, `video_info` (`VideoInfo.probe_url`).
 
 ## `dvp/hdr.lua`: HDR choices (D52)
 
@@ -619,7 +654,8 @@ audio, subs}`, `server_source(service, server_name, connection)` →
 `items(sections)` → menu items (headers + rows).
 `probe_local(path, cb)` runs ffprobe asynchronously (streams and format,
 then the first video frame: colours when the stream says "unknown",
-HDR10+, brightness).
+HDR10+, brightness); `probe_url(url, cb)` the same for an http(s) URL
+(DLNA), with `-protocol_whitelist http,https,tcp,tls`.
 `open(ctx, entry, source)` opens the wide side panel ("Reading…") and fills it
 from ffprobe or the server's `video_info(ref, cb)` (entries with `server` or `server_recent`, D55).
 

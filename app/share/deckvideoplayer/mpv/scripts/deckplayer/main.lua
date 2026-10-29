@@ -31,6 +31,7 @@ local About = require "dvp.about"
 local Plex = require "dvp.plex"
 local Servers = require "dvp.servers"
 local Jellyfin = require "dvp.jellyfin"
+local Dlna = require "dvp.dlna"
 local Downloads = require "dvp.downloads"
 
 local opts = {
@@ -167,8 +168,10 @@ local plex = Plex.new(opts.data_dir, {allow_insecure = cfg.plex.allow_insecure_l
 plex.readonly = opts.plex_readonly
 local jellyfin = Jellyfin.new(opts.data_dir, {urls = cfg.jellyfin.server})
 jellyfin.readonly = opts.jellyfin_readonly
+-- DLNA servers keep their progress here, like local files (D66).
+local dlna = Dlna.new(opts.data_dir, {resume = resume, clean_names = cfg.interface.clean_names})
 -- Media servers behind one interface (D55).
-local servers = Servers.new({plex, jellyfin})
+local servers = Servers.new({plex, jellyfin, dlna})
 
 -- Saves the position of the current file: in resume.json for local files,
 -- on the server for Plex / Jellyfin videos (D37, D55). `ending`: the file is
@@ -285,7 +288,7 @@ local ctx = {
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
     help = help, toast = toast, dismiss_toast = dismiss_toast, surround = surround, night = night, keepawake = keepawake,
     hdr = hdr,
-    app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, servers = servers,
+    app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, dlna = dlna, servers = servers,
     finished = function() state.finished_path = state.current_path end,
 }
 ctx.about = function() About.open(ctx) end

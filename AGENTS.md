@@ -20,6 +20,7 @@ non-trivial.
 | Folder listing, sources, sorting | `…/dvp/library.lua` |
 | Plex (sign-in, servers, browse, playback, progress) | `…/dvp/plex.lua`, Plex parts of `…/dvp/browser.lua` and `…/main.lua`, `tools/plex-dev-account.py` |
 | Jellyfin (discovery, Quick Connect, browse, playback, progress) | `…/dvp/jellyfin.lua`, `helper/dvp-discover.c`, Jellyfin parts of `…/dvp/browser.lua`, `tools/jellyfin-dev-account.py` (D55) |
+| DLNA servers (SSDP discovery, ContentDirectory browsing) | `…/dvp/dlna.lua`, `helper/dvp-discover.c` (`--ssdp`), DLNA menus in `…/dvp/browser.lua`, `tools/mock-dlna.py` (D66) |
 | Plex / Jellyfin behind one interface | `…/dvp/servers.lua` (router used by browser, main, player, subtitles, video info) |
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
@@ -154,7 +155,8 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   the Deck's hardware decoder (D62); bug hunt (D61); B closes toasts and
   the skip prompt first (D63).
 - v0.7.0 (in progress): folder listings in a subprocess, network
-  folders never stat'ed (D64); `EXTRA_FOLDER` in `tools/headless-run.sh`.
+  folders never stat'ed (D64); `EXTRA_FOLDER` in `tools/headless-run.sh`;
+  SMB mount guide (D65); DLNA servers (D66, `tools/mock-dlna.py`).
   Owner's test NAS: details only in git-ignored `.dev/network-test.md`.
 - Planned: see `docs/ROADMAP.md`. v0.7.0: folder listings that don't
   block on network shares, network folders (shares mounted by SteamOS)

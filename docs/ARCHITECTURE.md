@@ -228,6 +228,7 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `$XDG_DATA_HOME/deckvideoplayer/resume.json` (Flatpak: `~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/`) | Resume positions, watched flags, chosen audio/sub track per file | `dvp/resume.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/plex.json` | Plex sign-in: client id, account token, servers and their addresses (mode 600) | `dvp/plex.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/jellyfin.json` | Jellyfin: device id, servers (address, user) and their device tokens (mode 600) | `dvp/jellyfin.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/dlna.json` | DLNA servers added (name, description address; nothing secret) | `dvp/dlna.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
 | `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
 

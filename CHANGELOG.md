@@ -9,6 +9,11 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ### New
 
+- **DLNA servers:** *Menu → Add a DLNA server…* finds the media servers
+  on your network (NAS units, PCs, routers); added servers appear next to
+  your folders. Their videos play like any other, with resume, watched
+  marks and *Recently played* kept on the device (DLNA servers don't keep
+  progress). Video info works too.
 - **Guide for network shares (SMB):** the install guide shows how to
   have SteamOS mount a NAS or PC share (once, in Desktop Mode, kept
   through SteamOS updates) and add it to the library.

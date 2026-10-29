@@ -40,7 +40,8 @@ end
 
 -- Pure: the curl config for a request. req: url, method ("GET" default,
 -- "POST", "PUT"…), headers {name = value} or list of "Name: value",
--- body (table -> JSON), output (file path), timeout (s, default 25),
+-- body (table -> JSON), raw_body + content_type (a text body as is, e.g.
+-- SOAP XML for DLNA), output (file path), timeout (s, default 25),
 -- follow (bool, follow redirects; default false: curl forwards custom
 -- headers such as tokens to the redirect target, even on another host),
 -- max_size (bytes, abort larger downloads).
@@ -78,6 +79,9 @@ function M.curl_config(req)
     if req.body then
         lines[#lines + 1] = "header = " .. q("Content-Type: application/json")
         lines[#lines + 1] = "data-binary = " .. q(utils.format_json(req.body))
+    elseif req.raw_body then
+        lines[#lines + 1] = "header = " .. q("Content-Type: " .. (req.content_type or "text/plain"))
+        lines[#lines + 1] = "data-binary = " .. q(req.raw_body)
     elseif req.follow then
         lines[#lines + 1] = "location"
     end
