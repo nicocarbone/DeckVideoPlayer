@@ -122,7 +122,16 @@ subtitles (vendor-specific), DLNA progress sync.
 
 ## Next, in this order
 
-1. **In-app SMB** (no system mount): a helper built on libsmb2
+1. **Rename library sources**: *Rename…* in the start screen's menu for
+   any source (folders, network shares, SD card, USB drives, Plex,
+   Jellyfin and DLNA servers), shown on the start screen, in *Recently
+   played* tags and in Video info; names kept in the data folder by path
+   or server id, an empty name restores the original. Needs the UI's
+   first **text field** (typed with the Steam keyboard, STEAM + X, or a
+   keyboard; mpv's `ANY_UNICODE` key; Backspace and Enter handled while it
+   is open), reusable for the SMB password below. Until then a network
+   share is named after its mount folder (the SMB guide says how).
+2. **In-app SMB** (no system mount): a helper built on libsmb2
    (LGPL-2.1, SMB2/3) that lists folders and streams files to mpv
    through a local HTTP endpoint (`127.0.0.1`, random port and per-session
    token, only files the app asked for); the password goes to the helper
@@ -132,13 +141,13 @@ subtitles (vendor-specific), DLNA progress sync.
    the player process, password in the URL (logs), and no folder
    listing. (Licensing is not the obstacle: the bundle is already
    GPL-3.0-or-later because FFmpeg is built with `--enable-version3`.)
-2. **In-app NFS** with libnfs (LGPL-2.1) in the same helper, if worth it:
+3. **In-app NFS** with libnfs (LGPL-2.1) in the same helper, if worth it:
    most NFS exports only accept privileged source ports, which a
    sandboxed app can't use, so many would need `insecure` on the server;
    a system mount (v0.7.0) may be the better answer for NFS users.
-3. **Downloads from shares and DLNA** through the same paths (D60's
+4. **Downloads from shares and DLNA** through the same paths (D60's
    queue, curl).
-4. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
+5. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
    an episode started there should offer the next one (today *Continue
    watching* plays one item at a time).
 

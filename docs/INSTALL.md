@@ -409,6 +409,11 @@ Notes:
   The file is readable only by root, but programs running as you can see
   the mount options through `systemctl`, so use an account that can only
   read the videos. A password with a comma can't be written this way.
+- **The name in the library** is the folder's: this guide's share shows
+  as "share". To see another name, use another folder in every step,
+  e.g. `~/NAS/Movies` (units `home-deck-NAS-Movies.mount` /
+  `.automount`, `folder = ~/NAS/Movies`); the permission for `~/NAS`
+  stays the same.
 - **Another folder name:** unit files are named after the folder they
   mount: `/home/deck/NAS/share` → `home-deck-NAS-share.mount` /
   `.automount`. For another path, `systemd-escape -p --suffix=mount
