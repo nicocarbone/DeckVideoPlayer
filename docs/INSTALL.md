@@ -419,15 +419,84 @@ Notes:
   `.automount`. For another path, `systemd-escape -p --suffix=mount
   "/home/deck/NAS/My Share"` prints the name to use. A second share: a
   second folder in `~/NAS` with its own pair of units.
-- **To remove it:** `sudo systemctl disable --now
-  home-deck-NAS-share.automount`, then delete the three files above and
-  run `sudo systemctl daemon-reload`.
+- **To unmount or remove it:** see [Unmounting or removing a
+  share](#unmounting-or-removing-a-share) below.
 - The app never writes to the share: it is mounted read-only (`ro`),
   and downloads and *Delete* refuse network folders anyway.
 - **Desktop file search** (KDE's file indexer in Desktop Mode) may keep
   reading `~/NAS/share`, so the share is never released and the NAS doesn't
   sleep: exclude that folder from file search in Desktop Mode's settings.
 - NFS shares aren't covered yet: SteamOS lacks the tools to mount them.
+
+### Unmounting or removing a share
+
+The commands use the names from the steps above (`~/NAS/share`,
+`home-deck-NAS-share`); use yours if you chose another folder. Run them
+in Konsole, in Desktop Mode.
+
+**Unmount it for now** (it mounts again the next time it is opened, e.g.
+from the app):
+
+```sh
+sudo systemctl stop home-deck-NAS-share.mount
+```
+
+**Keep it unmounted until the next restart** (opening the folder then
+shows it empty; after a restart it works again):
+
+```sh
+sudo systemctl stop home-deck-NAS-share.automount home-deck-NAS-share.mount
+```
+
+**Remove it for good:**
+
+1. In `~/.config/deckvideoplayer/config.ini`, delete the
+   `folder = ~/NAS/share` line (or the line with your folder inside it).
+2. Stop it and turn off mounting at startup:
+
+   ```sh
+   sudo systemctl disable --now home-deck-NAS-share.automount
+   sudo systemctl stop home-deck-NAS-share.mount
+   ```
+
+3. Delete its two unit files and reload systemd:
+
+   ```sh
+   sudo rm /etc/systemd/system/home-deck-NAS-share.mount /etc/systemd/system/home-deck-NAS-share.automount
+   sudo systemctl daemon-reload
+   ```
+
+4. The keep-list for SteamOS updates: if this was your only share,
+   delete it:
+
+   ```sh
+   sudo rm /etc/atomic-update.conf.d/deckvideoplayer-nas.conf
+   ```
+
+   If it lists other shares too, remove only this share's two lines
+   instead (`sudo nano /etc/atomic-update.conf.d/deckvideoplayer-nas.conf`).
+
+5. Remove the empty folder, and `~/NAS` if no other share is in it:
+
+   ```sh
+   rmdir ~/NAS/share
+   rmdir ~/NAS
+   ```
+
+   `rmdir` only removes empty folders. If it says the folder isn't
+   empty, the share is still mounted: repeat step 2. Don't delete the
+   folder's contents yourself while it is mounted: they are the files on
+   your NAS.
+
+6. If no other share is left in `~/NAS`, take back the app's
+   permission:
+
+   ```sh
+   flatpak override --user --nofilesystem=/home/deck/NAS io.github.nicocarbone.DeckVideoPlayer
+   ```
+
+The share's credentials were only in the unit file deleted in step 3.
+Nothing on the NAS changes.
 
 ## Troubleshooting
 
