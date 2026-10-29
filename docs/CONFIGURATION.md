@@ -17,7 +17,7 @@ in `dvp/config.lua`.
 | `removable_media` | bool | `yes` | Also list mounted drives under `/run/media` and `/media` (microSD card, USB). |
 | `show_hidden` | bool | `no` | Show dot-files and dot-folders. |
 | `extensions` | csv | built-in list | File extensions treated as video. |
-| `download_folder` | absolute path | `~/Videos/Downloaded` | Where *Download* saves Plex and Jellyfin videos (D60); a library source while it holds something. Must be inside a folder the Flatpak can write to (`~/Videos`, `~/Downloads`, `/run/media` for the microSD card, `/media`, `/mnt`). Empty: no downloads. |
+| `download_folder` | absolute path | `~/Videos/Downloaded` | Where *Download* saves Plex and Jellyfin videos (D60); a library source while it holds something. Must be inside a folder the Flatpak can write to (`~/Videos`, `~/Downloads`, `/run/media` for the microSD card, `/media`, `/mnt`), and not on a network share or automount point (then, as when empty, there are no downloads, D64). Empty: no downloads. |
 
 ## `[playback]`
 

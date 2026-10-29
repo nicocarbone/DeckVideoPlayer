@@ -1621,11 +1621,18 @@ Flatpak's mpv); skipped elsewhere.
   alone.
 - **Kept synchronous:** listings for delete (local only, refused on
   network filesystems before any stat), the download folder and the
-  app's own data. The OpenSubtitles hash still reads the start and end of
+  app's own data. So a `download_folder` on a network share or an
+  automount point turns downloads off (`library.download_folder()` →
+  nil, found in the v0.7.0 audit): downloads stat, rename and list files
+  directly, and offline copies belong on the device anyway. The OpenSubtitles hash still reads the start and end of
   a file when it plays, where mpv reads the file anyway.
 - **Cost:** one process start per folder opened (a few milliseconds on a
   Deck); no timers while idle (the three timers live only while a listing
   is pending).
+- **Known limit:** opening a video on a share that dies at that moment
+  waits in mpv's own file reading (the kernel call can't be interrupted):
+  starting that video, and stopping it, may wait until the mount gives up (soft mounts time out; the SMB guide's CIFS mounts are
+  soft by default).
 - **Tested:** unit tests (parser, errors, slow-path detection, the same
   real folder listed directly and through `find`); headless gamescope with
   the owner's test share mounted through gvfs (listing, playback with a

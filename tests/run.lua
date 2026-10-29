@@ -1173,6 +1173,8 @@ do
     for _, e in ipairs(entries) do if e.name:find("newline") then odd = e end end
     check("listing: tab and newline in a name", odd ~= nil and odd.name == "Tab\tand\nnewline.mp4")
     eq("listing: empty output", #library.parse_listing("", "/v", lcfg, "name"), 0)
+    local old = library.parse_listing(rec("f", "-315608400.0000000000", "5", "Old.mkv"), "/v", lcfg, "name")
+    check("listing: file dated before 1970", #old == 1 and old[1].mtime == -315608400)
     eq("listing error: none on success", library.listing_error({status = 0, stdout = ""}), nil)
     eq("listing error: partial output wins", library.listing_error({status = 1, stdout = out, stderr = "x"}), nil)
     eq("listing error: find's reason", library.listing_error({status = 1, stdout = "",
@@ -1194,6 +1196,11 @@ do
     check("not slow: internal", not library.is_slow_path(mounts, "/home/deck/Videos/a.mkv"))
     eq("network tag", library.source_tag({kind = "network", name = "Movies"}), "Network")
     eq("network label", library.source_label({kind = "network", name = "Movies"}), "Network · Movies")
+    local dcfg2 = config.defaults()
+    dcfg2.library.download_folder = "/mnt/nas/Downloaded"
+    eq("download folder on a share: downloads off", library.download_folder(dcfg2, mounts), nil)
+    dcfg2.library.download_folder = "/run/media/deck/SD/Downloaded"
+    eq("download folder on the SD card", library.download_folder(dcfg2, mounts), "/run/media/deck/SD/Downloaded")
     local pts = library.parse_mountinfo("70 22 0:70 / /media/nas rw - cifs //nas/share rw")
     eq("removable list keeps fstype", pts[1] and pts[1].fstype, "cifs")
 

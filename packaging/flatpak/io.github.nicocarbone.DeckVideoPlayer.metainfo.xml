@@ -56,6 +56,16 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.7.0" date="2026-10-29">
+      <description>
+        <p>Network shares and DLNA servers.</p>
+        <ul>
+          <li>DLNA servers on the home network (NAS units, PCs, routers): find, browse and play, with resume and Recently played kept on the device</li>
+          <li>Folders on network shares no longer freeze the app; shares get their own icon and a Network tag</li>
+          <li>A guide to mount SMB shares on SteamOS, kept through updates</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-10-28">
       <description>
         <p>Downloads for offline playback.</p>

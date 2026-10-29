@@ -168,6 +168,7 @@ end
 
 -- Stops waiting for a folder listing (left the folder, or gave up).
 function M:cancel_listing()
+    self.slow_listing = false
     local job = self.listing
     if not job then return end
     self.listing = nil
@@ -518,7 +519,11 @@ function M:mark(entry, watched)
         local item = entry.server or entry.server_recent
         local duration = (entry.state or {}).duration
         local backend = self.ctx.servers:for_ref(item)
-        backend:connect(item.machine, function(base, err)
+        -- (DLNA keeps marks on this device: no need to reach the server.)
+        local reach = backend.LOCAL_STATE and function(_, cb) cb(true) end or function(id, cb)
+            backend:connect(id, cb)
+        end
+        reach(item.machine, function(base, err)
             if not base then self.ctx.toast(err or ("Can't reach the " .. backend.NAME .. " server")) return end
             backend:set_watched(item, watched, function(ok)
                 if not ok then self.ctx.toast(backend.NAME .. " didn't accept the change") return end
@@ -653,6 +658,7 @@ end
 -- Opens a local folder (from the Downloads menu), the cursor on `select`.
 function M:open_folder(path, select)
     self.ctx.menu:close_all()
+    -- (Only the download folder, which is never on a network share.)
     if not util.is_dir(path) then return end
     self.cursor[loc_key(self:location())] = self.selected
     self.stack = {{path = path, label = util.basename(path)}}

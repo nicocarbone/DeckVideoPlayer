@@ -104,7 +104,7 @@ eighth audit fixed (D59).
 Also: a bug hunt (D61), and B closes toasts and the skip prompt before
 stopping (D63).
 
-## v0.7.0: network shares and DLNA (planned)
+## v0.7.0: network shares and DLNA (released 2026-10-29)
 
 Scope chosen to keep the new attack surface small: no new native
 library, no credentials in the app, no listening socket, no sandbox

@@ -5,7 +5,9 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## v0.7.0 (unreleased)
+## v0.7.0 (2026-10-29)
+
+Network shares and DLNA servers.
 
 ### New
 
@@ -25,6 +27,9 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
   the folder is slow to answer and B goes back, instead of the whole app
   hanging. Shares mounted on the system (SMB, NFS) have their own icon on
   the start screen and a *Network* tag in *Recently played*.
+- A `download_folder` on a network share is no longer used (downloads
+  are for this device, and a share that stopped answering could freeze
+  them).
 
 ## v0.6.0 (2026-10-28)
 

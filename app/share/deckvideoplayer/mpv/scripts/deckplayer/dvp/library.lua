@@ -97,13 +97,17 @@ local function removable_roots(text)
     return roots
 end
 
--- The folder downloads go to ([library] download_folder), or nil (unset,
--- or not an absolute path).
-function M.download_folder(cfg)
+-- The folder downloads go to ([library] download_folder), or nil: unset,
+-- not an absolute path, or on a network share (downloads and their
+-- bookkeeping touch files directly, which a share that stopped answering
+-- would block; offline copies belong on this device anyway). `mounts`:
+-- parse_mounts() output, read here when not given.
+function M.download_folder(cfg, mounts)
     local f = cfg.library.download_folder
     if not f or f == "" then return nil end
     f = util.expand_path(f)
     if f:sub(1, 1) ~= "/" then return nil end
+    if M.is_slow_path(mounts or M.read_mounts(), f) then return nil end
     return f
 end
 
@@ -119,10 +123,8 @@ function M.sources(cfg, extra)
     local text = util.read_file("/proc/self/mountinfo") or ""
     local mounts = M.parse_mounts(text)
     local folders = util.shallow_copy(cfg.library.folder)
-    local downloads = M.download_folder(cfg)
-    if downloads and (M.is_slow_path(mounts, downloads) or #(util.readdir(downloads, "all") or {}) > 0) then
-        folders[#folders + 1] = downloads
-    end
+    local downloads = M.download_folder(cfg, mounts)
+    if downloads and #(util.readdir(downloads, "all") or {}) > 0 then folders[#folders + 1] = downloads end
     for _, folder in ipairs(folders) do
         local path = util.expand_path(folder)
         local slow = M.is_slow_path(mounts, path)
@@ -407,7 +409,8 @@ end
 function M.parse_listing(out, path, cfg, sort_mode)
     local items = {}
     for rec in tostring(out or ""):gmatch("([^%z]+)%z") do
-        local kind, mtime, size, name = rec:match("^(%a)\t([%d%.]+)\t(%d+)\t(.+)$")
+        -- (mtime is negative for files dated before 1970: cameras, FAT clocks.)
+        local kind, mtime, size, name = rec:match("^(%a)\t(%-?[%d%.]+)\t(%d+)\t(.+)$")
         if kind == "d" or kind == "f" then
             items[#items + 1] = {name = name, is_dir = kind == "d", is_file = kind == "f",
                                  mtime = math.floor(tonumber(mtime) or 0), size = tonumber(size)}

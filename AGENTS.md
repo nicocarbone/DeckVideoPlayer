@@ -70,7 +70,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-28, v0.6.0)
+## Current state (2026-10-29, v0.7.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -154,15 +154,16 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   software, per video) in the Video menu, because 4K AV1 stutters with
   the Deck's hardware decoder (D62); bug hunt (D61); B closes toasts and
   the skip prompt first (D63).
-- v0.7.0 (in progress): folder listings in a subprocess, network
+- v0.7.0 (2026-10-29): folder listings in a subprocess, network
   folders never stat'ed (D64); `EXTRA_FOLDER` in `tools/headless-run.sh`;
-  SMB mount guide (D65); DLNA servers (D66, `tools/mock-dlna.py`).
-  Owner's test NAS: details only in git-ignored `.dev/network-test.md`.
-- Planned: see `docs/ROADMAP.md`. v0.7.0: folder listings that don't
-  block on network shares, network folders (shares mounted by SteamOS)
-  and DLNA servers, with no credentials or new native library in the
-  app; then in-app SMB (libsmb2 helper), NFS, downloads from shares, next
-  episode from *Continue watching*. Flathub publication floating.
+  SMB mount guide (D65); DLNA servers (D66, `tools/mock-dlna.py`);
+  pre-release audit fixes recorded in D64. Owner's test NAS: details only
+  in git-ignored `.dev/network-test.md`. On a Deck the owner confirmed the
+  test build works (SMB share through the guide).
+- Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
+  (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
+  downloads from shares and DLNA, next episode from *Continue watching*.
+  Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

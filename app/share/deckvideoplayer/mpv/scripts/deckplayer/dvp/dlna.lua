@@ -27,6 +27,9 @@ M.__index = M
 
 M.ID = "dlna"
 M.NAME = "DLNA"
+-- Watched marks and positions live in resume.json, not on the server: the
+-- browser marks without reaching the server first.
+M.LOCAL_STATE = true
 M.DISCOVER_HELPER = "dvp-discover"
 
 local DESCRIPTION_MAX = 256 * 1024   -- bytes of a device description

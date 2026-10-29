@@ -177,11 +177,15 @@ function M.new(ctx, data_dir)
     self.file = (data_dir and data_dir ~= "") and util.join(data_dir, "downloads.json") or nil
     local text = self.file and util.read_file(self.file)
     local data = text and utils.parse_json(text)
+    local mounts = library.read_mounts()
     for _, job in ipairs(type(data) == "table" and type(data.jobs) == "table" and data.jobs or {}) do
         if type(job) == "table" and job.backend and job.machine and job.key then
             if job.status == "done" then
-                -- Deleted outside the app: forget it.
-                if job.path and util.file_exists(job.path) then self.jobs[#self.jobs + 1] = job end
+                -- Deleted outside the app: forget it. (Not checked on a
+                -- network share, which may not answer: kept.)
+                if job.path and (library.is_slow_path(mounts, job.path) or util.file_exists(job.path)) then
+                    self.jobs[#self.jobs + 1] = job
+                end
             else
                 -- Interrupted by closing the app: continues when the user asks.
                 if job.status == "downloading" or job.status == "queued" then job.status = "paused" end
