@@ -56,6 +56,15 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.7.1" date="2026-10-29">
+      <description>
+        <p>Download DLNA videos.</p>
+        <ul>
+          <li>Download videos from DLNA servers for offline playback, like Plex and Jellyfin videos</li>
+          <li>A download that has to try again says why</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-10-29">
       <description>
         <p>Network shares and DLNA servers.</p>

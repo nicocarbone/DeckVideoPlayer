@@ -305,6 +305,11 @@ Notes:
 - Not listed? The server must be on the same network, with its media
   server (DLNA) turned on; some routers block the search between Wi-Fi
   and wired devices.
+- **Download** (library menu, on a video) saves it for offline playback
+  in `download_folder` (`config.ini`), named after its title; it then
+  appears as a source on the start screen. *Menu → Downloads* shows
+  progress and can stop, resume or cancel it. DLNA has no subtitle files
+  to bring along.
 - **Menu → DLNA servers → server → Remove from the library** forgets it.
 
 ## Network shares (SMB)
@@ -510,7 +515,7 @@ Nothing on the NAS changes.
 | Software decoding (`Decoder: Software`) | Some formats have no hardware decoder (e.g. H.264 4:4:4, 10-bit H.264, MPEG-4 ASP). That's expected; it costs more battery. |
 | Folder missing from the library | The path in `config.ini` must exist. The Flatpak can only see `~/Videos`, `~/Downloads`, the microSD card / USB drives (`/run/media`, `/media`) and `/mnt` (since v0.3, so a malicious video can't read the rest of your files). For another folder, run once in Konsole: `flatpak override --user --filesystem=/home/deck/Movies io.github.nicocarbone.DeckVideoPlayer` (your path; add `:ro` at the end of the path to keep the app from downloading to or deleting there). |
 | *Download* fails with "Can't create …" | `download_folder` in `config.ini` must be inside one of the folders above. |
-| No *Download* entry | Only on Plex and Jellyfin videos. Plex: a shared server must allow downloads (the owner's setting); Jellyfin: the user needs download permission. |
+| No *Download* entry | Only on Plex, Jellyfin and DLNA videos (not on network shares). Plex: a shared server must allow downloads (the owner's setting); Jellyfin: the user needs download permission. |
 | No *Delete from this device…* entry | Only for video files in a library folder or on a drive of this device; never for server videos or network shares. |
 | Need logs | Desktop Mode: `flatpak run io.github.nicocarbone.DeckVideoPlayer --msg-level=all=v --log-file=$HOME/Downloads/dvp.log`. In game mode, add `--msg-level=all=v --log-file=/home/deck/Downloads/dvp.log` to the end of the shortcut's launch options (after the app id). The log must go in Downloads or Videos: the app can't write to the home folder itself. |
 | No *Download subtitles…* entry | No API key yet (see [above](#online-subtitles-opensubtitles)), or the video isn't a local file. |

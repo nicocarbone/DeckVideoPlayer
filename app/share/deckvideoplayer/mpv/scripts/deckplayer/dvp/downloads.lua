@@ -157,7 +157,9 @@ function M.status_text(job, have, speed)
     if s == "queued" then return "Waiting" end
     if s == "paused" then return job.error and ("Stopped: " .. job.error) or "Stopped" end
     if s == "failed" then return job.error or "Failed" end
-    if job.retry_at then return "Connection lost, trying again…" end
+    -- Why it is waiting to try again (a timeout, a server error…): the
+    -- reason, not a guess.
+    if job.retry_at then return (job.retry_why or "Network error") .. " · trying again…" end
     if not have or have == 0 then return "Starting…" end
     local done = job.size and job.size > 0 and string.format("%d%%", math.floor(100 * have / job.size))
         or M.format_size(have)
@@ -203,7 +205,7 @@ function M:save()
         local copy = {}
         for k, v in pairs(job) do
             -- Only the description; nothing of a run in progress.
-            if type(v) ~= "table" and type(v) ~= "function" and k ~= "handle" and k ~= "retry_at" then copy[k] = v end
+            if type(v) ~= "table" and type(v) ~= "function" and k ~= "handle" and k ~= "retry_at" and k ~= "retry_why" then copy[k] = v end
         end
         list[#list + 1] = copy
     end
@@ -317,7 +319,7 @@ function M:start(job)
         return self:finish(job, "fail", "Not signed in to this server")
     end
     local run = {}   -- this attempt: a stop or cancel meanwhile makes it stale
-    job.run, job.status, job.error, job.retry_at = run, "downloading", nil, nil
+    job.run, job.status, job.error, job.retry_at, job.retry_why = run, "downloading", nil, nil, nil
     self.running = job
     self:changed()
     backend:download_info(job, function(info, err, fatal)
@@ -371,7 +373,7 @@ function M:retry(job, why)
     job.tries = (job.tries or 0) + 1
     if job.tries > M.RETRIES then return self:finish(job, "pause", why) end
     local run = job.run
-    job.retry_at = os.time() + M.RETRY_DELAY
+    job.retry_at, job.retry_why = os.time() + M.RETRY_DELAY, why
     msg.info("downloads: " .. tostring(why) .. "; trying again in " .. M.RETRY_DELAY .. " s")
     self.retry_timer = mp.add_timeout(M.RETRY_DELAY, function()
         self.retry_timer = nil
@@ -432,7 +434,8 @@ end
 
 -- result: "done", "pause" (stopped, continues on request) or "fail".
 function M:finish(job, result, why)
-    job.run, job.handle, job.retry_at, job.tries, job.restarts, job.before = nil, nil, nil, nil, nil, nil
+    job.run, job.handle, job.retry_at, job.retry_why, job.tries, job.restarts, job.before =
+        nil, nil, nil, nil, nil, nil, nil
     if self.running == job then self.running = nil end
     if result == "done" then
         job.status, job.error, job.done = "done", nil, os.time()
@@ -452,7 +455,7 @@ end
 local function halt(self, job)
     job.run = nil
     if job.handle then http.abort(job.handle) end
-    job.handle, job.retry_at, job.tries, job.before = nil, nil, nil, nil
+    job.handle, job.retry_at, job.retry_why, job.tries, job.before = nil, nil, nil, nil, nil
     if self.running == job then
         self.running = nil
         if self.retry_timer then

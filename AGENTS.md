@@ -70,7 +70,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-29, v0.7.0)
+## Current state (2026-10-29, v0.7.1)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -160,9 +160,13 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   pre-release audit fixes recorded in D64. Owner's test NAS: details only
   in git-ignored `.dev/network-test.md`. On a Deck the owner confirmed the
   test build works (SMB share through the guide).
+- v0.7.1 (2026-10-29): DLNA downloads (D67); a download's retry status
+  names the reason. Open: on the owner's Deck the first attempt of a
+  download sometimes retries once (cause not found here; a log of the
+  new status would tell).
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
-  downloads from shares and DLNA, next episode from *Continue watching*.
+  copies from network shares, next episode from *Continue watching*.
   Flathub publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only

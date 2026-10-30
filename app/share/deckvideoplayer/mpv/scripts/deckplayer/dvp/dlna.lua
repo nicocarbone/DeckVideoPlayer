@@ -11,8 +11,9 @@
 -- entities and numeric references are decoded); a video URL must be
 -- http(s) on the server's own host.
 --
--- Same interface as dvp/plex.lua and dvp/jellyfin.lua (dvp/servers.lua);
--- no download_info (downloads from DLNA are not offered).
+-- Same interface as dvp/plex.lua and dvp/jellyfin.lua (dvp/servers.lua),
+-- including download_info for dvp/downloads.lua (v0.7.1): a video's own
+-- URL, asked for again when the download starts.
 
 local utils = require "mp.utils"
 local msg = require "mp.msg"
@@ -284,6 +285,25 @@ function M.parse_didl(didl)
     return containers, items
 end
 
+-- File extensions of video MIME types (for a download whose URL has none).
+local MIME_EXT = {["video/mp4"] = "mp4", ["video/x-matroska"] = "mkv", ["video/matroska"] = "mkv",
+                  ["video/x-msvideo"] = "avi", ["video/avi"] = "avi", ["video/mpeg"] = "mpg",
+                  ["video/mp2t"] = "ts", ["video/vnd.dlna.mpeg-tts"] = "ts", ["video/quicktime"] = "mov",
+                  ["video/webm"] = "webm", ["video/x-ms-wmv"] = "wmv", ["video/x-flv"] = "flv",
+                  ["video/3gpp"] = "3gp", ["video/x-m4v"] = "m4v"}
+
+-- Pure: the "file" a download is named after (dvp/downloads.lua takes its
+-- extension): the URL's file name when it ends in a short extension, else
+-- "video.<ext>" from the MIME type of protocolInfo, else nil.
+function M.download_file(url, protocol)
+    local path = tostring(url or ""):match("^https?://[^/]+(/[^?#]*)") or ""
+    local name = path:match("([^/]+)$") or ""
+    if name:match("%.%w%w?%w?%w?$") then return name end
+    local mime = tostring(protocol or ""):match("^[^:]*:[^:]*:([^:;]*)")
+    local ext = mime and MIME_EXT[mime:lower()]
+    return ext and ("video." .. ext) or nil
+end
+
 local function encode(s)
     return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", c:byte()) end))
 end
@@ -457,7 +477,9 @@ end
 function M:forget_token()
 end
 
--- One Browse request. cb(page or nil, err).
+-- One Browse request. cb(page or nil, err, answered): `answered` when the
+-- server itself refused (a SOAP fault, e.g. no such object), not a
+-- network problem.
 function M:browse(id, object_id, flag, start, cb)
     self:connect(id, function(base, err)
         if not base then return cb(nil, err) end
@@ -470,7 +492,8 @@ function M:browse(id, object_id, flag, start, cb)
                 if not code then self.control[id] = nil end
                 return cb(nil, code and ("DLNA server error " .. code) or body)
             end
-            cb(M.parse_browse(body))
+            local page, err = M.parse_browse(body)
+            cb(page, err, page == nil)
         end)
     end)
 end
@@ -501,9 +524,10 @@ function M:entries_from(id, containers, videos)
         local r = M.pick_res(v.res, host)
         if r then
             local l = label(v.title)
+            -- name: the cleaned title (subtitle search, download file name).
             local item = {backend = M.ID, machine = id, key = v.id, rating_key = v.id, kind = "movie",
-                          title = l, name = v.title, url = r.url, size = r.size, parent = v.parent,
-                          duration = r.duration and r.duration * 1000}   -- ms, as Plex
+                          title = l, name = l, url = r.url, size = r.size, parent = v.parent,
+                          protocol = r.protocol, duration = r.duration and r.duration * 1000}   -- ms, as Plex
             out[#out + 1] = {label = l, name = l, is_dir = false, path = r.url, size = r.size, pos = v.pos,
                              mtime = v.date, server = item, state = self:state_of(item)}
         end
@@ -534,14 +558,27 @@ function M:list(loc, cb)
     page(0)
 end
 
--- A video's current entry (BrowseMetadata). cb(entry or nil, err).
+-- A video's current entry (BrowseMetadata). cb(entry or nil, err, gone):
+-- `gone` when the server answered that it isn't there (any more).
 function M:metadata(id, object_id, cb)
-    self:browse(id, object_id, "BrowseMetadata", 0, function(p, err)
-        if not p then return cb(nil, err) end
+    self:browse(id, object_id, "BrowseMetadata", 0, function(p, err, answered)
+        if not p then return cb(nil, err, answered) end
         local _, videos = M.parse_didl(p.didl)
         local entry = self:entries_from(id, {}, videos)[1]
-        if not entry then return cb(nil, "This video is no longer on the server") end
+        if not entry then return cb(nil, "This video is no longer on the server", true) end
         cb(entry)
+    end)
+end
+
+-- For dvp/downloads.lua: cb({url, size, file, subs} or nil, err, fatal).
+-- The URL is the one the server gives now (checked like any other: http(s)
+-- on the server's host); no headers, no subtitles (DLNA has no standard
+-- for them).
+function M:download_info(item, cb)
+    self:metadata(item.machine, item.key, function(entry, err, gone)
+        if not entry then return cb(nil, err or "Can't reach the DLNA server", gone == true) end
+        local it = entry.server
+        cb({url = it.url, size = it.size, file = M.download_file(it.url, it.protocol), subs = {}})
     end)
 end
 

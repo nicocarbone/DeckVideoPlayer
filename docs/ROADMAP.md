@@ -120,6 +120,12 @@ change. In-app SMB/NFS clients come later (see below).
 Not in v0.7.0: in-app SMB/NFS, downloads from shares or DLNA, DLNA
 subtitles (vendor-specific), DLNA progress sync.
 
+## v0.7.1: DLNA downloads (released 2026-10-29)
+
+| Feature | Status | Notes |
+|---|---|---|
+| **DLNA downloads** | Done (D67) | *Download* on DLNA videos, through D60's queue: stop, resume (also after closing), cancel; the URL asked again from the server at start. |
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for
@@ -145,8 +151,11 @@ subtitles (vendor-specific), DLNA progress sync.
    most NFS exports only accept privileged source ports, which a
    sandboxed app can't use, so many would need `insecure` on the server;
    a system mount (v0.7.0) may be the better answer for NFS users.
-4. **Downloads from shares and DLNA** through the same paths (D60's
-   queue, curl).
+4. **Downloads from network shares**: a background copy (e.g. `dd`,
+   resumable) in D60's queue, with progress, stop, resume and cancel,
+   sidecar subtitles, only from configured network sources; on-device
+   tests for sleep and a share disappearing mid-copy. (DLNA downloads:
+   v0.7.1.)
 5. **Next episode from *Continue watching*** (Plex, Jellyfin): finishing
    an episode started there should offer the next one (today *Continue
    watching* plays one item at a time).

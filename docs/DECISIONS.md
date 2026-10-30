@@ -1747,3 +1747,32 @@ Flatpak's mpv); skipped elsewhere.
   row, a hanging server); the owner's NAS (found and described; its
   browse requests hang, the timeout path).
 
+## D67. DLNA downloads (v0.7.1)
+
+- **What:** *Download* on DLNA videos, through D60's queue unchanged
+  (one at a time, curl to `.part` with resume, size check, retries, free
+  space, stop / resume / cancel, also after closing the app). DLNA videos
+  are plain HTTP without a token, the case Jellyfin downloads already
+  cover.
+- **`download_info`:** a BrowseMetadata request when the download starts,
+  so the URL is the server's current one and passes the same checks as
+  playback (http(s) on the server's host, a video type, the original
+  before a converted copy). A SOAP fault or an object missing from the
+  answer is final (`fatal`: "No such object"); no answer is retried. No
+  headers (nothing secret) and no subtitles (DLNA has no standard for
+  them; OpenSubtitles files downloaded while streaming come along, as for
+  the other servers).
+- **Names:** the cleaned title (`name` in the item is now the cleaned
+  label; it is also the subtitle search's title), with the extension of
+  the URL's file name, or from the MIME type of `protocolInfo` when the
+  URL has none (`download_file`), else the queue's default (`mkv`). DLNA
+  has no season/episode metadata, so videos are saved by title at the
+  top of the download folder.
+- **Not in v0.7.1:** "download all" for a DLNA folder; copies from
+  network shares (a different transport: ROADMAP).
+- **Tested** against `tools/mock-dlna.py` (new `--rate` option): a 214 MB
+  file interrupted by closing the app, resumed after a restart with a
+  Range request, byte-identical; the server stopped mid-download, then
+  back without the video: retried, then failed with "No such object";
+  the Flatpak (download identical); the downloaded copy in the library.
+

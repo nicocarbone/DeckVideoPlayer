@@ -592,7 +592,11 @@ the default route and every multicast interface; prints `sender address
 ## `dvp/dlna.lua`: DLNA / UPnP media servers (D66)
 
 Same interface as the other backends (`ID = "dlna"`, `NAME = "DLNA"`),
-without sign-in or `download_info`. Pure (unit-tested): `xml_unescape`
+without sign-in; `LOCAL_STATE = true` (marks without reaching the
+server); `download_info(item, cb)` (v0.7.1, D67: BrowseMetadata for the
+current URL and size; `fatal` when the server answered that the object is
+gone) with the pure `download_file(url, protocolInfo)` (the URL's file
+name, else `video.<ext>` from the MIME type). Pure (unit-tested): `xml_unescape`
 (predefined entities and numeric references, one pass), `xml_escape`,
 `element_text(xml, name)` (with or without a namespace prefix, CDATA),
 `attr(attrs, name)`, `safe_id` (UUID of a UDN/USN), `split_url`,

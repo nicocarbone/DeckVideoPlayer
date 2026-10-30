@@ -5,13 +5,14 @@ ContentDirectory built from a folder, and the videos themselves (with
 Range, for seeking).
 
     tools/mock-dlna.py [--port 8766] [--name "Mock DLNA"] [--slow S] [--hang]
-                       [--page N] FOLDER
+                       [--page N] [--rate KB] FOLDER
 
 Object ids are the folders' and files' paths relative to FOLDER (so they
 contain "/" and spaces, which the client must encode), "0" is the root.
 --slow S delays every Browse answer by S seconds; --hang never answers
 Browse (a server busy indexing); --page N returns at most N entries per
-Browse, whatever the client asks (paging).
+Browse, whatever the client asks (paging); --rate KB serves videos at
+about KB kilobytes per second (to stop and resume a download midway).
 
 The description, Browse answers and files are served on this machine's
 LAN address (SSDP answers must come from the address in their LOCATION),
@@ -186,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
                     left -= len(chunk)
+                    if args.rate:
+                        time.sleep(len(chunk) / (args.rate * 1024.0))
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
@@ -258,6 +261,7 @@ def main():
     p.add_argument("--slow", type=float, default=0)
     p.add_argument("--hang", action="store_true")
     p.add_argument("--page", type=int, default=0)
+    p.add_argument("--rate", type=float, default=0)
     args = p.parse_args()
     args.folder = os.path.abspath(args.folder)
     threading.Thread(target=ssdp_loop, daemon=True).start()

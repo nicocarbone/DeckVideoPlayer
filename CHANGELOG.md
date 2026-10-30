@@ -5,6 +5,22 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.7.1 (2026-10-29)
+
+Download DLNA videos.
+
+### New
+
+- **Download DLNA videos** for offline playback: *Menu → Download* on a
+  video of a DLNA server, like Plex and Jellyfin videos. Downloads can be
+  stopped, resumed (also after closing the app) and cancelled from
+  *Menu → Downloads*.
+
+### Changed
+
+- A download that has to try again now says why (e.g. "The server did
+  not answer (timeout)") instead of always "Connection lost".
+
 ## v0.7.0 (2026-10-29)
 
 Network shares and DLNA servers.

@@ -224,7 +224,7 @@ Notes and pitfalls:
   a ContentDirectory (object ids are relative paths, so they hold `/` and
   spaces) and its videos with Range. In the app: *Menu → Add a DLNA
   server…*. `--page 3` exercises paging, `--hang` a server that never
-  answers. While it runs, `DIR` is readable from the LAN.
+  answers, `--rate KB` throttles videos (to stop a download midway). While it runs, `DIR` is readable from the LAN.
 - `gshot:`/`shot:` steps after the app quit (e.g. a video opened by IPC
   stops and closes the app) don't write anything: check the file's time
   before trusting a screenshot.

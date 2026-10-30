@@ -47,8 +47,8 @@ there is a single process and nothing between the video and the screen.
   like a local folder; a share that is asleep never freezes the app
   ([setup guide](docs/INSTALL.md#network-shares-smb)).
 - **Downloads** for offline playback: Plex and Jellyfin videos or whole
-  seasons, with their subtitles, to a folder of your choice (also the
-  microSD card). Local videos can be deleted from the library menu.
+  seasons, with their subtitles, and DLNA videos, to a folder of your
+  choice (also the microSD card). Local videos can be deleted from the library menu.
 - **Download subtitles** from OpenSubtitles.com from the subtitle menu
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).

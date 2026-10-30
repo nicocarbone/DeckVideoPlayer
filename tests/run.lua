@@ -1002,6 +1002,8 @@ eq("dl status pct", DL.status_text({status = "downloading", size = 200}, 50, 2e6
 eq("dl status start", DL.status_text({status = "downloading", size = 200}, 0), "Starting…")
 eq("dl status paused", DL.status_text({status = "paused", error = "x"}), "Stopped: x")
 eq("dl status done", DL.status_text({status = "done", size = 1.5e9}), "1.5 GB")
+eq("dl status retry says why", DL.status_text({status = "downloading", retry_at = 1,
+   retry_why = "The server did not answer (timeout)"}, 0), "The server did not answer (timeout) · trying again…")
 
 -- curl options for long downloads
 local dlcfg = http.curl_config({url = "u", timeout = 0, resume = true, fail = true, output = "/f.part"})
@@ -1304,6 +1306,13 @@ do
     check("recent key round trip", id == "aaaa-1" and k == "64$1/2 x")
     eq("not a dlna key", D.parse_recent_key("jellyfin://x/y"), nil)
     eq("duration parse", D.parse_duration("0:00:07"), 7)
+    eq("download file from url", D.download_file("http://192.168.1.50:9000/m/Film%20One.mkv?x=1", nil), "Film%20One.mkv")
+    eq("download file from mime", D.download_file("http://192.168.1.50:9000/get/1234", "http-get:*:video/mp4:*"),
+       "video.mp4")
+    eq("download file unknown", D.download_file("http://192.168.1.50:9000/get/1234", "http-get:*:video/x-odd:*"), nil)
+    local DL = require "dvp.downloads"
+    eq("dlna download name", DL.relative_path({kind = "movie", name = "The Test Movie 2024"},
+       DL.safe_ext(D.download_file("http://192.168.1.50/x/v.mkv"))), "The Test Movie 2024.mkv")
 end
 
 -- Video menu decoding choice (D62)
