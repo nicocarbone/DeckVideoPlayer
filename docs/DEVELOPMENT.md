@@ -184,9 +184,23 @@ track, three subtitle tracks and chapters; a hand-written `resume.json` in
 `.dev/headless/data/` for the watched/progress marks (`KEEP=1` keeps it);
 and `KEEP=1 MEDIA=… DEVICE=deck-oled XWAYLAND2=1 RATES=45,48,60,72,90
 SURROUND=1 OSMOCK=1 MOCK_TITLE=Sintel.2010 tools/headless-run.sh -- …`
-with `gshot:` steps. Seek right before a shot (`raw:["seek",…]`) to get the
-same frame each time; seeking with `key:RIGHT` also shows the overlay.
-Video shots are saved as JPEG (`ffmpeg -q:v 3`), flat UI shots as PNG.
+with `gshot:` steps. Video shots are saved as JPEG (`ffmpeg -q:v 3`), flat
+UI shots as PNG.
+
+Refreshed for v0.7.0 (2026-10-29), with HDR=1 as well:
+- Start from a profile without server accounts (a run without `KEEP=1`
+  leaves fresh `plex.json` / `jellyfin.json`), so no real server shows.
+- The start screen's other sources: `EXTRA_FOLDER=` a network mount (a
+  `gio mount` share works: kind *network*), `tools/mock-dlna.py --name
+  "Home Media Server" .dev/screens/Videos` with a hand-written `dlna.json`
+  (the mock's fixed id, its LAN `desc.xml` address), and *Recently
+  played* entries in `resume.json` (`played` timestamps; a DLNA one under
+  `dlna://<id>/<percent-encoded object id>` with a `title`).
+- Right after a `raw:["seek",…]` the frame came out black for over a
+  second; capture during normal playback instead: start the video, `sleep`
+  to the moment, then `key:ENTER key:ENTER` (pause and resume) to show the
+  overlay without moving. *Playback info* shows 2 dropped frames from the
+  refresh-rate switch at start.
 
 Notes and pitfalls:
 - Unix socket paths must be under ~108 characters; the tool uses
