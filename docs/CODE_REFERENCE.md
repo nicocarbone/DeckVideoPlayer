@@ -267,11 +267,13 @@ key.
   `mount_for(mounts, path)` (longest mount point), `is_network_fs(fstype)`,
   `is_video(name, cfg)`, `delete_refusal(path, sources, mounts, cfg)` →
   nil or why not (absolute plain path inside a local source, not the source
-  itself, a video extension, not on a network filesystem),
+  itself, a video extension, not on a network filesystem or automount point),
   `sidecar_subtitles(video, names)` (its subtitle files; ones matching a
   longer video name belong to that one), `delete_video(path, sources,
   cfg)` → true or false, message (checks again, removes the file, its
-  subtitles and folders left empty inside the download folder).
+  subtitles and folders left empty inside the download folder),
+  `prune_folders(dir, downloads)` (removes `dir` and the folders above it
+  while empty, inside the download folder; also used by a cancelled download).
 
 ## `dvp/resume.lua`: playback state store
 
@@ -724,7 +726,8 @@ D28/D29. Pure helpers (all unit-tested):
 | Function | Meaning |
 |---|---|
 | `moviehash_from(size, head, tail)` / `moviehash(path)` | OpenSubtitles hash (64-bit sum done as two 32-bit halves for Lua 5.1). `moviehash` returns `nil, size` for files < 128 KiB. |
-| `parse_release(path)` | `{title, year, season, episode}` from a file name (episode markers, years, release junk, show folder for bare `S01E02` names). |
+| `parse_name(name)` | `{title, year, season, episode}` from a name without extension (episode markers, years, release junk); title `""` when nothing is left. Also used for DLNA titles. |
+| `parse_release(path)` | The same from a file path, with the show folder for bare `S01E02` names. |
 | `languages(slang)` | ISO 639-2 list → OpenSubtitles codes (`pob` → `pt-br`), English if empty. |
 | `query_string(params)` | sorted, lowercase, URL-encoded. |
 | `curl_quote(s)` | quoted string for a curl config file. |
@@ -766,8 +769,9 @@ D28. `SubDownload.new(ctx, data_dir, api_url)`.
 
 Downloads and deleting (D60): `download(entries)`, `download_season(entry)`,
 `deletable(entry)`, `delete_dialog(path, label)` (defaults to *Cancel*),
-`delete(path)`, `open_folder(path, select)`, `play_path(path)`,
-`downloads_changed()`; server rows show `downloads:tag()` as a pill.
+`delete(path)`, `open_folder(path, select)` (stack built from the folder's
+source down), `play_path(path)`, `downloads_changed()` (deferred while a
+menu is open: `menu_closed()` catches up); server rows show `downloads:tag()` as a pill.
 
 State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `selected`, `scroll`, `cursor[path]` (remembered selection per folder),

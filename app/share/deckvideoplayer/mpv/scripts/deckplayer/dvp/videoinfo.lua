@@ -399,10 +399,10 @@ end
 
 -- A video on a DLNA server (D66): http(s) only, and ffprobe may only use
 -- network protocols for it (no file:, no other protocols a playlist could
--- point to).
+-- point to). A server that stops answering ends it after 15 s.
 function M.probe_url(url, cb)
     if not tostring(url):match("^https?://") then return cb(nil, "not a web address") end
-    probe(url, {"-protocol_whitelist", "http,https,tcp,tls"}, cb)
+    probe(url, {"-protocol_whitelist", "http,https,tcp,tls", "-rw_timeout", "15000000"}, cb)
 end
 
 -- Opens the panel for a library entry: a local file, or a media server

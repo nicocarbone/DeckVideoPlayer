@@ -1776,3 +1776,45 @@ Flatpak's mpv); skipped elsewhere.
   back without the video: retried, then failed with "No such object";
   the Flatpak (download identical); the downloaded copy in the library.
 
+
+## D68. Ninth audit (ISSUES.md Part IX, after v0.7.1)
+
+Reviewed on 2026-10-30; each finding has a status line in `ISSUES.md`.
+
+- **Fixed:**
+  - *Show in the library* (Downloads menu) builds the folder stack from
+    the source down, so the breadcrumb is complete and B goes up level
+    by level.
+  - Cancelling a download, or one refused for lack of space, removes the
+    empty folders made for it (`library.prune_folders`, shared with
+    `delete_video`).
+  - Deleting re-reads the sources first (the download folder may have
+    become one meanwhile) and afterwards, and the browser leaves a
+    folder that is gone or no longer inside a source. A download that
+    ends while a menu is open reloads the library once the menu closes
+    (`Browser:menu_closed`).
+  - DLNA: elements written as one tag (`<res .../>`) are dropped before
+    matching; `uuid:` in any case; a MediaServer embedded in another
+    device (a router, a NAS) is read from its own part of the
+    description; `connect` stops if the server was removed meanwhile.
+  - Subtitle search for DLNA videos parses the title like a file name
+    (`OpenSubtitles.parse_name`): DLNA has no year/season/episode fields.
+  - Mounts: of two mounts on one point the later wins (the share over its
+    systemd automount point), and deleting is refused on any slow path,
+    so a share automounted inside a library folder is protected.
+    `fuse.kio-fuse` counts as a network filesystem.
+  - Video info on DLNA: ffprobe gets `-rw_timeout` (15 s).
+  - Metainfo feature list brought up to date.
+- **Not bugs** (the finding quotes code that isn't in the repository):
+  `Downloads.outcome` already requires curl status 0 for 200/206 (tests
+  added for a cut-off transfer and a full disk); `Dlna:fetch_range`
+  exists; the decoder choice is stored by `save_progress` from mpv's
+  current `hwdec`, after the entry is created.
+- **Declined:** aborting ffprobe when Video info is closed. The late
+  answer is ignored, the probe ends by itself (now with a timeout for
+  DLNA), and a read stuck on a local share can't be killed anyway.
+- **Tested:** 651 unit checks; in headless gamescope, *Show in the
+  library* for a downloaded episode then B ×3, and deleting it from its
+  season folder (season and show folders removed, view moved up);
+  ffprobe's timeout against a server that never answers, and a normal
+  probe with the option.

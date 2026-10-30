@@ -146,6 +146,7 @@ function M:load()
     local loc = self:location()
     self:cancel_listing()   -- of the folder we are leaving
     self.error = nil
+    self.downloads_stale = nil
     if not loc then
         self:refresh_sources()
         -- With a single source there is no point in showing the root list.
@@ -624,7 +625,8 @@ function M:delete_dialog(path, label)
 end
 
 function M:delete(path)
-    self.sources = self.sources or library.sources(self.cfg, self.ctx.servers:sources())
+    -- (The download folder may have become a source since they were read.)
+    self:refresh_sources()
     local ok, err = library.delete_video(path, self.sources, self.cfg)
     if not ok then
         self.ctx.toast(err)
@@ -635,9 +637,12 @@ function M:delete(path)
     self.ctx.downloads:forget_path(path)
     self.ctx.toast("Deleted")
     if not self.active then return end
-    -- A folder left empty is gone (a season in the download folder): go up.
+    -- A folder left empty is gone (a season in the download folder), and
+    -- the download folder emptied is no longer a source: go up.
+    self:refresh_sources()
     local loc, index = self:location(), self.selected
-    while #self.stack > 0 and not self:location().server and not util.is_dir(self:location().path) do
+    while #self.stack > 0 and not self:location().server
+        and not (util.is_dir(self:location().path) and library.source_for(self.sources, self:location().path)) do
         table.remove(self.stack)
     end
     -- Still in the same folder: the cursor stays where the video was.
@@ -655,13 +660,25 @@ function M:delete(path)
     end
 end
 
--- Opens a local folder (from the Downloads menu), the cursor on `select`.
+-- Opens a local folder (from the Downloads menu), the cursor on `select`,
+-- with the folders above it up to its source (B goes up through them).
 function M:open_folder(path, select)
     self.ctx.menu:close_all()
     -- (Only the download folder, which is never on a network share.)
     if not util.is_dir(path) then return end
     self.cursor[loc_key(self:location())] = self.selected
-    self.stack = {{path = path, label = util.basename(path)}}
+    self:refresh_sources()
+    local source = library.source_for(self.sources, path)
+    if not source then
+        self.stack = {{path = path, label = util.basename(path)}}
+    else
+        self.stack = {{path = source.path, label = source.name, is_root = self:single_source() or nil}}
+        local dir = source.path
+        for name in path:sub(#source.path + 1):gmatch("[^/]+") do
+            dir = util.join(dir, name)
+            self.stack[#self.stack + 1] = {path = dir, label = library.display_name(name, true, self.cfg.interface.clean_names)}
+        end
+    end
     self:show(select)
 end
 
@@ -673,11 +690,23 @@ function M:play_path(path)
     self:recent_playlist(path, function(list) self:start(entry, list) end)
 end
 
--- A download started or ended: new files and tags.
+-- A download started or ended: new files and tags (once the menus over
+-- the library are closed).
 function M:downloads_changed()
-    if not self.active or self.ctx.menu:is_open() then return end
+    if not self.active then return end
+    if self.ctx.menu:is_open() then
+        self.downloads_stale = true
+        return
+    end
+    self.downloads_stale = nil
     local loc = self:location()
     if loc and loc.server then self:render() else self:reload() end
+end
+
+-- The last menu over the library was closed.
+function M:menu_closed()
+    if self.downloads_stale then return self:downloads_changed() end
+    self:render()   -- the selected entry may scroll again
 end
 
 function M:open_menu()

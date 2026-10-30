@@ -116,11 +116,11 @@ local function is_season_dir(name)
     return false
 end
 
--- Guesses what to search for from a file path:
--- {title, year, season, episode}. Episode titles come from the part before
--- "S01E02"/"1x02"; an empty title falls back to the show folder.
-function M.parse_release(path)
-    local name = util.strip_extension(util.basename(path))
+-- Guesses what to search for from a name without extension (a file's,
+-- or a DLNA server's title): {title, year, season, episode}. Episode
+-- titles come from the part before "S01E02"/"1x02" (title "" when there
+-- is none).
+function M.parse_name(name)
     local info = {}
     local before, s, e = name:match("^(.-)[Ss](%d%d?)[%s%._%-]*[Ee](%d%d?%d?)")
     if not before then
@@ -136,7 +136,14 @@ function M.parse_release(path)
     local year
     title, year = split_year(title)
     info.year = year
-    title = clean_title(title)
+    info.title = clean_title(title)
+    return info
+end
+
+-- The same from a file path; an empty title falls back to the show folder.
+function M.parse_release(path)
+    local info = M.parse_name(util.strip_extension(util.basename(path)))
+    local title = info.title
     if title == "" then
         -- "Show/Season 1/S01E02.mkv": use the show folder.
         local dir = util.dirname(path)

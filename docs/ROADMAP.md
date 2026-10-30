@@ -126,6 +126,14 @@ subtitles (vendor-specific), DLNA progress sync.
 |---|---|---|
 | **DLNA downloads** | Done (D67) | *Download* on DLNA videos, through D60's queue: stop, resume (also after closing), cancel; the URL asked again from the server at start. |
 
+## v0.7.2: ninth audit fixes (released 2026-10-30)
+
+Fixes from ISSUES.md Part IX (D68): network shares automounted inside a
+library folder protected from deletion, *Show in the library* with the
+whole folder path, download folder clean-up, DLNA parsing (empty tags,
+embedded media servers, `UUID:`), subtitle search for DLNA titles, a
+timeout for Video info on DLNA.
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for

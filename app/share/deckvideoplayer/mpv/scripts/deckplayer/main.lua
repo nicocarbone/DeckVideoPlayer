@@ -326,7 +326,7 @@ input.init(function(action)
         if state.screen == "player" then
             player:render()
         elseif not menu:is_open() then
-            browser:render()   -- the selected entry may scroll again
+            browser:menu_closed()
         end
         return
     end

@@ -509,6 +509,11 @@ local pinfo = SubDL.server_info({kind = "episode", show = "Sherlock", name = "Th
 check("plex sub info episode", pinfo.title == "Sherlock" and pinfo.season == 1 and pinfo.episode == 2)
 pinfo = SubDL.server_info({kind = "movie", name = "Some Film", year = 1995})
 check("plex sub info movie", pinfo.title == "Some Film" and pinfo.year == 1995 and not pinfo.season)
+pinfo = SubDL.server_info({backend = "dlna", kind = "movie", name = "Mr. Robot S01E02 1080p"})
+check("dlna sub info: title parsed", pinfo.title == "Mr Robot" and pinfo.season == 1 and pinfo.episode == 2)
+pinfo = SubDL.server_info({backend = "dlna", kind = "movie", name = "Some.Film.1995.1080p.BluRay"})
+check("dlna sub info: year", pinfo.title == "Some Film" and pinfo.year == 1995)
+eq("dlna sub info: bare episode code keeps the name", SubDL.server_info({backend = "dlna", name = "S01E02"}).title, "S01E02")
 eq("safe lang", SubDL.safe_lang("pt-br"), "pt-br")
 eq("unsafe lang", SubDL.safe_lang("../../x"), "und")
 eq("empty lang", SubDL.safe_lang(""), "und")
@@ -996,6 +1001,8 @@ eq("dl outcome 500", DL.outcome(503, 22), "retry")
 eq("dl outcome net", DL.outcome(nil, 7), "retry")
 eq("dl outcome stall", DL.outcome(206, 28), "retry")
 eq("dl outcome redirect", DL.outcome(302, 0), "fail")
+eq("dl outcome cut off after the headers", DL.outcome(200, 18), "retry")
+eq("dl outcome disk full mid-transfer", DL.outcome(200, 23), "fail")
 check("dl space ok", DL.enough_space(DL.SPACE_MARGIN + 100, 150, 50))
 check("dl space short", not DL.enough_space(DL.SPACE_MARGIN + 99, 150, 50))
 eq("dl status pct", DL.status_text({status = "downloading", size = 200}, 50, 2e6), "25% · 2 MB/s")
@@ -1120,6 +1127,16 @@ do
     check("delete not video", library.delete_refusal("/home/deck/Videos/notes.txt", srcs, mounts, lcfg) ~= nil)
     check("delete network share", library.delete_refusal("/home/deck/Videos/NAS/a.mkv", srcs, mounts, lcfg) ~= nil)
     check("delete sshfs", library.delete_refusal("/mnt/ssh/a.mkv", srcs, mounts, lcfg) ~= nil)
+    local auto = library.parse_mounts(table.concat({
+        "22 1 0:21 / / rw - ext4 /dev/nvme0n1p8 rw",
+        "40 22 0:40 / /home/deck/Videos/NAS rw - autofs systemd-1 rw",
+        "41 40 0:41 / /home/deck/Videos/NAS rw - cifs //nas/share rw",
+        "42 22 0:42 / /home/deck/Videos/Idle rw - autofs systemd-1 rw",
+    }, "\n"))
+    eq("mount_for: the share over its automount point", library.mount_for(auto, "/home/deck/Videos/NAS/a.mkv").fstype, "cifs")
+    check("delete automounted share", library.delete_refusal("/home/deck/Videos/NAS/a.mkv", srcs, auto, lcfg) ~= nil)
+    check("delete automount not mounted", library.delete_refusal("/home/deck/Videos/Idle/a.mkv", srcs, auto, lcfg) ~= nil)
+    check("network fs: kio-fuse", library.is_network_fs("fuse.kio-fuse"))
     local side = library.sidecar_subtitles("Film.mkv", {"Film.mkv", "Film.srt", "Film.en.srt", "Film.Extended.mkv",
         "Film.Extended.en.srt", "Other.srt", "Film.nfo", "Filmography.srt"})
     eq("sidecars", table.concat(side, ","), "Film.en.srt,Film.srt")
@@ -1152,6 +1169,11 @@ do
     check("download folder kept", util.is_dir(dl))
     check("delete film", library.delete_video(dl .. "/Film.mkv", srcs, dcfg))
     eq("empty download folder hidden", #library.sources(dcfg), 0)
+    util.mkdir_p(dl .. "/Other/Season 02")
+    library.prune_folders(dl .. "/Other/Season 02", dl .. "/Other/Season 02")
+    check("prune: never the download folder itself", util.is_dir(dl .. "/Other/Season 02"))
+    library.prune_folders(dl .. "/Other/Season 02", dl)
+    check("prune: cancelled show's folders gone", not util.is_dir(dl .. "/Other") and util.is_dir(dl))
     os.remove(dl)
     os.remove(tmp)
 end
@@ -1239,6 +1261,8 @@ do
     eq("no match inside a longer name", D.element_text("<subtitle>no</subtitle>", "title"), nil)
     eq("cdata", D.element_text("<dc:title><![CDATA[A & <B>]]></dc:title>", "title"), "A & <B>")
     eq("safe id from usn", D.safe_id("uuid:1234-abcd::urn:schemas-upnp-org:device:MediaServer:1"), "1234-abcd")
+    eq("safe id: upper-case prefix", D.safe_id("UUID:1234-abcd::urn:x"), "1234-abcd")
+    eq("element after an empty one", D.element_text("<x><dc:title/><dc:title >Real</dc:title></x>", "title"), "Real")
     eq("ssdp: spoofed location ignored", #D.parse_ssdp(
         "192.168.1.9\thttp://192.168.1.50:8200/desc.xml\tuuid:aaaa-1\tX\n"), 0)
     eq("ssdp: public address ignored", #D.parse_ssdp("8.8.8.8\thttp://8.8.8.8/d.xml\tuuid:aaaa-1\tX\n"), 0)
@@ -1263,6 +1287,17 @@ do
         and info.control == "http://192.168.1.50:9000/cd/control")
     local evil = desc:gsub("http://192.168.1.50:9000/", "http://192.168.1.66/")
     eq("description: control on another host refused", D.parse_description(evil, "http://192.168.1.50:8200/d"), nil)
+    local combo = [[<root><device><deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+        <friendlyName>Router</friendlyName><UDN>uuid:gw-0001</UDN><serviceList><service>
+        <serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType><controlURL>/l3f</controlURL>
+        </service></serviceList><deviceList><device>
+        <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType><friendlyName>Router media</friendlyName>
+        <UDN>uuid:ms-0002</UDN><serviceList><service>
+        <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><controlURL>/cd</controlURL>
+        </service></serviceList></device></deviceList></device></root>]]
+    local cinfo = D.parse_description(combo, "http://192.168.1.1:5000/d.xml")
+    check("description: media server inside another device", cinfo and cinfo.id == "ms-0002"
+        and cinfo.name == "Router media" and cinfo.control == "http://192.168.1.1:5000/cd")
     eq("description: not a media server", D.parse_description("<root><UDN>uuid:x1234</UDN></root>", "http://192.168.1.50/"), nil)
     local body = D.browse_body("64$1$<2>", "BrowseDirectChildren", 0, 200)
     check("browse body escapes the id", body:find("<ObjectID>64$1$&lt;2&gt;</ObjectID>", 1, true) ~= nil)
@@ -1271,6 +1306,7 @@ do
         <upnp:class>object.container.storageFolder</upnp:class></container>
       <item id="v$1" parentID="Video/Films"><dc:title>A Film</dc:title><dc:date>2024-05-01</dc:date>
         <upnp:class>object.item.videoItem.movie</upnp:class>
+        <res protocolInfo="http-get:*:image/jpeg:*" />
         <res protocolInfo="http-get:*:video/mp4:DLNA.ORG_CI=1" size="100">http://192.168.1.50:9000/t/v1.mp4</res>
         <res protocolInfo="http-get:*:video/x-matroska:DLNA.ORG_OP=01;DLNA.ORG_CI=0" size="9000" duration="1:02:03.500" resolution="1920x1080">http://192.168.1.50:9000/m/v1.mkv?a=1&amp;b=2</res>
         <res protocolInfo="http-get:*:video/x-matroska:*" size="99999">http://192.168.1.66/evil.mkv</res></item>
@@ -1278,6 +1314,7 @@ do
         <res protocolInfo="http-get:*:audio/mpeg:*">http://192.168.1.50:9000/a.mp3</res></item>
       <item id="v2" parentID="Video/Films"><dc:title>Generic</dc:title><upnp:class>object.item</upnp:class>
         <res protocolInfo="http-get:*:video/mp4:*">http://192.168.1.50:9000/v2.mp4</res></item>
+      <item id="empty" parentID="Video/Films"/>
       <item id="v3" parentID="Video/Films"><dc:title>Elsewhere</dc:title><upnp:class>object.item.videoItem</upnp:class>
         <res protocolInfo="http-get:*:video/mp4:*">http://192.168.1.66/v3.mp4</res></item>
     </DIDL-Lite>]]
@@ -1291,6 +1328,7 @@ do
     eq("res: by video mime in a generic item", D.pick_res(videos[2].res, "192.168.1.50").url,
        "http://192.168.1.50:9000/v2.mp4")
     eq("res: other host only -> none", D.pick_res(videos[3].res, "192.168.1.50"), nil)
+    check("didl: empty elements skipped", #videos[1].res == 3 and videos[3].id == "v3")
     eq("didl: date", videos[1].date, 20240501000000)
     check("didl: document order kept", containers[1].pos < videos[1].pos and videos[1].pos < videos[2].pos)
     local wrapped = "<s:Envelope><s:Body><u:BrowseResponse><Result>" .. D.xml_escape(didl)

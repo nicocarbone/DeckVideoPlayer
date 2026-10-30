@@ -83,10 +83,17 @@ local function text_of(inner)
     return util.trim(M.xml_unescape(inner))
 end
 
+-- Pure: `xml` without its empty elements written as one tag ("<res .../>"),
+-- which the patterns below would otherwise take for an opening tag.
+local function without_empty(xml)
+    return (xml:gsub("<[^>]-/>", ""))
+end
+
 -- Pure: the text of the first element `name` in `xml`, written either
 -- without a namespace prefix or with any prefix ("dc:title" is found by
 -- "title"), or nil.
 function M.element_text(xml, name)
+    xml = without_empty(xml)
     local inner = xml:match("<" .. name .. "[%s>].-</" .. name .. ">")
         or xml:match("<[%w_%-]+:" .. name .. "[%s>].-</[%w_%-]+:" .. name .. ">")
     if not inner then return nil end
@@ -102,7 +109,7 @@ end
 
 -- Pure: a server id (the UUID of a UDN or USN), or nil.
 function M.safe_id(id)
-    id = tostring(id or ""):gsub("^uuid:", ""):match("^([%w%-]+)")
+    id = util.trim(tostring(id or "")):gsub("^[Uu][Uu][Ii][Dd]:", ""):match("^([%w%-]+)")
     if id and #id >= 4 and #id <= 64 then return id end
     return nil
 end
@@ -163,10 +170,18 @@ end
 function M.parse_description(xml, location)
     xml = tostring(xml or "")
     if not xml:find("MediaServer", 1, true) then return nil, "Not a media server" end
-    local id = M.safe_id(M.element_text(xml, "UDN"))
+    -- A media server inside another device (a router, a NAS): its own
+    -- part, from its deviceType to the next device's.
+    local device = xml
+    local start = xml:find("<deviceType>%s*urn:schemas%-upnp%-org:device:MediaServer:")
+    if start then
+        local stop = xml:find("<deviceType>", start + 1, true)
+        device = xml:sub(start, stop and stop - 1 or -1)
+    end
+    local id = M.safe_id(M.element_text(device, "UDN") or M.element_text(xml, "UDN"))
     if not id then return nil, "No server id" end
     local control
-    for service in xml:gmatch("<service>(.-)</service>") do
+    for service in device:gmatch("<service>(.-)</service>") do
         local stype = M.element_text(service, "serviceType") or ""
         if stype:find("ContentDirectory", 1, true) then
             local base = M.element_text(xml, "URLBase")
@@ -180,7 +195,7 @@ function M.parse_description(xml, location)
     local _, chost = M.split_url(control)
     local _, lhost = M.split_url(location)
     if chost ~= lhost then return nil, "Content directory on another host" end
-    local name = M.element_text(xml, "friendlyName") or "DLNA server"
+    local name = M.element_text(device, "friendlyName") or M.element_text(xml, "friendlyName") or "DLNA server"
     return {id = id, name = util.utf8_truncate(name, 60), control = control}
 end
 
@@ -249,7 +264,7 @@ end
 -- duration, resolution}}; `pos` keeps the document order of both.
 function M.parse_didl(didl)
     local containers, items = {}, {}
-    didl = tostring(didl or "")
+    didl = without_empty(tostring(didl or ""))
     for pos, attrs, inner in didl:gmatch("()<container(%s[^>]*)>(.-)</container>") do
         local id = M.attr(attrs, "id")
         if id and id ~= "" then
@@ -452,11 +467,13 @@ function M:connect(id, cb)
     if not s then return cb(nil, "Unknown DLNA server") end
     if self.control[id] then return cb({url = self.control[id], kind = "local"}) end
     self:describe_device(s.location, function(info, err)
+        if self:server(id) ~= s then return cb(nil, "Unknown DLNA server") end   -- removed meanwhile
         if info and info.id == id then
             self.control[id] = info.control
             return cb({url = info.control, kind = "local"})
         end
         self:discover(function(found)
+            if self:server(id) ~= s then return cb(nil, "Unknown DLNA server") end
             for _, f in ipairs(found) do
                 if f.id == id then
                     s.location, s.name = f.location, f.name

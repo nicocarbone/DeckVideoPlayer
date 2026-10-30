@@ -353,6 +353,7 @@ function M:start(job)
         self:check_space(dir, job, function(ok, avail)
             if job.run ~= run then return end
             if not ok then
+                library.prune_folders(dir, library.download_folder(self.ctx.cfg))
                 return self:finish(job, "fail", "Not enough free space (" .. M.format_size(avail) .. " free)")
             end
             job.before = file_size(job.path .. ".part")
@@ -513,6 +514,8 @@ function M:cancel(job)
                 os.remove(util.join(util.dirname(job.path), s))
             end
         end
+        -- (A show's season folder made for it.)
+        library.prune_folders(util.dirname(job.path), library.download_folder(self.ctx.cfg))
     end
     for i, j in ipairs(self.jobs) do
         if j == job then table.remove(self.jobs, i) break end

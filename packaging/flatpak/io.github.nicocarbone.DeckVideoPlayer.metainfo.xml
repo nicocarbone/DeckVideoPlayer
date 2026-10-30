@@ -29,6 +29,9 @@
       <li>Recently played list, black-bar cropping, screen kept awake while playing</li>
       <li>Night mode, and intro/credits skipping for Plex and Jellyfin</li>
       <li>Video info for every file, and HDR settings (HDR off, tone mapping, SDR to HDR)</li>
+      <li>Downloads from Plex, Jellyfin and DLNA servers for offline playback</li>
+      <li>DLNA servers on the home network, and network folders (SMB, NFS) mounted by the system</li>
+      <li>Hardware or software decoding, chosen per video</li>
     </ul>
   </description>
   <screenshots>
@@ -56,6 +59,17 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.7.2" date="2026-10-30">
+      <description>
+        <p>Fixes from a code review.</p>
+        <ul>
+          <li>"Show in the library" opens the whole folder path; B goes up one level at a time</li>
+          <li>Cancelled downloads leave no empty folders; deleting downloads is more reliable</li>
+          <li>Files on a network share mounted inside a library folder can no longer be deleted</li>
+          <li>DLNA: more servers recognised, better subtitle search, Video info gives up on a server that stops answering</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-10-29">
       <description>
         <p>Download DLNA videos.</p>

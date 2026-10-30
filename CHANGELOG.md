@@ -5,6 +5,32 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.7.2 (2026-10-30)
+
+Fixes from a code review of the download, network and DLNA features.
+
+### Fixed
+
+- **Files on a network share can't be deleted** even when the share is
+  mounted inside a library folder by a systemd automount (as in the SMB
+  guide). KDE network folders (Desktop Mode) also count as network
+  shares now.
+- *Menu → Downloads → Show in the library* opens the whole folder path
+  (e.g. *downloads › Show › Season 01*), so B goes up one level at a
+  time instead of straight to the start screen.
+- Cancelling a download (or one stopped for lack of free space) no
+  longer leaves empty show and season folders behind.
+- Deleting a download from *Menu → Downloads* works even when it was the
+  first one in the download folder, and the library leaves a folder
+  emptied by the deletion.
+- A download that finishes while a menu is open shows up in the library
+  when the menu closes.
+- DLNA: servers built into a router or NAS, and servers that write their
+  id in capitals, are found correctly; videos are no longer hidden by an
+  empty resource entry before them; the subtitle search reads the year,
+  season and episode from DLNA titles; *Video info* gives up after 15 s
+  when the server stops answering.
+
 ## v0.7.1 (2026-10-29)
 
 Download DLNA videos.

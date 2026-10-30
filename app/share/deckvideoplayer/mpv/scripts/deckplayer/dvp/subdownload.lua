@@ -67,8 +67,14 @@ function M.server_key(item)
 end
 
 -- Pure: what to search for a media server video, from the server's own
--- metadata (more reliable than parsing a file name).
+-- metadata (more reliable than parsing a file name). A DLNA server only
+-- has a title, often a file name: parsed like one.
 function M.server_info(item)
+    if item.backend == "dlna" then
+        local info = OpenSubtitles.parse_name(item.name or "")
+        if info.title == "" then info.title = item.name or "" end
+        return info
+    end
     if item.kind == "episode" then
         return {title = item.show or item.name or "", season = item.season, episode = item.episode}
     end

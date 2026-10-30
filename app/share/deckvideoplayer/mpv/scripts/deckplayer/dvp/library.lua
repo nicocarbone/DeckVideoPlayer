@@ -206,7 +206,9 @@ function M.mount_for(mounts, path)
     for _, m in ipairs(mounts) do
         local p = m.path
         local prefix = p:sub(-1) == "/" and p or (p .. "/")
-        if (path == p or path:sub(1, #prefix) == prefix) and (not best or #p > #best.path) then best = m end
+        -- (>=: of two mounts on the same point, the later one is on top,
+        -- e.g. a share mounted by its automount point.)
+        if (path == p or path:sub(1, #prefix) == prefix) and (not best or #p >= #best.path) then best = m end
     end
     return best
 end
@@ -216,7 +218,7 @@ local NETWORK_FS = {
     cifs = true, smb3 = true, smbfs = true, nfs = true, nfs4 = true, ceph = true, glusterfs = true,
     ["9p"] = true, afs = true, davfs = true, ["fuse.sshfs"] = true, ["fuse.rclone"] = true,
     ["fuse.gvfsd-fuse"] = true, ["fuse.davfs2"] = true, ["fuse.s3fs"] = true,
-    ["fuse.curlftpfs"] = true, ["fuse.smbnetfs"] = true,
+    ["fuse.curlftpfs"] = true, ["fuse.smbnetfs"] = true, ["fuse.kio-fuse"] = true,
 }
 
 function M.is_network_fs(fstype)
@@ -262,8 +264,7 @@ function M.delete_refusal(path, sources, mounts, cfg)
         return "Only videos on this device can be deleted"
     end
     if not M.is_video(util.basename(path), cfg) then return "Not a video file" end
-    local mount = M.mount_for(mounts, path)
-    if mount and M.is_network_fs(mount.fstype) then return "Videos on a network share can't be deleted" end
+    if M.is_slow_path(mounts, path) then return "Videos on a network share can't be deleted" end
     return nil
 end
 
@@ -314,13 +315,18 @@ function M.delete_video(path, sources, cfg)
     for _, n in ipairs(M.sidecar_subtitles(util.basename(path), util.readdir(dir, "files") or {})) do
         os.remove(util.join(dir, n))
     end
-    local downloads = M.download_folder(cfg)
+    M.prune_folders(dir, M.download_folder(cfg))
+    return true
+end
+
+-- Removes `dir` and the folders above it while they are empty, inside
+-- the download folder `downloads` (never that folder itself).
+function M.prune_folders(dir, downloads)
     while downloads and dir ~= downloads and dir:sub(1, #downloads + 1) == downloads .. "/" do
         local left = util.readdir(dir, "all")
         if not left or #left > 0 or not os.remove(dir) then break end
         dir = util.dirname(dir)
     end
-    return true
 end
 
 -- Sorts entries in place: folders first, then files; by natural name

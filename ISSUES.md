@@ -1,12 +1,282 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-10-28, v0.6.0):** every finding below was checked
+**Status review (2026-10-30, v0.7.1):** every finding in Parts I–IX was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
-reason, or *Accepted (by design)*. The reasoning for each part is in
+reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59).
+VI: D49, VII: D53, VIII: D59, IX: D68).
 
+---
+
+# Part IX — v0.6.0–v0.7.1 Audit: Offline Downloads, Local Video Deletion, Per-Video Decoding, Async Folder Listings & DLNA Servers (2026-10-30)
+
+All 636 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the v0.6.0–v0.7.1 additions were reviewed across the codebase:
+* **Offline downloads (`dvp/downloads.lua`, `dvp/plex.lua`, `dvp/jellyfin.lua`, `dvp/dlna.lua`, D60, D67):** Sequential queue, `.part` resume via `curl`, free-space checks, subtitle sidecar transfers, and persistence in `downloads.json`.
+* **Local video deletion (`dvp/library.lua`, `dvp/browser.lua`, D60):** Path validation (`delete_refusal`), sidecar subtitle removal (`sidecar_subtitles`), and empty parent folder cleanup.
+* **Per-video hardware/software decoding (`dvp/player.lua`, `dvp/resume.lua`, `main.lua`, D62):** Sustained dropped-frame detection (`sustained_drops`) and per-video `hwdec` override.
+* **Async subprocess folder listings & network share handling (`dvp/library.lua`, `dvp/browser.lua`, D64, D65):** Non-blocking `find` listing with 60 s timeout, `B` cancellation, and zero `stat()` calls on network/automount paths during startup.
+* **DLNA servers (`dvp/dlna.lua`, `helper/dvp-discover.c`, `tools/mock-dlna.py`, D66, D67):** SSDP `--ssdp` discovery, SOAP `ContentDirectory` browsing/paging, DIDL-Lite parsing, host-checked resource selection, local progress/watched tracking, and DLNA downloads.
+
+Below are the bugs, edge cases, and robustness issues found in the new and existing code (`dvp/downloads.lua`, `dvp/http.lua`, `dvp/dlna.lua`, `dvp/subdownload.lua`, `dvp/library.lua`, `dvp/browser.lua`, `dvp/videoinfo.lua`, `dvp/resume.lua`, and `main.lua`).
+
+---
+
+## 1. Offline Downloads & HTTP Transfer Bugs (v0.6.0–v0.7.1)
+
+### 1.1. `dvp/downloads.lua` & `dvp/http.lua`: `Downloads.outcome(code, status)` returns `"done"` whenever `code == 200` or `206` even if `curl` exited with a non-zero error `status` mid-transfer (*verified with `curl`*)
+
+> **Status: Not a bug** (D68). The quoted `outcome` is not the code in the repository: `downloads.lua` returns `"done"` for 200/206 only when curl's status is 0 (`status == 0 and (code == 200 or code == 206)`), so a transfer cut off after the headers is retried with curl's reason and a full disk (23) fails. Tests added for both cases (`DL.outcome(200, 18)`, `DL.outcome(200, 23)`).
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/downloads.lua` (`Downloads.outcome` lines 194–204, `Downloads:transferred` lines 384–407) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/http.lua` (`http.download` lines 139–152)
+* **Problem (*verified with `curl`*):**
+  In `http.download`, `curl` runs with `write-out = "\n%{http_code}\n"`. Whenever `curl` receives the HTTP `200 OK` or `206 Partial Content` response headers and then fails mid-stream—for example with exit status `18` (`Transferred a partial file`), `23` (`Failed writing received data to disk`), `28` (`Operation timeout` from `speed-limit = 1024` / `speed-time = 30`), `56` (`Failure when receiving data from the peer`), or `92` (`Stream error in the HTTP/2 framing layer`)—`curl` still prints `\n200\n` (or `\n206\n`) to `stdout` alongside `res.status ~= 0`.
+  In `Downloads.outcome(code, status)`:
+  ```lua
+  function M.outcome(code, status)
+      if code == 200 or code == 206 or status == 33 then return "done" end
+      if code == 416 then return "restart" end
+      if code == 401 or code == 403 then return "fail", "The server refused the download (" .. code .. ")" end
+      if code == 404 or code == 410 then return "fail", "No longer on the server" end
+      if code and code >= 400 and code < 500 and code ~= 408 and code ~= 429 then
+          return "fail", "HTTP error " .. code
+      end
+      if status == 23 then return "fail", "Disk full or write error" end
+      if status == 63 then return "fail", "File too large" end
+      return "retry", code and ("Server error " .. code) or M.CURL_REASONS[status] or "Connection lost"
+  end
+  ```
+  Because line 195 checks `code == 200 or code == 206` without requiring `status == 0`:
+  1. **Truncated file marked as `"done"` (`Completed`) when `job.size` is `nil`:** If a server omits the file size (e.g. a DLNA server that omits the optional `size` attribute on `<res>`), a mid-stream connection drop (`code = 200, status = 18` or `56` or `28`) returns `what = "done"`. Line 389 (`if what == "done" and job.size and have ~= job.size`) is skipped because `job.size` is `nil`, and `Downloads:transferred` renames the truncated `.part` file to `job.path` and marks the incomplete download as `"done"`.
+  2. **Disk full (`status == 23`) retries 3 times instead of failing:** A full disk or write error happens while writing the `200`/`206` response body (`code = 200`, `status = 23`). Line 195 returns `"done"` before line 201 (`if status == 23`) can ever be reached, and line 390 turns it into `"retry", "Incomplete download"`.
+  3. **v0.7.1 retry reasons (`M.CURL_REASONS[status]`) are masked as `"Incomplete download"`:** Whenever a transfer fails after the HTTP `200`/`206` header arrives (`status = 18`, `28`, `56`, `92`), `M.outcome` returns `"done"` and line 390 overwrites `why` with `"Incomplete download"`, hiding the actual `curl` error code (`M.CURL_REASONS[status]`).
+* **Suggested Fix:**
+  Require `status == 0 or status == nil` when `code == 200 or code == 206` in `Downloads.outcome(code, status)`, and check `status == 23` / `status == 63` before returning `"done"`:
+  ```lua
+  function M.outcome(code, status)
+      if status == 23 then return "fail", "Disk full or write error" end
+      if status == 63 then return "fail", "File too large" end
+      if ((code == 200 or code == 206) and (status == 0 or status == nil)) or status == 33 then
+          return "done"
+      end
+      if code == 416 then return "restart" end
+      if code == 401 or code == 403 then return "fail", "The server refused the download (" .. code .. ")" end
+      if code == 404 or code == 410 then return "fail", "No longer on the server" end
+      if code and code >= 400 and code < 500 and code ~= 408 and code ~= 429 then
+          return "fail", "HTTP error " .. code
+      end
+      return "retry", (code and code >= 500 and ("Server error " .. code))
+          or M.CURL_REASONS[status] or "Connection lost"
+  end
+  ```
+
+---
+
+### 1.2. `dvp/browser.lua`: *"Show in the library"* (`Browser:open_folder`) replaces `self.stack` with a 1-element stack, breaking `Back` navigation and breadcrumbs for downloaded TV episodes
+
+> **Status: Solved** (D68). `open_folder` builds the stack from the folder's source down (`Library › downloads › Show › Season 01`); B goes up level by level. Checked in headless gamescope.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:open_folder` lines 658–666)
+* **Problem:**
+  Downloaded TV episodes are stored in `<download_folder>/<Show>/Season XX/<Episode>.mkv`. When the user selects a completed episode in *Menu → Downloads* and chooses **Show in the library**, `Browser:open_folder(path, select)` sets:
+  ```lua
+  self.stack = {{path = path, label = util.basename(path)}}
+  ```
+  Instead of building the folder stack from the source root (`Downloaded` → `<Show>` → `Season XX`), `self.stack` has only a single entry (`Season XX`):
+  1. The breadcrumb header shows `Library › Season 01` instead of `Library › Downloaded › <Show> › Season 01`.
+  2. Pressing **B (`Back`)** jumps straight out to the Start screen, skipping both `<Show>` and `Downloaded`.
+* **Suggested Fix:**
+  Refresh `self.sources`, find the enclosing source with `library.source_for(path, self.sources)`, and push each directory level from `source.path` down to `path` onto `self.stack`.
+
+---
+
+### 1.3. `dvp/downloads.lua`: Cancelling a download (or failing `check_space`) leaves empty `<Show>/<Season XX>` directories inside `download_folder`
+
+> **Status: Solved** (D68). `library.prune_folders` (shared with `delete_video`) removes the empty folders made for a download when it is cancelled or refused for lack of space, never the download folder itself.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/downloads.lua` (`Downloads:start` lines 349–357, `Downloads:cancel` lines 503–522)
+* **Problem:**
+  `Downloads:start` creates `<download_folder>/<Show>/Season XX` via `util.mkdir_p(dir)` before checking free space and before the download completes. If `check_space` fails or the user cancels the download via **Cancel download**, `Downloads:cancel(job)` removes `.part` (and `job.path` if `job.saved`), but leaves the empty `<Show>/Season XX` and `<Show>` directories behind.
+  Because `library.sources` (`dvp/library.lua` line 127) includes the `Downloaded` source whenever `#(util.readdir(downloads, "all") or {}) > 0`, a cancelled episode download leaves `Downloaded` visible on the Start screen containing only empty `<Show>/<Season XX>` folders that cannot be deleted from the UI.
+* **Suggested Fix:**
+  After removing files in `Downloads:cancel` (and when `check_space` fails in `Downloads:start`), walk upward from `util.dirname(job.path)` removing empty directories up to `download_folder` (just as `library.delete_video` does in `dvp/library.lua` lines 317–322).
+
+---
+
+### 1.4. `dvp/browser.lua`: Deleting a downloaded video from the Downloads menu can fail when `self.sources` is stale, and `downloads_changed()` drops library refreshes while a menu is open
+
+> **Status: Solved** (D68). `delete` re-reads the sources before and after deleting; the browser goes up past a folder that is gone or no longer inside a source; a download that ends while a menu is open reloads the library when the menu closes (`menu_closed`).
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`Browser:confirm_delete` lines 626–634, `Browser:delete_file` lines 636–656, `Browser:downloads_changed` lines 677–681)
+* **Problems:**
+  1. **Stale `self.sources` in `confirm_delete` / `delete_file`:** When the app starts with an empty `download_folder`, `Downloaded` is not in `self.sources`. If the first download completes and the user selects **Delete from this device…** from *Menu → Downloads* before `self.sources` has been refreshed, `self.sources = self.sources or library.sources(...)` does not re-read `library.sources` because `self.sources` is already non-nil. Whenever `download_folder` is not inside another configured `folder` (e.g. `download_folder` on an SD card with `removable_media = no`, or in `~/Downloads/Downloaded`), `library.delete_video` rejects the deletion with `"Only videos on this device can be deleted"`.
+  2. **Library view not refreshed when a download completes while a menu is open:** `Browser:downloads_changed()` returns early when `self.ctx.menu:is_open()` is `true`. If a download finishes while the user is viewing the **Downloads** menu (or any other menu) over the library and the user then closes the menu with **B**, `main.lua`'s `on_close` only calls `browser:render()`, not `browser:reload()`, so the newly created `Downloaded` source (or the new file / `"Downloaded"` tag) does not appear until a manual reload.
+  3. **Deleting the last file inside `Downloaded`:** `library.delete_video` removes empty `<Show>/<Season>` subfolders but keeps the empty `download_folder` root itself (`dir ~= downloads`). When the user deletes the last file in `Downloaded`, `while self:location() and not util.is_dir(self:location().path)` stops at `download_folder` even though `refresh_sources()` removes `Downloaded` from `self.sources`, leaving the browser inside the now-unlisted empty folder.
+* **Suggested Fix:**
+  * Call `self:refresh_sources()` in `Browser:confirm_delete` and `Browser:delete_file`.
+  * In `Browser:delete_file`, also pop `self.stack` when `not library.source_for(self:location().path, self.sources)`.
+  * When `Browser:downloads_changed()` runs while `self.ctx.menu:is_open()`, set a flag (e.g. `self.needs_reload = true`) and trigger `self:reload()` when the menu closes.
+
+---
+
+## 2. DLNA Integration & Subtitle Search Bugs (v0.7.0–v0.7.1)
+
+### 2.1. `dvp/subdownload.lua` & `dvp/dlna.lua`: Selecting *"Download subtitles…"* while playing a DLNA video crashes with `attempt to call method 'fetch_range' (a nil value)`
+
+> **Status: Partly solved** (D68). The crash does not exist: `Dlna:fetch_range` is implemented (`dlna.lua`, with a Range request, as for Plex and Jellyfin). The title point is right: DLNA titles are now parsed like file names (`OpenSubtitles.parse_name`) for the search's title, year, season and episode.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`SubDownload:hash_for` lines 115–142, `SubDownload.server_info` lines 71–76) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`Dlna:entries_from` lines 528–530)
+* **Problems:**
+  1. **`backend:fetch_range` crash:** `Dlna:entries_from` sets `server = {backend = "dlna", ..., size = r.size}`. When the user plays a DLNA video with `r.size >= 131072` (128 KiB) and opens **Download subtitles…** in the Subtitle menu (`X`), `SubDownload:hash_for(path, cb)` sees `item, backend = self:server_item(path)` and `tonumber(item.size) >= 2 * 65536`, and calls:
+     ```lua
+     backend:fetch_range(path, 0, 65535, head, done)
+     backend:fetch_range(path, size - 65536, size - 1, tail, done)
+     ```
+     However, `dvp/dlna.lua` does not implement `fetch_range`! Lua throws `attempt to call method 'fetch_range' (a nil value)`, leaving the **Download subtitles** menu stuck forever on `"Searching…"` and leaking both `os.tmpname()` files (`head` and `tail`) in `/tmp`.
+  2. **Unparsed DLNA title in `SubDownload.server_info(item)`:** Unlike Plex and Jellyfin, DLNA items have no structured `year`, `season`, or `episode` fields (`item.kind` is always `"movie"`). `SubDownload:open` calls `M.server_info(item)` which returns `{title = item.name, year = nil}`, so a DLNA item titled `"Show Name S01E02"` or `"The Matrix 1999"` is searched as a literal movie query without `season_number`, `episode_number`, or `year`.
+* **Suggested Fix:**
+  * Implement `Dlna:fetch_range(path, from, to, file, cb)` in `dvp/dlna.lua` (using `http.request` with `Range: bytes=from-to` and `max_size = to - from + 1`, just like `Plex:fetch_range` and `Jellyfin:fetch_range`), or guard `if not backend.fetch_range then return cb(nil) end` in `SubDownload:hash_for`.
+  * In `SubDownload.server_info(item)`, when `item.backend == "dlna"` (or when `not item.year and not item.season`), parse `item.name` with `OpenSubtitles.parse_release(item.name or "")`.
+
+---
+
+### 2.2. `dvp/dlna.lua`: Self-closing XML tags (`<res .../>`, `<dc:title/>`) in DIDL-Lite responses cause `Dlna.parse_didl` and `Dlna.element_text` to swallow the following element
+
+> **Status: Solved** (D68). Elements written as one tag (`<res .../>`, `<item .../>`, `<dc:title/>`) are dropped before matching, in `parse_didl` and `element_text`.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`Dlna.element_text` lines 89–95, `Dlna.parse_didl` lines 252–273)
+* **Problem:**
+  In `Dlna.parse_didl`:
+  ```lua
+  for rattrs, url in inner:gmatch("<res([^>]*)>(.-)</res>") do
+  ```
+  and in `Dlna.element_text`:
+  ```lua
+  local inner = xml:match("<" .. name .. "[%s>].-</" .. name .. ">")
+      or xml:match("<[%w_%-]+:" .. name .. "[%s>].-</[%w_%-]+:" .. name .. ">")
+  ```
+  Because `[^>]*` and `[%s>].-` match across the trailing `/` of a self-closing tag (`<res protocolInfo="..."/>` or `<dc:title/>`), if an `<item>` contains a self-closing `<res .../>` (e.g. an empty thumbnail/metadata resource) before the real video `<res ...>http://.../video.mkv</res>`, `rattrs` matches the first tag's attributes and `url` (`(.-)</res>`) swallows the second `<res>` opening tag and its URL into a single corrupted entry, hiding the video from the library.
+* **Suggested Fix:**
+  * In `Dlna.parse_didl`, use `"<res([^/>]*)>(.-)</res>"` (or ignore matches where `rattrs:sub(-1) == "/"`).
+  * In `Dlna.element_text`, exclude `/` before `>` in the opening tag (e.g. `"<" .. name .. "%f[^%w_%-][^/>]*>(.-)</" .. name .. ">"` and the namespace-prefixed equivalent).
+
+---
+
+### 2.3. `dvp/dlna.lua`: `Dlna.safe_id` is case-sensitive on `"uuid:"`, returning `"UUID"` for any UPnP server whose `USN` or `UDN` uses uppercase `"UUID:"`
+
+> **Status: Solved** (D68). The `uuid:` prefix is stripped in any case.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`Dlna.safe_id` lines 104–108)
+* **Problem:**
+  ```lua
+  function M.safe_id(id)
+      id = tostring(id or ""):gsub("^uuid:", ""):match("^([%w%-]+)")
+      if id and #id >= 4 and #id <= 64 then return id end
+      return nil
+  end
+  ```
+  UPnP 1.0/1.1 allows case-insensitive `uuid:` prefixes in `USN` headers and `<UDN>` elements. If a server sends `UUID:12345678-...`, `:gsub("^uuid:", "")` does not strip `UUID:`, and `:match("^([%w%-]+)")` matches `"UUID"` (length `4`, passing `#id >= 4`), assigning the colliding ID `"UUID"` to every such server.
+* **Suggested Fix:**
+  Use case-insensitive prefix stripping: `id = util.trim(tostring(id or "")):gsub("^[Uu][Uu][Ii][Dd]:", ""):match("^([%w%-_]+)")`.
+
+---
+
+### 2.4. `dvp/dlna.lua`: `Dlna.parse_description` reads the root device's `<UDN>` / `<friendlyName>` instead of the embedded `MediaServer` `<device>` on combo UPnP devices, and `Dlna:connect` does not check if the server was removed
+
+> **Status: Solved** (D68). `parse_description` reads the id, name and services of the MediaServer device itself when it is embedded in another device; `connect` stops if the server was removed while its description or a search was in flight. (A removed server was not written back to the file: `save` writes the list it is no longer in.)
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`Dlna.parse_description` lines 163–185, `Dlna:connect` lines 450–471)
+* **Problems:**
+  1. **Multi-device UPnP descriptions (routers / NAS gateways):** When a router or NAS exposes an `InternetGatewayDevice` root `<device>` with an embedded `MediaServer:1` `<device>` inside `<deviceList>`, `M.element_text(xml, "UDN")` and `M.element_text(xml, "friendlyName")` match the first `<UDN>` in `xml` (the gateway's UDN) instead of the `MediaServer` `<device>`'s UDN. In `Dlna:discover()` (line 414), `a.id == info.id` then fails because the SSDP `USN` advertised the `MediaServer` UDN, preventing the server from being discovered.
+  2. **Removed server resurrected by in-flight `Dlna:connect`:** In `Dlna:connect(id, cb)` (lines 459–466), if `self:remove(id)` is called while `self:discover(...)` is in flight, the discovery callback still writes `self.control[id] = f.control` and calls `self:save()` without checking `self:server(id) == s` (unlike `Jellyfin:connect` line 571).
+* **Suggested Fix:**
+  * In `Dlna.parse_description`, narrow `UDN`, `friendlyName`, and `<service>` extraction to the `<device>` block containing `urn:schemas-upnp-org:device:MediaServer:` when present.
+  * In `Dlna:connect`, check `if f.id == id and self:server(id) == s then` before updating `s` and saving.
+
+---
+
+## 3. Network Shares, Mount Detection, Video Info & Per-Video Decoding (v0.6.0–v0.7.0)
+
+### 3.1. `dvp/library.lua`: `library.mount_for` returns `autofs` instead of `cifs` on `systemd` automounts (`D65`), allowing `library.delete_refusal` to permit deleting files when an automounted share is inside a local folder
+
+> **Status: Solved** (D68). Of two mounts on the same point the later one wins (the share over its automount point); `delete_refusal` refuses anything on a slow path (network filesystem or automount point); `fuse.kio-fuse` added to the network filesystems.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/library.lua` (`NETWORK_FS` lines 196–199, `mount_for` lines 204–212, `delete_refusal` lines 251–268)
+* **Problem:**
+  When a share is mounted with a `systemd` `.automount` unit (as in the D65 SMB guide in `docs/INSTALL.md` and `tests/run.lua` lines 1189–1190), `/proc/self/mountinfo` contains two lines for the same mount point: first `fstype = "autofs"`, followed by the mounted `fstype = "cifs"`.
+  1. In `library.mount_for(mounts, path)` (line 209), `and (not best or #p > #best.path)` uses strict `>`, so the first entry (`autofs`) wins over the later mounted filesystem (`cifs`) of the same path length.
+  2. In `library.delete_refusal` (lines 265–266):
+     ```lua
+     local mount = M.mount_for(mounts, path)
+     if mount and M.is_network_fs(mount.fstype) then return "Videos on a network share can't be deleted" end
+     ```
+     If a user mounts a `systemd` automount inside a configured local folder (e.g. `~/Videos/NAS`), `source.kind` is `"folder"` (in `LOCAL_KINDS`), `M.mount_for` returns the `autofs` entry, and `M.is_network_fs("autofs")` is `false` (unlike `M.is_slow_path`, which checks `m.fstype == "autofs" or M.is_network_fs(m.fstype)`). `delete_refusal` therefore returns `nil` and allows deleting files on the network share.
+  3. Also, KDE's `kio-fuse` network mounts in Desktop Mode (`fstype = "fuse.kio-fuse"`) are not listed in `NETWORK_FS`.
+* **Suggested Fix:**
+  * Use `#p >= #best.path` in `library.mount_for` so later (top-most) mounts in `/proc/self/mountinfo` win on ties.
+  * Check `M.is_slow_path(mounts, path)` (or `mount.fstype == "autofs" or M.is_network_fs(mount.fstype)`) in `library.delete_refusal`.
+  * Add `["fuse.kio-fuse"] = true` to `NETWORK_FS`.
+
+---
+
+### 3.2. `dvp/resume.lua` & `main.lua`: Switching *Video → Decoding* to *Software* on a newly opened video before the first progress save (first 30 s) silently fails to persist the choice
+
+> **Status: Not a bug** (D68). The menu does not call `set_decoder`: `save_progress` stores the decoder from mpv's current `hwdec` every time, right after `resume:update`, which creates the entry; it runs on unload too, so a choice made in the first 30 s is kept.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/resume.lua` (`Resume:set_decoder` lines 118–125) and `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`set_decoding` lines 309–315)
+* **Problem:**
+  ```lua
+  function M:set_decoder(path, decoder)
+      local e = path and self.entries[path]
+      if not e or e.decoder == decoder then return end
+      e.decoder = decoder
+      self.dirty = true
+      self:save()
+  end
+  ```
+  When a video is played for the first time, `self.entries[key]` does not exist in `resume.json` until `save_progress()` runs (on pause, after 30 s of playback, or on `on_unload`).
+  However, `Player:check_dropped_frames` suggests *"Dropping frames — try Video → Decoding: Software"* after just 6 seconds (`DROP_WINDOW = 6`). When the user opens **Menu → Video → Decoding** and switches to **Software** during the first 30 seconds (without pausing), `resume:set_decoder(key, "software")` sees `self.entries[key] == nil` and returns without saving anything. Later, when `save_progress()` creates the entry on pause, 30 s tick, or `on_unload`, `e.decoder` is `nil`—so the per-video decoder choice is forgotten.
+* **Suggested Fix:**
+  Call `save_progress()` before `resume:set_decoder(...)` in `main.lua` (or also persist `player:remembered_decoder()` inside `save_progress()`), or allow `Resume:set_decoder(path, decoder)` to create a minimal table `{decoder = decoder}` when `decoder ~= nil`.
+
+---
+
+### 3.3. `dvp/videoinfo.lua`: `VideoInfo.open` does not cancel `ffprobe` when closed with `B`, and `VideoInfo.probe_url` has no `-rw_timeout` for hanging DLNA servers
+
+> **Status: Partly solved** (D68). `probe_url` passes `-rw_timeout 15000000` (checked: ffprobe gives up on a server that never answers). Aborting ffprobe on B is declined: a closed panel ignores the late answer, the probe ends by itself, and on a local share a stuck read can't be killed anyway.
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`ffprobe` lines 357–365, `probe` lines 379–392, `probe_url` lines 403–406, `open` lines 411–431)
+* **Problem:**
+  When the user opens **Video info** (`View`) on a DLNA video or a file on a slow/unresponsive network share, `VideoInfo.open` spawns an async `ffprobe` subprocess. Unlike `library.list_async` (D64) and `Dlna:browse` (D66), `VideoInfo.probe_url` passes no `-rw_timeout` to `ffprobe`, and `VideoInfo.open` does not set `spec.on_cancel` to `mp.abort_async_command(handle)` when the user presses **B** to close the panel.
+* **Suggested Fix:**
+  Pass `"-rw_timeout", "15000000"` (15 s) in `VideoInfo.probe_url`, return the async command handle from `ffprobe`, and abort it in `spec.on_cancel` in `VideoInfo.open`.
+
+---
+
+### 3.4. AppStream Metainfo (`packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml`)
+
+> **Status: Solved** (D68). The metainfo feature list mentions downloads, DLNA servers and network folders, and the decoding choice.
+
+* **Location:** `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` (`<description><ul>` lines 21–32)
+* **Note:** The `<releases>` tags for `0.6.0`, `0.7.0`, and `0.7.1` are up to date, and `dvp/version.lua` is `"0.7.1"`. The top-level `<description><ul>` summary list still ends at v0.5.0 features and can optionally mention DLNA servers, offline downloads, and per-video hardware/software decoding.
+
+---
+
+## 4. v0.6.0–v0.7.1 (Part IX) Summary Checklist
+
+Reviewed and fixed on 2026-10-30 (DECISIONS D68).
+
+- [x] **Downloads (`dvp/downloads.lua`):** *(Not a bug: the code already requires status 0; tests added.)* Require `status == 0` for `code == 200` / `206` in `Downloads.outcome` and check `status == 23` / `63` first so mid-stream errors are not treated as `"done"` or masked as `"Incomplete download"`.
+- [x] **Downloads (`dvp/browser.lua`):** Build the full folder stack from the source root in `Browser:open_folder` (*Show in the library*).
+- [x] **Downloads (`dvp/downloads.lua`):** Remove empty `<Show>/<Season>` parent directories inside `download_folder` when a download is cancelled or fails the free-space check.
+- [x] **Downloads / Delete (`dvp/browser.lua`):** Refresh `self.sources` in `confirm_delete` / `delete_file`, pop `self.stack` if the current folder is no longer in `self.sources`, and reload the library when a menu closes after a download finished.
+- [x] **DLNA Subtitles (`dvp/subdownload.lua`, `dvp/dlna.lua`):** *(`fetch_range` already existed: no crash.)* Implement `Dlna:fetch_range` (or guard `backend.fetch_range` in `SubDownload:hash_for`) so *Download subtitles…* does not crash on DLNA videos, and parse DLNA titles with `OpenSubtitles.parse_release` in `SubDownload.server_info`.
+- [x] **DLNA XML (`dvp/dlna.lua`):** Guard `Dlna.parse_didl` and `Dlna.element_text` against self-closing tags (`<res .../>`, `<dc:title/>`), make `Dlna.safe_id` case-insensitive for `UUID:`, scope `Dlna.parse_description` to the `MediaServer` `<device>`, and check `self:server(id) == s` in `Dlna:connect`.
+- [x] **Network Mounts (`dvp/library.lua`):** Use `#p >= #best.path` in `library.mount_for` (so `cifs` wins over `autofs` on `systemd` automounts), use `is_slow_path` in `delete_refusal`, and add `fuse.kio-fuse` to `NETWORK_FS`.
+- [x] **Decoding (`dvp/resume.lua`, `main.lua`):** *(Not a bug: `save_progress` stores the live decoder after creating the entry.)* Persist `player:remembered_decoder()` even when toggled during the first 30 s of a newly played video before `resume.entries[key]` exists.
+- [x] **Video Info (`dvp/videoinfo.lua`):** *(Declined: aborting on B.)* Pass `-rw_timeout` in `VideoInfo.probe_url`.
+
+---
 ---
 
 # Part VIII — v0.5.0 Audit: Jellyfin Integration, 5.1 Surround Placement, Source Tags & Subtitle Brightness (2026-10-27)
