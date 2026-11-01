@@ -1,10 +1,18 @@
 # Deck Video Player
 
-A lightweight, controller-driven video player for the **Steam Deck** and
-**SteamOS game mode** (and DIY Steam Machines). It is a thin front end for
+**A video player for the Steam Deck and SteamOS Game Mode.** Watch your
+own videos from the couch with the controller, without leaving Game Mode:
+from local folders, the microSD card, USB drives, network shares (SMB),
+and Plex, Jellyfin and DLNA media servers, with hardware decoding and
+HDR output on HDR screens (Steam Deck OLED, HDR TVs). It has also been
+tested on a PC running SteamOS (a DIY Steam Machine) with a 4K HDR TV.
+
+It is a lightweight, free and open-source front end for
 [mpv](https://mpv.io): the whole interface (library browser, playback
 controls, menus) is drawn by Lua scripts on mpv's own on-screen display, so
 there is a single process and nothing between the video and the screen.
+It installs as a Flatpak with a Steam shortcut (a *Non-Steam game* with
+library artwork).
 
 > [!WARNING]
 > **Beta software.** Deck Video Player is, at best, beta quality. The
@@ -15,6 +23,8 @@ there is a single process and nothing between the video and the screen.
 > desktop Linux are untested. Expect bugs, and please [report them](https://github.com/nicocarbone/DeckVideoPlayer/issues).
 > The installer edits Steam's `shortcuts.vdf` (it keeps a `.bak` copy).
 > Provided **without any warranty**, as described in the GPL (`LICENSE`).
+
+## Features
 
 - Plays essentially every format (FFmpeg), with **hardware decoding** through
   VA-API on the Deck's AMD APU (H.264, HEVC 8/10-bit, VP9, AV1).
@@ -77,7 +87,7 @@ DLNA server is the project's test server (`tools/mock-dlna.py`), and the
 subtitle results come from its local test server
 (`tools/mock-opensubtitles.py`), not from OpenSubtitles.
 
-## Why another video player?
+## Why another video player for the Steam Deck?
 
 The Steam Deck can already play video, so this needs explaining. The gap
 is **Game Mode**: watching your own files from the couch with the
@@ -122,16 +132,19 @@ what exists and where it falls short. Corrections are welcome.
   rather than a library browser.
 
 What Deck Video Player adds is deliberately narrow:
-- a controller-first library for local folders and the SD card;
+- a controller-first library for local folders, the SD card and USB
+  drives, network shares mounted by SteamOS, and Plex, Jellyfin and DLNA
+  servers;
 - real HDR10 output through gamescope and VA-API hardware decoding;
 - refresh-rate matching (48 Hz for 24 fps films and so on), which none of
   the players above document doing in Game Mode;
 - resume, headphone surround, subtitle downloads;
 - a Steam shortcut with artwork.
 
-All of it needs no server and no setup beyond choosing a folder. It is
-**not** a media center: there is no metadata scraping or posters, and no
-network shares yet.
+For local files it needs no server and no setup beyond choosing a folder.
+It is **not** a media center: there is no metadata scraping or posters
+for your own files, and network shares must be mounted by SteamOS first
+([guide](docs/INSTALL.md#network-shares-smb)).
 
 Our own caveats:
 - Refresh-rate matching is confirmed on a Steam Deck OLED. On TVs the app
@@ -162,11 +175,14 @@ Our own caveats:
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | Every source file and module API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, unit/headless/Flatpak/on-device testing, building, releasing, recipes |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Releases and plans (later Jellyfin, network shares) and guiding rules |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Releases, plans and guiding rules |
 | [AGENTS.md](AGENTS.md) | Quick orientation for AI agents and new contributors |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licences of bundled components, source availability, trademarks |
 
-## Install on SteamOS
+## Install on Steam Deck and SteamOS
+
+Not on Flathub yet: install from the
+[GitHub releases](https://github.com/nicocarbone/DeckVideoPlayer/releases).
 
 1. Switch to **Desktop Mode**, download the release archive
    (`DeckVideoPlayer-vX.Y.Z.tar.gz`) and extract it.
@@ -305,8 +321,29 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md): next episode from *Continue
-watching* and network shares; Flathub publication at some point. Past releases: [CHANGELOG.md](CHANGELOG.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md): renaming library sources, SMB
+shares without a system mount, next episode from *Continue watching*;
+Flathub publication at some point. Past releases:
+[CHANGELOG.md](CHANGELOG.md).
+
+## Questions
+
+- **Do I need Desktop Mode?** Only once, to run the installer. After
+  that the app starts from the Steam library in Game Mode.
+- **Does it work on the Steam Deck LCD?** Yes, lightly tested. Its
+  screen is SDR, so HDR videos are tone-mapped to SDR there.
+- **Can it play HDR and Dolby Vision files?** HDR10 and HLG videos are
+  sent to the screen as HDR10 when HDR is on in Steam's settings (Steam
+  Deck OLED, HDR TV). Dolby Vision videos play too, but the screen never
+  gets a Dolby Vision signal: they are shown as HDR10.
+- **Does it transcode?** No. Plex and Jellyfin videos are played as the
+  original files (direct play), so the device must be able to decode
+  them. On a Deck, 4K60 AV1 can stutter with the hardware decoder;
+  *Video → Decoding: Software* plays it more smoothly, using about twice
+  the power.
+- **Other handhelds, Valve's Steam Machine, desktop Linux?** Untested.
+  Anything running SteamOS's Game Mode (gamescope) may work; reports are
+  welcome.
 
 ## Known limitations / to verify on hardware
 
