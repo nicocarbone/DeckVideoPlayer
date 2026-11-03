@@ -134,6 +134,17 @@ whole folder path, download folder clean-up, DLNA parsing (empty tags,
 embedded media servers, `UUID:`), subtitle search for DLNA titles, a
 timeout for Video info on DLNA.
 
+## v0.8.0: old SD video (released 2026-11-03)
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Deinterlacing** | Released (D69) | `deinterlace=auto`: interlaced video (480i/576i TV and DVDs) shown at a frame per field; refresh matching follows the doubled rate. |
+| **Looks** | Released (D69); battery cost of Clean-up on a Deck not measured | Video menu, SDR videos: *Look* (Off / CRT), *Grain* (Off / Light / Medium / Strong), *Clean-up* (Off / Light / Strong, SD only: debanding, `fspp` deblocking, `hqdn3d` when strong), remembered together per folder or show. Sharp and Film dropped after the owner's tests; CRT made stronger on the Deck. Test builds tried by the owner on a Deck. |
+
+Fixes from ISSUES.md Part X (D70): Clean-up with hardware decoding,
+grain strength on 16:9 video, CRT shader cost, screen updates while
+paused.
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for

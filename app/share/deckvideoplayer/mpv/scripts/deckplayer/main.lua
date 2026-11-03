@@ -33,6 +33,7 @@ local Servers = require "dvp.servers"
 local Jellyfin = require "dvp.jellyfin"
 local Dlna = require "dvp.dlna"
 local Downloads = require "dvp.downloads"
+local Looks = require "dvp.looks"
 
 local opts = {
     config_file = "",
@@ -294,8 +295,15 @@ local ctx = {
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
 ctx.downloads = Downloads.new(ctx, opts.data_dir)
+ctx.looks = Looks.new(opts.data_dir)
 local browser = Browser.new(ctx)
 local player = Player.new(ctx)
+-- The Video menu's rows and the info panel depend on whether the video is
+-- SDR and SD, known a moment after it starts.
+ctx.looks.on_change = function()
+    if menu:is_open() then menu:refresh() end
+    player:render_info()
+end
 
 -- Downloads (D60): the library follows them; finishing is announced there,
 -- not over a playing video.
@@ -325,6 +333,7 @@ input.init(function(action)
         menu:handle(action)
         if state.screen == "player" then
             player:render()
+            player:render_info()   -- e.g. a Video menu choice while paused
         elseif not menu:is_open() then
             browser:menu_closed()
         end
@@ -449,8 +458,8 @@ mp.register_event("file-loaded", function()
     state.current_path = mp.get_property("path")
     if not save_timer:is_enabled() then save_timer:resume() end
     state.last_played = state.current_path
-    local fps = mp.get_property_number("container-fps")
-    display:match(fps, function() player:render() end)
+    ctx.looks:start(Looks.memory_key(state.current_path, servers:item_for(state.current_path)))
+    display:match(Display.video_fps(), function() player:render() end)
     keepawake:set_playing(not mp.get_property_native("pause"))
     if state.resumed_at then
         toast("Resumed at " .. util.format_time(state.resumed_at))
@@ -476,6 +485,15 @@ mp.register_event("end-file", function(ev)
         msg.error("playback failed: " .. tostring(ev.file_error))
     end
     state.current_path = nil
+end)
+
+-- Interlaced video (D69): the deinterlacer starts a moment after the file
+-- loads and shows a frame per field, twice the container's rate.
+mp.observe_property("deinterlace-active", "bool", function(_, active)
+    if active and state.current_path then
+        display:rematch(Display.video_fps(), function() player:render() end)
+    end
+    player:render_info()   -- its Deinterlacing row (also while paused)
 end)
 
 mp.observe_property("idle-active", "bool", function(_, idle)

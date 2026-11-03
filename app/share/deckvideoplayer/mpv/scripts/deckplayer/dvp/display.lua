@@ -237,6 +237,14 @@ function M:apply_profile()
         self.device, self.quality, tostring(self.gamescope), tostring(self.refresh_possible and self.refresh_on)))
 end
 
+-- The rate the video's frames are shown at: the container's, doubled while
+-- a deinterlacer makes a frame of every field (D69). Read when needed.
+function M.video_fps()
+    local fps = mp.get_property_number("container-fps")
+    if fps and mp.get_property_native("deinterlace-active") then fps = fps * 2 end
+    return fps
+end
+
 -- Called once the video's frame rate is known. `on_result(actual_hz,
 -- requested_hz)` is called once gamescope's answer can be checked; returns
 -- the requested rate (or nil when no switch was attempted).
@@ -252,6 +260,7 @@ function M:match(fps, on_result)
         return nil
     end
     local rates = self.config_rates or info.rates
+    self.rates = rates
     -- One rate (or none) means gamescope can't switch this display.
     if #rates < 2 then
         self:restore()
@@ -303,6 +312,16 @@ function M:verify(on_result)
         mp.set_property_number("display-fps-override", 0)
     end
     if on_result then on_result(actual, self.requested_hz) end
+end
+
+-- The frame rate changed after match() (a deinterlacer started a moment
+-- after the file loaded): asks again only if that calls for another rate
+-- (or if there was none for the container's rate).
+function M:rematch(fps, on_result)
+    if not (self.refresh_possible and self.refresh_on) or not self.rates then return nil end
+    local hz = M.choose_rate(fps, self.rates, self.cfg.display.refresh_prefer)
+    if not hz or hz == self.requested_hz then return nil end
+    return self:match(fps, on_result)
 end
 
 -- Playback menu toggle. Returns the requested rate when switching on.

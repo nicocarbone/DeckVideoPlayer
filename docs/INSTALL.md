@@ -119,7 +119,9 @@ See the controls table in the [README](../README.md#controls). Notes:
   stutter with the hardware decoder; software plays them smoother at
   about twice the power. The choice is remembered for that video only. When
   a video keeps dropping frames with hardware decoding, the player
-  suggests this once.
+  suggests this once. Some older codecs are always decoded in software (MPEG-4 Part 2,
+  as in XviD/DivX AVI files, and MPEG-2): the row then says *Software
+  (GPU can't)*. That is normal, and cheap for SD video.
 - **Picture** (Fit / Crop black bars / Fill / Stretch) in the Video menu
   applies to the current video only; the next one starts with your normal
   setting. **Crop black bars** is for bars that are part of the video file
@@ -155,6 +157,22 @@ See the controls table in the [README](../README.md#controls). Notes:
   OpenSubtitles results in your `subtitle_languages`; "Exact" marks
   subtitles made for this very file. A downloads and selects one, and it
   loads automatically next time. See [Online subtitles](#online-subtitles-opensubtitles).
+- **Look, Grain, Clean-up** (Video menu, SDR videos), for old or
+  low-quality video. All off by default, and remembered together for
+  the folder (or the show, for Plex and Jellyfin episodes).
+  - *Look: CRT* gives video made for CRT televisions scanlines, a
+    phosphor mask and a little glow, at the same average brightness. The
+    Deck's 800-line screen draws each scanline two pixels tall; a 4K TV
+    draws them closer to a real CRT.
+  - *Grain* (Light / Medium / Strong) adds fine moving film grain, which
+    also hides banding and faint blocks on smooth areas.
+  - *Clean-up* (Light / Strong, SD videos only) smooths the square
+    blocks and colour banding of low-bitrate files (old XviD/DivX rips,
+    TV recordings); *Strong* also reduces noise, at the cost of some fine
+    detail. It runs on the CPU, so it uses more battery than the others.
+
+  Interlaced video (old TV, DVDs) is deinterlaced by itself; the info
+  panel says so.
 - **Match refresh rate** (Video menu): on by default; the
   screen switches to a multiple of the video's frame rate (48 Hz for films)
   to avoid judder. Steam's Quick Access Menu keeps showing its own rate

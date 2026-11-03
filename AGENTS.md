@@ -70,7 +70,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-10-30, v0.7.2)
+## Current state (2026-11-03, v0.8.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -165,6 +165,15 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   download sometimes retries once (cause not found here; a log of the
   new status would tell).
 - v0.7.2 (2026-10-30): ninth audit (ISSUES.md Part IX) fixed in D68.
+- v0.8.0 (2026-11-03, D69): old SD video. `deinterlace=auto` in
+  `mpv.conf` (refresh matching follows the doubled rate), and
+  `dvp/looks.lua`: *Look* (CRT), *Grain*, *Clean-up* (SD only; mpv
+  `format` + lavfi `fspp`/`hqdn3d`, libplacebo deband) in the Video menu,
+  shaders in `app/share/deckvideoplayer/mpv/shaders/`, remembered in
+  `looks.json`. Test builds tried by the owner on a Deck (Clean-up's
+  battery cost not measured). Tenth audit (ISSUES.md Part X) fixed in
+  D70. Test clips (`.dev/test-media/SD`, interlaced and blocky ones) are
+  made with ffmpeg, not by `tools/make-test-media.sh`.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

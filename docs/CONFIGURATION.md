@@ -113,7 +113,13 @@ app's own `mpv.conf`, so anything there wins. Examples:
 profile=high-quality
 # Force software decoding for debugging
 hwdec=no
+# Don't deinterlace (the app's default is auto: only interlaced video)
+deinterlace=no
 ```
+
+Shaders (`glsl-shaders=...`) and video filters (`vf=...`) of your own
+stay on; *Look*, *Grain* and *Clean-up* from the Video menu run after
+them.
 
 Note that `hwdec` and other per-file options set from `config.ini` are
 applied by Lua at startup and override `mpv.conf`. Use `config.ini` for

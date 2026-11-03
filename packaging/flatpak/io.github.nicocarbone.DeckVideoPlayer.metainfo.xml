@@ -32,6 +32,7 @@
       <li>Downloads from Plex, Jellyfin and DLNA servers for offline playback</li>
       <li>DLNA servers on the home network, and network folders (SMB, NFS) mounted by the system</li>
       <li>Hardware or software decoding, chosen per video</li>
+      <li>Old SD video: deinterlacing, a CRT look, film grain and clean-up of compression blocks</li>
     </ul>
   </description>
   <screenshots>
@@ -59,6 +60,16 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.8.0" date="2026-11-03">
+      <description>
+        <p>Better playback of old, low-resolution video.</p>
+        <ul>
+          <li>Interlaced video (TV, DVDs) is deinterlaced to a frame per field</li>
+          <li>Video menu for SDR videos: a CRT look, film grain, and clean-up of blocks and banding for SD videos</li>
+          <li>The choices are remembered per folder or show</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.2" date="2026-10-30">
       <description>
         <p>Fixes from a code review.</p>

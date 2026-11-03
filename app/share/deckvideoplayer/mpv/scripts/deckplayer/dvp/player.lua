@@ -13,6 +13,7 @@ local library = require "dvp.library"
 local Menu = require "dvp.menu"
 local cropdetect = require "dvp.cropdetect"
 local Markers = require "dvp.markers"
+local Looks = require "dvp.looks"
 
 local M = {}
 M.__index = M
@@ -46,8 +47,13 @@ function M.new(ctx)
     -- starts with the configured hwdec (already set by main.lua).
     self.hwdec_config = mp.get_property("hwdec")
     mp.observe_property("hwdec-current", "string", function()
-        -- The decoder switches a moment after the choice: update the row.
+        -- The decoder switches a moment after the choice (also while
+        -- paused, when no timer runs): update the row, the HW badge and
+        -- the info panel's Decoder row.
         if self.video_menu and self.ctx.menu:shows(self.video_menu) then self.ctx.menu:refresh() end
+        if not self.active then return end
+        if self.overlay_visible then self:render() end
+        if self.info_visible then self:render_info() end
     end)
     self.timer = mp.add_periodic_timer(0.5, function() self:tick() end)
     self.timer:kill()
@@ -529,7 +535,7 @@ end
 function M:toggle_refresh()
     local display = self.ctx.display
     local on = not display.refresh_on
-    local hz = display:set_matching(on, mp.get_property_number("container-fps"),
+    local hz = display:set_matching(on, display.video_fps(),
                                     function() self:render() end)
     if not on then
         self.ctx.toast("Refresh-rate matching off")
@@ -613,6 +619,8 @@ end
 function M:video_summary()
     local source, output_hdr = media.hdr_state(self.video_track)
     local pic = self.crop_bars == "none" and ZOOM_LABELS.fit or ZOOM_LABELS[self:zoom_mode()]
+    local look = self.ctx.looks:shown().look
+    if look and look ~= "off" then pic = pic .. " · " .. Looks.LABELS.look[look] end
     if not source then return pic end
     local out
     if source == "SDR" then out = output_hdr and "SDR to HDR" or "SDR"
@@ -678,6 +686,23 @@ function M:video_items()
             return ZOOM_LABELS[self:zoom_mode()]
         end,
         adjust = function(d) self:set_zoom(cycle(ZOOM_MODES, self:zoom_mode(), d)) end}
+    -- Looks for old SD video (D69): Look, Grain, Clean-up; SDR only.
+    local looks = self.ctx.looks
+    if looks:available() == false then
+        items[#items + 1] = {label = "Look, grain, clean-up", value = "SDR videos only", disabled = true}
+    elseif looks:available() then
+        for _, setting in ipairs(Looks.SETTINGS) do
+            if setting == "cleanup" and not looks:cleanup_available() then
+                items[#items + 1] = {label = Looks.TITLES[setting], value = "SD videos only", disabled = true}
+            else
+                items[#items + 1] = {label = Looks.TITLES[setting],
+                    value = function() return Looks.LABELS[setting][looks.current[setting]] end,
+                    adjust = function(d)
+                        looks:set(setting, cycle(Looks.ORDER[setting], looks.current[setting], d))
+                    end}
+            end
+        end
+    end
     local display = self.ctx.display
     if display.refresh_possible then
         items[#items + 1] = {label = "Match refresh rate",
@@ -688,8 +713,9 @@ function M:video_items()
         value = function()
             if self:software_decoding() then return "Software" end
             local hw = mp.get_property("hwdec-current") or ""
-            -- e.g. a codec this GPU can't decode
-            if hw == "" or hw == "no" then return "Hardware (unavailable)" end
+            -- A codec the GPU doesn't decode (MPEG-4 Part 2 / XviD, MPEG-2,
+            -- …): software is used anyway, and is cheap for those.
+            if hw == "" or hw == "no" then return "Software (GPU can't)" end
             return "Hardware"
         end,
         adjust = function() self:toggle_decoding() end}
@@ -729,7 +755,7 @@ function M:main_menu_items()
                          action = function() self:open_audio_menu() end}
     items[#items + 1] = {label = "Subtitles", value = st and media.track_label(st) or "Off",
                          action = function() self:open_subtitle_menu() end}
-    items[#items + 1] = {label = "Video", value = self:video_summary(),
+    items[#items + 1] = {label = "Video", value = function() return self:video_summary() end,
                          action = function() self:open_video_menu() end}
     items[#items + 1] = {label = "Subtitle size",
         value = function() return string.format("%d%%", util.round(prop_num("sub-scale", 1) * 100)) end,
@@ -939,8 +965,18 @@ function M:info_lines()
         if fps then v = v .. string.format(" · %.3f fps", fps) end
         add("Video", v)
     end
+    if mp.get_property_native("deinterlace-active") then
+        local vf_fps = mp.get_property_number("estimated-vf-fps")
+        add("Deinterlacing", vf_fps and string.format("On · %.3f fps", vf_fps) or "On")
+    end
+    local look = Looks.describe(self.ctx.looks:shown())
+    if #look > 0 then add("Look", table.concat(look, " · ")) end
     local hw = mp.get_property("hwdec-current")
-    add("Decoder", (hw and hw ~= "" and hw ~= "no") and ("Hardware (" .. hw .. ")") or "Software")
+    if hw and hw ~= "" and hw ~= "no" then
+        add("Decoder", "Hardware (" .. hw .. ")")
+    else
+        add("Decoder", self:software_decoding() and "Software" or "Software (not supported by the GPU)")
+    end
     if source then
         local s = source
         if vp.primaries then s = s .. " · " .. vp.primaries end

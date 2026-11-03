@@ -59,6 +59,10 @@ library artwork).
 - **Downloads** for offline playback: Plex and Jellyfin videos or whole
   seasons, with their subtitles, and DLNA videos, to a folder of your
   choice (also the microSD card). Local videos can be deleted from the library menu.
+- **Old SD video** (DVDs, TV recordings, XviD series): interlaced video
+  is deinterlaced to a frame per field, and *Menu → Video* offers a CRT
+  look (scanlines), film grain and, for SD videos, a clean-up of
+  compression blocks and banding, remembered per folder or show.
 - **Download subtitles** from OpenSubtitles.com from the subtitle menu
   (needs your own free API key in `config.ini`: see
   [docs/INSTALL.md](docs/INSTALL.md#online-subtitles-opensubtitles)).

@@ -315,6 +315,9 @@ picture, D45), rounded down to even sizes. `from_screenshot(shot)` reads a `scre
   (`Jupiter`) or `tv`.
 - `in_gamescope()`: `GAMESCOPE_WAYLAND_DISPLAY` set or
   `XDG_CURRENT_DESKTOP=gamescope`.
+- `video_fps()`: the container's rate, doubled while `deinterlace-active`
+  (D69); `rematch(fps, on_result)` asks again only if that rate calls for
+  another refresh rate.
 - `parse_rates("45-90" | "48,60,72")`, `choose_rate(fps, rates, prefer)`,
   `parse_helper_info(text)` (pure, unit-tested).
 - `get_root_cardinal(name)`: X11 root property read via LuaJIT FFI
@@ -647,6 +650,34 @@ track)`, `mapping_choices(dynamic)`, `shown_mapping(state)` (D54: "dynamic"
 works as "static" without per-scene metadata; `dynamic` is read once per
 file). The rows are built in
 `player:hdr_items()`.
+
+## `dvp/looks.lua`: looks for old SD video (D69)
+
+Three settings, `SETTINGS` = look (off / crt), grain (off / light /
+medium / strong), cleanup (off / light / strong), with `ORDER`, `LABELS`,
+`TITLES`. `Looks.new(data_dir)`: choices kept in `looks.json`
+(`{version = 2, looks = {key = {look, grain, cleanup}}}`, only settings
+that aren't "off"; v1 values were a look name). Observes `video-params`
+and `video-crop`. `start(key)` at each file (reads the options before any
+look: `glsl-shaders`, `glsl-shader-opts`, `vf`, `deband`,
+`deband-iterations`), `set(setting, value)` (Video menu: applies and
+remembers), `available()` (true for SDR, false for HDR, nil while
+unknown), `cleanup_available()` (SDR and SD), `shown()` (the effective
+choice), `apply()` (sets as file-local options only the values that
+changed: a new filter list restarts the filters). Pure (unit-tested):
+`memory_key(path, item)` ("dir:<folder>", "<backend>:<server>:show:<name>",
+"…:folder:<container>", "…:item:<id>", or nil), `source_lines(h, crop)`,
+`is_sd(w, h)` (up to 1024×576), `effective(choice, sdr, sd)`,
+`normalize(value)` (a looks.json value to a choice), `option_values(choice,
+base, lines)`, `describe(choice)`, `serialize(value)`. Clean-up is two
+`vf` entries: mpv's `format` (`yuv420p`, `FORMAT_LABEL`, so hardware
+frames are copied to memory) and lavfi (`FILTER_LABEL`, `dvp-cleanup`);
+our shaders and filters are never taken from the base options. Field
+`on_change` (set by `main.lua`): called when the video turns out SDR/HDR
+or SD/HD, to refresh the menu and info panel. Shaders in
+`app/share/deckvideoplayer/mpv/shaders/`: `dvp-grain.glsl` (takes
+`dvp_grain`) runs before `dvp-crt.glsl` (takes `dvp_src_h`), both hook
+`SCALED`.
 
 ## `dvp/videoinfo.lua`: Video info panel (D50)
 

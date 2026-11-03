@@ -1548,7 +1548,8 @@ Flatpak's mpv); skipped elsewhere.
   `resume.json` entry (the local copy's key for Plex / Jellyfin videos),
   saved with the position and set file-locally in `on_load` before the
   decoder starts. Independent of `resume = no`, which is about positions
-  and tracks. The row shows "Hardware (unavailable)" when mpv found no
+  and tracks. The row shows "Software (GPU can't)" (until v0.7.2: "Hardware
+  (unavailable)", which read like a fault, D69) when mpv found no
   hardware decoder for the video; `hwdec-current` is observed so the row
   follows the switch.
 - **Suggestion:** with hardware decoding, at least 15 frames dropped
@@ -1818,3 +1819,187 @@ Reviewed on 2026-10-30; each finding has a status line in `ISSUES.md`.
   season folder (season and show folders removed, view moved up);
   ffprobe's timeout against a server that never answers, and a normal
   probe with the option.
+
+## D69. Old SD video: deinterlacing, looks, grain and clean-up (v0.8.0)
+
+- **Request:** old SD series (made for CRT televisions, low resolution)
+  look poor on the Deck; could filters give them "more personality",
+  cheaply?
+- **Deinterlacing first:** mpv's default is `deinterlace=no` and the app
+  didn't change it, so interlaced video (480i/576i from TV and DVDs)
+  showed combing on motion. Now `deinterlace=auto` in `mpv.conf`: only
+  frames marked interlaced, at a frame per field (29.97i → 59.94), as
+  smooth as on a CRT. With VA-API, mpv uses the GPU's deinterlacer
+  (`vavpp`); where that's missing (the NVIDIA VA-API driver of the
+  development PC) it copies frames back and uses `bwdif` on the CPU,
+  checked with no dropped frames at SD. MPEG-2 is software-decoded by
+  `auto-safe` anyway. Limit: *auto* follows the marks, so a badly marked
+  rip isn't caught; telecined film (3:2 pulldown) is deinterlaced, not
+  inverse-telecined.
+- **Refresh rate:** matching used the container's rate (29.97). The
+  deinterlacer starts about 30 ms after `file-loaded` and doubles the
+  rate; with `refresh_prefer = high` 29.97 meant 90 Hz, which judders at
+  59.94. `display.video_fps()` doubles the rate while `deinterlace-active`,
+  and an observer calls `rematch()`, which switches again only when the
+  doubled rate calls for another refresh rate (with the default `low`,
+  29.97 already gives 60 Hz: no second switch).
+- **Looks:** *Look* in the Video menu (Off / CRT), our own GLSL shader
+  run by libplacebo (the first test build also had *Sharp* and *Film*,
+  see "Test build" below). All hook `SCALED`: probed with test
+  shaders, it is the video area only (not the black bars), at screen
+  size, in linear light; subtitles and the OSD are drawn after it.
+  - *CRT*: Gaussian scanlines, wider for brighter colours (the idea of
+    Timothy Lottes' public-domain CRT shader, new code), an aperture
+    grille (lighter on small screens) and a faint glow. 800 screen lines
+    can't show 480 or 576 lines evenly (uneven lines shimmer), so each
+    scanline covers a whole number of pixels, the nearest to the video's
+    line count (2 on a Deck, 4-5 at 4K), with its centre on a pixel row.
+    The video's visible lines come from the app (`dvp_src_h`, from
+    `video-params/h` or the *Crop black bars* crop). Each beam is
+    divided by its own average over a line (in closed form, D70), so the
+    lines move light around without dimming the picture (only clipped
+    bright beams lose some, which the glow gives back): average
+    brightness measured within 3 % of the original at 1280×800 and 4K.
+    The output is clipped to SDR white, as an SDR screen does.
+  - Not offered: AI upscalers (heavier; Anime4K is for animation),
+    curvature (subtitles and the interface wouldn't follow it).
+- **Only SDR videos:** the shaders work on SDR light levels; the row says
+  "SDR videos only" for HDR ones.
+- **File-local:** set as `file-local-options` on top of the options at
+  the start of the file (the user's own shaders stay, ours run after),
+  so mpv restores everything at the next file.
+- **Remembered** in `looks.json`: per folder for local files and DLNA
+  folders, per show for Plex / Jellyfin episodes, per video for other
+  server videos. A series keeps its look; nothing is stored for "Off".
+- **Cost:** measured with `vo-passes` on the development PC's GPU at
+  1280×800: CRT 32 µs per frame plus one ~13 µs output pass, against
+  about 90 µs for the video's usual passes. Expect several times that
+  on a Deck, still a small part of a frame; power on a Deck to be read
+  by the owner.
+- **Test build** first, as with the HDR choices (D51/D52): the first
+  had *CRT*, *Sharp* (debanding, `ewa_lanczossharp`, CAS-like
+  sharpening) and *Film* (grain, S-curve, warm glow, vignette). The
+  owner liked only CRT, and found it too subtle on a Deck. Measured
+  there (darkest row ÷ brightest row of a scanline, by brightness):
+  0.76 / 0.91 / 0.93: the 2-pixel gap filled up with wide beams, and
+  a fixed 1.15 gain made the picture 15 % brighter instead. Now
+  narrower beams (sigma 0.20–0.34 of a line with 2 pixels per line,
+  0.24–0.42 above, was 0.28–0.50), the per-beam normalization above and
+  a darker mask (0.80 / 0.70, was 0.86 / 0.72): 0.41 / 0.61 / 0.65 on a
+  Deck, 0.63 / 0.80 / 0.84 at 4K. Sharp and Film were removed; saved
+  choices of them are dropped when `looks.json` is read.
+- **Grain and Clean-up** (third test build), asked for after the owner
+  kept only CRT. Both sit next to *Look* in the Video menu, combine with
+  it and with each other, and are remembered with it (`looks.json`
+  version 2: `{look, grain, cleanup}` per key; version 1 look names are
+  read as such).
+  - *Grain* (Light / Medium / Strong; `dvp_grain` 0.025 / 0.045 / 0.075):
+    `dvp-grain.glsl` on `SCALED`, before the CRT shader (the CRT draws
+    its lines over a grainy picture). Colourless value noise, new every
+    frame, strongest in the mid-tones, in gamma 2.2; one pixel per
+    grain up to 800 screen lines (a Deck, whatever the video's aspect
+    ratio), larger soft-edged grains above (about three pixels at 4K),
+    with the amplitude compensated so Medium measures 7.5 levels RMS on
+    mid-grey at 1280×800 (16:9 and 4:3 alike, D70) and 7.6 at 4K. About
+    10 µs per frame at 1280×800 on the development PC.
+  - *Clean-up* (Light / Strong): libplacebo debanding (1 or 2 passes, on
+    the video's own resolution, ~5 µs) plus FFmpeg filters in a `vf`
+    entry labelled `dvp-cleanup`, after the user's own filters and after
+    mpv's deinterlacer (a pre-filter). Before it, mpv's `format` filter
+    (`yuv420p`, labelled `dvp-cleanup-format`) makes `autoconvert` copy
+    hardware-decoded frames to memory: without it the lavfi graph
+    refused VA-API frames and mpv dropped the filter (D70). Deblocking: mpv gives filters no
+    quantizer tables, so `fspp` (FFmpeg's fast simple post-processing)
+    does nothing by default and runs at a fixed `qp`: 4 (Light) removes
+    most blocks of a 350 kb/s XviD test clip without visibly softening a
+    900 kb/s one; 8 (Strong) removes nearly all, a little softer; 12
+    smeared edges. FFmpeg's `deblock` filter was compared and barely
+    touched the blocks. Strong adds `hqdn3d` at half its default strength
+    (temporal denoising for VHS and TV noise).
+  - **Clean-up is SD only** (up to 1024×576; the row says "SD videos
+    only" otherwise): `fspp` runs on one CPU core. Measured with
+    `--untimed` on the development PC (decode + filters, share of one
+    core at real time): 640×480 30p XviD 2.5 % → 12–13 %, 576i50 DVD
+    deinterlaced to 50p 7.6 % → 30–33 %. Cost grows with pixels per
+    second: 1080p would need more than a Deck core. The Deck's cores are
+    slower than the PC's, so expect about twice these figures there;
+    power to be read by the owner.
+  - Everything on (CRT, Medium grain, Strong clean-up) at 1280×800:
+    148 µs of GPU per frame (vs ~120 with CRT alone), no dropped frames.
+    Changing Clean-up restarts the filters (a dropped frame or a few);
+    options are set only when their value changes, so changing Grain or
+    Look doesn't.
+  - Not done: GPU deblocking (would need a shader of our own; `fspp` is
+    the proven one), a better upscaler for the TV (to be tested
+    separately: licences and cost).
+- **Decoding row:** the owner's old series are MPEG-4 Part 2 (XviD) in
+  AVI, which mpv doesn't hardware-decode by default (its `hwdec-codecs`
+  list leaves out MPEG-4 Part 2 and MPEG-2), so the Video menu showed "Hardware (unavailable)",
+  which read like a fault. It now says "Software (GPU can't)", and the
+  info panel's Decoder row "Software (not supported by the GPU)".
+  Software decoding of SD MPEG-4 is cheap. Not a change in v0.8.0: the
+  same videos were software-decoded before.
+
+## D70. Tenth audit (ISSUES.md Part X, before v0.8.0)
+
+Reviewed on 2026-11-03; each finding has a status line in `ISSUES.md`.
+
+- **Fixed:**
+  - Clean-up did nothing on hardware-decoded SD video (H.264, HEVC,
+    VP9, AV1 with VA-API; also interlaced video deinterlaced by `vavpp`,
+    as on a Deck): the lavfi graph can't take VA-API frames, mpv logged
+    "Disabling filter dvp-cleanup because it has failed", and the menu
+    still said it was on. The test builds were checked with software
+    frames only (XviD, MPEG-2, and bwdif output on the development PC).
+    Now mpv's `format` filter (`yuv420p`) goes first, so `autoconvert`
+    copies the frames to memory; with software-decoded SD video it does
+    nothing. Clean-up off removes both entries.
+  - Grain: `gl_FragCoord` is at pixel centres, so with one-pixel cells
+    the noise read the same fraction (0.5) everywhere: an average of
+    four neighbours, half as strong and 2×2-blurred. On a Deck that hit
+    16:9 video (scaled to 720 lines, under the old 720-line threshold);
+    4:3 video (800 lines) got interpolated cells of 1.11 pixels with a
+    faint 9-pixel column pattern. Now one pixel per grain up to 800
+    lines, interpolated above; measured on mid-grey at 1280×800, Medium
+    is 7.5 levels RMS for 16:9 and 4:3 (was 3.4 and 7.6) and 7.6 at 4K
+    (was 7.6): the strength tuned on 4:3 is kept.
+  - CRT: the beam average is computed in closed form (1 `exp` with 2
+    rows per line, none above, instead of a loop of up to 16 rows × 3
+    beams); within 0.05 % of the loop, and screenshots match the
+    previous build to 1 level at 1280×800 and 3 at 4K. The row is
+    snapped to the pixel's centre (an interpolated value could pick
+    either neighbour line on a line's centre row). The output is
+    clipped to `[0, 1]`, as an SDR screen would, so values above SDR
+    white don't reach an HDR output (*SDR to HDR*).
+  - Looks: our shaders and filters are left out of the options read at
+    the start of a file (only the user's own are kept); nothing is
+    applied between files; `start()` reads `video-params` in case the
+    video is already known.
+  - Screen updates: a Video menu choice made while paused redraws the
+    info panel (the 0.5 s tick only runs during playback); the decoder
+    switching redraws the HW badge and the Decoder row; the Video
+    menu's rows and the info panel are refreshed when the video turns
+    out SDR/HDR or SD/HD (`looks.on_change`), and when deinterlacing
+    starts. The main menu's Video row reads its value when drawn (it
+    could not show a stale value in practice: B on the Video menu
+    closes all menus, and the main menu is rebuilt when opened).
+  - Refresh matching: `rematch()` also runs when the container's rate
+    gave no refresh rate, if matching is on.
+- **Declined:**
+  - Reading the options before any look once at startup instead of at
+    each file: mpv has already restored the file-local values when the
+    next file loads, so reading them then also keeps options the user
+    changed during the session.
+  - Matching again when deinterlacing stops: the doubled rate is still
+    a multiple of the frame rate (50 Hz for 25 fps), and on material
+    that mixes interlaced and progressive parts each change would blank
+    the screen for a refresh switch.
+  - The "exact two-beam" CRT average: the current one counts a third
+    beam's faint tail, less than 1 % brighter, and is the look the owner
+    approved.
+- **Tested:** 698 unit checks. In headless gamescope: Clean-up on SD
+  H.264 with VA-API (`HW-downloading from vaapi`, no failure, 0 dropped
+  frames), interlaced H.264 (VA-API, deinterlaced to 59.94), XviD
+  (software, unchanged), an HD file afterwards (user's filters back,
+  hardware decoding zero-copy); the info panel updating while paused.
+

@@ -5,6 +5,41 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.0 (2026-11-03)
+
+Better playback of old, low-resolution video: DVDs, TV recordings and SD
+series made for CRT televisions.
+
+### New
+
+- **Deinterlacing**: interlaced video (480i/576i from TV and DVDs) is
+  shown at a frame per field, as smooth as on a CRT, instead of with
+  comb lines on motion. Other video is untouched. The refresh rate
+  follows the doubled frame rate (e.g. 60 Hz for 29.97i).
+- In *Menu → Video*, for SDR videos, three settings that can be combined:
+  - **Look: CRT**: scanlines, an aperture-grille mask and a faint glow,
+    sized for the screen (2 pixels per line on the Deck, 4–5 on a 4K
+    TV), with the picture's brightness kept.
+  - **Grain**: Light / Medium / Strong. Fine, moving film grain, about
+    the same size relative to the picture on the Deck and on a TV.
+  - **Clean-up** (SD videos only): Light / Strong. Smooths the colour
+    banding and the square blocks of low-bitrate files (XviD, old TV
+    rips); Strong also reduces noise (VHS, TV recordings) and is a
+    little softer. It runs on the CPU, so it uses some battery.
+- The choices are remembered per folder, or per show for Plex and
+  Jellyfin episodes; *Playback info* lists what is on.
+- Your own shaders and filters from `mpv.conf` stay on; these run after
+  them.
+
+### Changed
+
+- *Video → Decoding* says *Software (GPU can't)* for videos the GPU
+  doesn't decode (MPEG-4 Part 2, as in XviD/DivX AVI files, and MPEG-2),
+  instead of *Hardware (unavailable)*, which read like a fault. These
+  videos were software-decoded before too, and that is cheap at SD.
+- *Playback info* and the HW badge update right away while paused when a
+  Video menu setting or the decoder changes.
+
 ## v0.7.2 (2026-10-30)
 
 Fixes from a code review of the download, network and DLNA features.

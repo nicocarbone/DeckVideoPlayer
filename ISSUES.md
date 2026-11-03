@@ -1,12 +1,210 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-10-30, v0.7.1):** every finding in Parts I–IX was checked
+**Status review (2026-11-03, v0.8.0 work):** every finding in Parts I–X was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
 reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59, IX: D68).
+VI: D49, VII: D53, VIII: D59, IX: D68, X: D70).
 
+---
+
+# Part X — v0.8.0 Audit: Old SD Video Filters (Deinterlacing, CRT Look, Film Grain & Clean-up) (2026-11-03)
+
+All 695 Lua checks and 10 Python unit tests in `tests/run.sh` pass, and the v0.8.0 filter architecture (`dvp/looks.lua`, `mpv/shaders/dvp-crt.glsl`, `mpv/shaders/dvp-grain.glsl`, `mpv/mpv.conf`, `dvp/display.lua`, `dvp/player.lua`, `main.lua`, D69) was audited for mathematical correctness, GPU/CPU optimality, and state management:
+
+* **Overall filter choices & pipeline order (D69):**
+  * **`deinterlace=auto` (`mpv/mpv.conf`):** Correct. Frame-per-field deinterlacing (`29.97i → 59.94 fps`, `25i → 50 fps`) using VA-API `vavpp` where supported and `bwdif` on CPU otherwise, active only on frames flagged interlaced.
+  * **Clean-up (`fspp=qp=4` for Light, `fspp=qp=8,hqdn3d=2:1.5:3:2.25` for Strong + libplacebo `deband` 1 or 2 iterations):** Well-tuned for SD video, and restricting `fspp`/`hqdn3d` to SD (`<= 1024×576`) is the right call because FFmpeg's `fspp` is single-threaded on CPU. However, **on hardware-decoded SD videos (`hwdec=vaapi`, e.g. SD H.264/x264, HEVC, VP9, AV1), `vf_lavfi` fails to configure the filter graph and disables `dvp-cleanup`** unless `mpv`'s native `format:fmt=yuv420p` filter precedes it to trigger `autoconvert` hardware download (see **§2.1** below).
+  * **Shader hook point (`//!HOOK SCALED`, grain before CRT):** Correct. Under `vo=gpu-next` (`libplacebo`), `SCALED` contains only the scaled video area (excluding black bars, subtitles, and the OSD) in linear light. Running `dvp-grain.glsl` before `dvp-crt.glsl` ensures the CRT scanlines and aperture-grille mask modulate the grainy image rather than adding digital noise on top of the dark scanline gaps.
+
+Below are the shader bugs, GPU optimizations, and Lua state synchronization issues found in the new v0.8.0 code.
+
+---
+
+## 1. Shader Correctness & GPU Optimizations (`dvp-grain.glsl`, `dvp-crt.glsl`)
+
+### 1.1. `mpv/shaders/dvp-grain.glsl`: `gl_FragCoord.xy` is at half-integer pixel centers `(x + 0.5, y + 0.5)`, making 16:9 videos on the Steam Deck (`HOOKED_size.y <= 720`, `cell == 1.0`) 2.2× weaker (`3.33` RMS vs `7.37` RMS) and 2×2 box-blurred (*verified mathematically*)
+
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-grain.glsl` (lines 47–53)
+* **Problem (*verified*):**
+  ```glsl
+  float cell = max(1.0, HOOKED_size.y / 720.0);
+  vec2 seed = vec2(float(frame % 509) * 17.0, float(frame % 397) * 29.0);
+  float n = grain(gl_FragCoord.xy / cell, seed);
+  // Interpolated noise is weaker than per-pixel noise: the same amount
+  // looks the same on any screen.
+  if (cell > 1.0) n *= 1.5;
+  ```
+  1. **Half-integer `gl_FragCoord.xy` when `cell == 1.0`:**
+     In GLSL fragment shaders, `gl_FragCoord.xy` at pixel `(x, y)` is `(x + 0.5, y + 0.5)`, not integer `(x, y)`.
+     When `cell == 1.0`, `p = gl_FragCoord.xy / 1.0 = (x + 0.5, y + 0.5)`, so `fract(p)` inside `grain()` is **`vec2(0.5, 0.5)` for every single pixel on screen**.
+     Instead of producing per-pixel independent noise (where `f = (0, 0)` has $\text{RMS} = 1/\sqrt{12} \approx 0.289$, or `6.63` levels out of 255 for Medium grain), `mix(mix(a, b, 0.5), mix(c, d, 0.5), 0.5)` computes the **4-corner average `(a + b + c + d) / 4`**—which blurs the grain over 2×2 pixel blocks and cuts the standard deviation in half ($\text{RMS} = 1 / (2\sqrt{12}) \approx 0.144$).
+  2. **Large jump between 16:9 (`HOOKED_size.y <= 720`) and 4:3 (`HOOKED_size.y = 800`) on the Steam Deck (`1280×800`):**
+     Because `SCALED` is the video area without letterbox bars:
+     * A **16:9** (or 1.85:1 / 2.35:1 / cropped) video on the 1280×800 Steam Deck has `HOOKED_size.y <= 720`, so `cell = 1.000`. It gets the 4-corner average **without** `n *= 1.5`, yielding a mid-tone RMS of only **`3.33` levels** (out of 255) for Medium grain.
+     * A **4:3** video on the 1280×800 Steam Deck has `HOOKED_size.y = 800`, so `cell = 800.0 / 720.0 = 1.111 > 1.0`. It triggers `if (cell > 1.0) n *= 1.5`, yielding **`7.37` levels RMS** (**2.2× stronger** than a 16:9 video on the same screen!) and a 9-pixel spatial beat pattern (`800 / 720 = 10 / 9`) where every 9th pixel hits `fract ≈ 0` and 4.5 pixels away hits `fract ≈ 0.5`.
+* **Suggested Fix:**
+  Divide by `800.0` (the Steam Deck's vertical resolution) so all videos on the Deck have `cell == 1.0`, and when `cell <= 1.0` sample `hash(floor(gl_FragCoord.xy) + seed) - 0.5` directly (which gives true 1-pixel grain with `6.63` levels RMS for both 4:3 and 16:9 on the Deck, eliminates the 9-pixel beat pattern, and executes 1 `hash()` call per pixel instead of 4):
+  ```glsl
+  float cell = max(1.0, HOOKED_size.y / 800.0);
+  vec2 seed = vec2(float(frame % 509) * 17.0, float(frame % 397) * 29.0);
+  float n = cell <= 1.0 ? hash(floor(gl_FragCoord.xy) + seed) - 0.5
+                        : 1.5 * grain((gl_FragCoord.xy - 0.5) / cell, seed);
+  ```
+
+> **Status: Solved** (D70). Confirmed: with one-pixel cells every pixel read `fract == 0.5`. One pixel per grain up to 800 lines (`hash(floor(gl_FragCoord.xy))`), interpolated grains above at `(gl_FragCoord.xy - 0.5) / cell`. The per-pixel noise gets ×1.1 so it measures as strong as the interpolated grains and as the 4:3 case the strengths were tuned on: Medium on mid-grey at 1280×800 is 7.5 levels RMS for 16:9 and 4:3 (was 3.4 and 7.6), with no neighbour correlation, and 7.6 at 4K (unchanged).
+
+---
+
+### 1.2. `mpv/shaders/dvp-crt.glsl`: `beam_mean` loop can be replaced with a closed-form expression (eliminating up to 90 `exp()` calls per pixel at 4K), `row = HOOKED_pos.y * h` has float sign jitter at `d == 0`, and `col` is not clamped to `[0, 1]` before `SDR to HDR`
+
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-crt.glsl` (`beam_mean` lines 46–54, `hook` lines 67–99)
+* **Problems & Optimizations:**
+  1. **Closed-form `beam_mean` (GPU ALU optimization & 2-beam vs 3-beam normalization):**
+     ```glsl
+     vec3 beam_mean(vec3 s, float n, float centre) {
+         vec3 sum = vec3(0.0);
+         for (int j = 0; j < 16; j++) {
+             if (float(j) >= n) break;
+             float d = (float(j) + 0.5 - centre) / n;
+             sum += beam(d, s) + beam(d - 1.0, s) + beam(d + 1.0, s);
+         }
+         return sum / n;
+     }
+     ```
+     * `beam_mean` is called twice per pixel (`s1` and `s2`). At 4K (`n = 5`), each call runs 5 iterations × 3 `vec3` `exp()` evaluations = 45 scalar `exp()` calls (**90 scalar `exp()` calls per pixel**, or ~746M `exp()` calls per 4K frame).
+     * For $n \ge 3$ and $\sigma \in [0.24, 0.42]$, by the Poisson summation formula ($\exp(-2\pi^2 \sigma^2 n^2) \le e^{-10.23} = 3.6 \times 10^{-5}$), the Riemann sum of the Gaussian over a scanline equals the continuous Gaussian integral $\sigma\sqrt{2\pi} \approx 2.5066283 \cdot s$ to within **0.05%** (`< 0.0006`, well below 1/255).
+     * For $n = 2$ (`centre = 0.5`, $j \in \{0, 1\}$), with $q = \exp(-0.125 / (s \cdot s))$, $\exp(-0.5 / (s \cdot s)) = q^4$ and $0.5 \cdot q^9 < 3 \times 10^{-5}$, so `beam_mean` is `0.5 + q + q * q * q * q` using only **1** `vec3 exp()` call instead of 6.
+     * *(Note also that `beam_mean` sums 3 beams `d`, `d - 1`, and `d + 1`, whereas `col` on lines 82–83 only sums the 2 nearest beams `d` and `d2`; for the exact 2-beam mean at $n = 2$, the $d = \pm 1$ tail occurs once rather than twice, i.e. `0.5 + q + 0.5 * q * q * q * q`.)*
+  2. **Float interpolation jitter on the scanline center row (`d == 0.0`):**
+     ```glsl
+     float centre = floor((n - 1.0) / 2.0) + 0.5;
+     float row = HOOKED_pos.y * h;
+     float k = floor(row / n);
+     float d = (row - k * n - centre) / n;
+     float k2 = d < 0.0 ? k - 1.0 : k + 1.0;
+     ```
+     Because `HOOKED_pos.y` is an interpolated vertex attribute, at pixel centers `HOOKED_pos.y * h` is `m + 0.5 ± 1e-7`. On the center row of a scanline (every even row when $n = 2$ on the Steam Deck, or the middle row for any odd $n$), exact `d` is `0.0`, so `d` fluctuates between `-1e-7` and `+1e-7` across the row, causing `k2 = d < 0.0 ? k - 1.0 : k + 1.0` to flip randomly between the upper and lower neighbor scanlines from pixel to pixel. Snapping `float row = floor(HOOKED_pos.y * h) + 0.5;` makes `d` exact.
+  3. **Unclamped super-white output (`> 1.0`) when combined with *SDR to HDR*:**
+     At the center of a bright scanline (`d = 0`), dividing by `beam_mean` and the aperture-grille mean produces linear values up to `~1.70`. On an SDR swapchain this clips at `1.0`, but `SCALED` in `vo=gpu-next` is a floating-point `rgba16f` texture: when the user enables **SDR to HDR** on an HDR display (Steam Deck OLED or HDR TV), unclamped values up to `1.70` are fed into libplacebo's inverse tone mapper / PQ output. Clamping `return vec4(clamp(col, 0.0, 1.0), 1.0);` (as `dvp-grain.glsl` does on line 54) keeps the output within SDR `[0, 1]`.
+
+> **Status: Solved** (D70). Closed-form `beam_mean` (`0.5 + q + q^4` with 2 rows, `s * sqrt(2 pi)` above), checked against the loop over the shader's whole sigma range (worst 0.05 %); the row is snapped to the pixel centre; the output is clamped to `[0, 1]`. Screenshots match the previous build to 1 level (1280×800) and 3 levels (4K). The "exact two-beam" mean was not taken: the current normalization (a third beam's tail, under 1 % brighter) is the look the owner approved.
+
+---
+
+## 2. Filter Graph, State Synchronization & Lifecycle Bugs (`dvp/looks.lua`, `dvp/player.lua`, `dvp/display.lua`, `main.lua`)
+
+### 2.1. `dvp/looks.lua`: *Clean-up* (`lavfi` `fspp` / `hqdn3d`) fails to configure and disables itself on all hardware-decoded SD videos (`hwdec=vaapi`, e.g. SD H.264, HEVC, VP9, AV1) (*verified in headless gamescope*)
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/looks.lua` (`Looks.option_values`, lines 110–113 and 125–129)
+* **Problem (*verified*):**
+  In `Looks.option_values`:
+  ```lua
+  local clean = CLEANUP[choice.cleanup]
+  if clean then
+      out.deband, out["deband-iterations"] = "yes", clean.iterations
+      vf[#vf + 1] = {name = "lavfi", label = M.FILTER_LABEL, enabled = true, params = {graph = clean.graph}}
+  end
+  ```
+  On MPEG-4 Part 2 (XviD) and MPEG-2 videos, `mpv`'s default `hwdec-codecs` list leaves them in software (`yuv420p`), so `fspp` works.
+  However, on **any SD video that is hardware-decoded by `hwdec=vaapi`** (every SD H.264/x264, HEVC/x265, VP9, or AV1 file or server stream), `mpv`'s `vf_lavfi` wrapper advertises support for `vaapi` hardware surfaces (in case the `lavfi` graph is a VA-API graph), and `libavfilter`'s `auto_scale_0` (`swscale`) cannot convert `src: vaapi` to `dst: yuv420p` without a hardware download:
+  ```
+  Using hardware decoding (vaapi).
+  [ffmpeg] Impossible to convert between the formats supported by the filter 'mpv_src_in0' and the filter 'auto_scale_0'
+  [ffmpeg] Link 'mpv_src_in0.default' -> 'auto_scale_0.default':
+  [ffmpeg]   src: vaapi
+  [ffmpeg]   dst: yuv420p ...
+  [lavfi] failed to configure the filter graph
+  Disabling filter dvp-cleanup because it has failed.
+  ```
+  As a result, `dvp-cleanup` (`fspp` and `hqdn3d`) **completely fails and disables itself** on every hardware-decoded SD video while the Video menu and Playback info panel continue to claim `Clean-up: Light` or `Strong` is active.
+* **Suggested Fix (*verified in headless gamescope*):**
+  Precede the `lavfi` entry with `mpv`'s native `format` filter (`{name = "format", label = M.FORMAT_LABEL, enabled = true, params = {fmt = "yuv420p"}}`). Because `mpv`'s `vf_format` only accepts CPU `yuv420p`, `mpv`'s `autoconvert` automatically inserts `[autoconvert] HW-downloading from vaapi` + `[autoconvert] Converting nv12 -> yuv420p` when `hwdec=vaapi` is active (after `deinterlace=auto` has already run `vavpp` on the GPU if interlaced), and is a no-op when the video is already software-decoded `yuv420p`. When `Clean-up` is turned back to `Off`, removing both `M.FORMAT_LABEL` and `M.FILTER_LABEL` from `vf` restores zero-copy `vaapi[nv12]` immediately without restarting the decoder.
+
+> **Status: Solved** (D70). Reproduced in headless gamescope with a 640×480 H.264 file ("Disabling filter dvp-cleanup because it has failed"). mpv's `format` filter (`yuv420p`, labelled `dvp-cleanup-format`) now precedes the lavfi entry: `HW-downloading from vaapi`, no failure, 0 dropped frames; also checked with interlaced H.264 (VA-API, deinterlaced to 59.94 fps), XviD (software, unchanged) and an HD file afterwards (both entries removed, zero-copy VA-API). Unit tests cover the order and the removal.
+
+---
+
+### 2.2. `dvp/looks.lua`: `Looks:start` captures `self.base` at `file-loaded` instead of startup (`Looks.new`), and `option_values` does not strip `CRT_SHADER` / `GRAIN_SHADER` from `base.shaders`
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/looks.lua` (`Looks.option_values` lines 104–114, `Looks.new` lines 164–182, `Looks:start` lines 193–211) and `main.lua` (`file-loaded` line 454)
+* **Problems:**
+  1. Unlike `Hdr.new` (`dvp/hdr.lua` lines 148–152) and `Player.new` (`dvp/player.lua` lines 41–48), which snapshot the user's configured defaults once at startup after `mpv.conf` is loaded, `Looks:start` re-reads `self.base` (`glsl-shaders`, `glsl-shader-opts`, `vf`, `deband`, `deband-iterations`) from mpv on every `file-loaded`.
+  2. If `video-params` or `video-crop` fires during a file transition before `file-loaded` runs (while `self.base` is still non-nil from the previous file), `Looks:video_changed` applies the previous file's shaders/deband to the new file *before* `Looks:start` reads `self.base`.
+  3. While `Looks.option_values` filters `f.label ~= M.FILTER_LABEL` out of `base.vf` (line 112), it does not filter `CRT_SHADER` or `GRAIN_SHADER` out of `base.shaders`, nor can it tell if `base.deband` was mutated before `Looks:start`.
+  4. Conversely, if `video-params` is already populated before `Looks:start` runs in `file-loaded`, `Looks:start` sets `self.sdr, self.sd, self.lines = nil, nil, nil` without calling `self:video_changed(mp.get_property_native("video-params"))` at the end of `start()`.
+* **Suggested Fix:**
+  Capture `self.base` once in `Looks.new` (after `display:apply_profile()` in `main.lua`), filter `CRT_SHADER` and `GRAIN_SHADER` out of `base.shaders` in `option_values` (just like `M.FILTER_LABEL` in `base.vf`), reset `self.key = nil; self.sdr = nil` in `on_load`, and call `self:video_changed(mp.get_property_native("video-params"))` at the end of `Looks:start(key)`.
+
+> **Status: Partly solved** (D70). Done: `option_values` leaves our shaders out of the base, as it already did our filters; `self.base` is cleared at `end-file`, so nothing is applied between files; `start()` calls `video_changed` with the current `video-params`. Declined: reading the base once at startup. When the next file loads, mpv has already restored the file-local values, so the options read then are the user's own (including changes made during the session). Also, `file-local-options` can't be written while no file is playing.
+
+---
+
+### 2.3. `dvp/looks.lua`, `dvp/player.lua` & `main.lua`: Changing `Look`, `Grain`, `Clean-up`, or `Decoding` while paused (or when `video-params` arrives) does not refresh the Playback info panel, open menus, or `[HW]` badge
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/looks.lua` (`video_changed` lines 213–219), `dvp/player.lua` (`hwdec-current` observer lines 49–52, `main_menu_items` line 753), and `main.lua` (menu input handling lines 326–334)
+* **Problems:**
+  1. **Playback info panel (`View`) stays stale while paused:** When a video is paused, `player.timer` (`0.5 s`) is stopped to save battery. In `main.lua` line 329, handling a menu action over the player calls `player:render()` but not `player:render_info()`. Adjusting **Look**, **Grain**, **Clean-up**, or **Match refresh rate** in the Video menu while paused leaves the `Look` and `Display` rows in an open Playback info panel outdated.
+  2. **`hwdec-current` observer does not redraw the overlay or info panel:** In `dvp/player.lua` lines 49–52:
+     ```lua
+     mp.observe_property("hwdec-current", "string", function()
+         -- The decoder switches a moment after the choice: update the row.
+         if self.video_menu and self.ctx.menu:shows(self.video_menu) then self.ctx.menu:refresh() end
+     end)
+     ```
+     When the user toggles **Decoding** (`Hardware` ↔ `Software`) while paused (or when `hwdec-current` becomes known a moment after `file-loaded` on a file started paused), `hwdec-current` changes asynchronously, but neither `self:render()` (the `[HW]` badge) nor `self:render_info()` (the `Decoder` row) is called.
+  3. **`Looks:video_changed` does not refresh an open menu or info panel:** As verified with `mpv`, `video-params` is still `nil` when `file-loaded` runs and only becomes non-nil when the first video frame is decoded. If the **Video** or **Playback** menu (or **Playback info** panel) is opened before the first frame is decoded—or when switching video tracks (`vid`)—`Looks:video_changed` sets `self.sdr` and `self.sd` and applies the remembered look without calling `menu:refresh()` or `player:render_info()`. Also, in `Player:main_menu_items()` (`dvp/player.lua` line 753), `Video` uses `value = self:video_summary()` (a static string) instead of `value = function() return self:video_summary() end`.
+* **Suggested Fix:**
+  * In `main.lua` line 329, also call `player:render_info()` when `state.screen == "player"`.
+  * In `dvp/player.lua`'s `hwdec-current` observer, also call `if self.overlay_visible then self:render() end` and `if self.info_visible then self:render_info() end`.
+  * Pass an `on_change` callback to `Looks.new` (like `Hdr.new`) that calls `if menu:is_open() then menu:refresh() end` and `player:render_info()` when `self.sdr` or `self.sd` changes in `Looks:video_changed`, and make `Video`'s `value` in `main_menu_items()` a function `function() return self:video_summary() end`.
+
+> **Status: Solved** (D70). The info panel is redrawn after every menu action over the player; the `hwdec-current` observer redraws the overlay (HW badge) and the info panel; `looks.on_change` refreshes an open menu and the info panel when the video turns out SDR/HDR or SD/HD; the main menu's Video row is a function. (That row could not show a stale value in practice: B on the Video menu closes all menus, and the main menu is rebuilt when it opens.)
+
+---
+
+### 2.4. `dvp/display.lua` & `main.lua`: `Display:rematch` exits early if `self.requested_hz` was `nil`, and the `deinterlace-active` observer ignores transitions back to `false`
+
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/display.lua` (`Display:rematch` lines 319–324) and `main.lua` (`deinterlace-active` observer lines 485–489)
+* **Problems:**
+  1. In `Display:rematch`:
+     ```lua
+     function M:rematch(fps, on_result)
+         if not self.requested_hz or not self.rates then return nil end
+         local hz = M.choose_rate(fps, self.rates, self.cfg.display.refresh_prefer)
+         if not hz or hz == self.requested_hz then return nil end
+         return self:match(fps, on_result)
+     end
+     ```
+     If `display:match()` at `file-loaded` returned `nil` (for example, `container-fps` was not yet known or had no match in `self.rates`, leaving `self.requested_hz = nil`), `rematch` refuses to run when `deinterlace-active` becomes `true` even if the doubled frame rate *does* have a match in `self.rates`.
+  2. In `main.lua` lines 485–489:
+     ```lua
+     mp.observe_property("deinterlace-active", "bool", function(_, active)
+         if active and state.current_path then
+             display:rematch(Display.video_fps(), function() player:render() end)
+         end
+     end)
+     ```
+     Only calls `display:rematch` when `active` is `true` (ignoring transitions from interlaced to progressive content where `active` becomes `false`), and does not call `player:render_info()` to update the `Deinterlacing` row in the Playback info panel.
+* **Suggested Fix:**
+  * In `Display:rematch`, check `if not (self.refresh_possible and self.refresh_on) or not self.rates then return nil end`.
+  * In `main.lua`, call `display:rematch` whenever `state.current_path` is set (whether `active` is `true` or `false`) and call `player:render_info()`.
+
+> **Status: Partly solved** (D70). `rematch()` now runs whenever matching is on and the rates are known, also when the container's rate gave no refresh rate. The `deinterlace-active` observer redraws the info panel. Declined: matching again when deinterlacing stops. The doubled rate is still a multiple of the frame rate, and on material that mixes interlaced and progressive parts every change would blank the screen for a refresh switch.
+
+---
+
+## 3. v0.8.0 (Part X) Summary Checklist
+
+- [x] **Grain shader (`mpv/shaders/dvp-grain.glsl`):** Fix `cell == 1.0` half-integer `gl_FragCoord.xy` (`fract == 0.5`) and `HOOKED_size.y / 800.0` threshold so 16:9 and 4:3 videos on the Steam Deck have the same grain strength and 1-pixel grain size.
+- [x] **CRT shader (`mpv/shaders/dvp-crt.glsl`):** Snap `row = floor(HOOKED_pos.y * h) + 0.5` to prevent `d == 0` sign jitter, replace the `beam_mean` loop with the closed-form expression (1 `exp` for $n=2$, $\sigma\sqrt{2\pi}$ for $n \ge 3$), and clamp `col` to `[0, 1]`.
+- [x] **Clean-up with hardware decoding (`dvp/looks.lua`):** Precede the `lavfi` filter (`fspp` / `hqdn3d`) with `mpv`'s `format:fmt=yuv420p` filter so `autoconvert` downloads `vaapi` hardware frames on SD H.264/HEVC/VP9/AV1 videos instead of failing and disabling `dvp-cleanup`.
+- [x] **Looks lifecycle (`dvp/looks.lua`, `main.lua`):** *(Partly: the base is still read per file, by design.)* Snapshot `self.base` once in `Looks.new`, strip `CRT_SHADER` / `GRAIN_SHADER` from `base.shaders`, and call `video_changed` from `Looks:start`.
+- [x] **UI sync (`dvp/looks.lua`, `dvp/player.lua`, `main.lua`):** Refresh open menus and `player:render_info()` when `Looks:video_changed` or `hwdec-current` fires or when menu items are adjusted while paused.
+- [x] **Deinterlace refresh matching (`dvp/display.lua`, `main.lua`):** *(Partly: no new switch when deinterlacing stops.)* Allow `Display:rematch` when `self.requested_hz` is `nil`, and handle `deinterlace-active` transitions to `false`.
+- [ ] **Release metadata (`dvp/version.lua`, `CHANGELOG.md`, `metainfo.xml`):** *(Expected while in development: done at release, as for every version; the check exists so a `-dev` version can't be released.)* Bump from `"0.8.0-dev"` to `"0.8.0"` with `CHANGELOG.md` and `<release>` entries when tagging (`tests/run.sh` currently fails on the `-dev` check).
+---
 ---
 
 # Part IX — v0.6.0–v0.7.1 Audit: Offline Downloads, Local Video Deletion, Per-Video Decoding, Async Folder Listings & DLNA Servers (2026-10-30)

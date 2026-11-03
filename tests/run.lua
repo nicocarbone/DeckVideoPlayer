@@ -1385,5 +1385,77 @@ do
     eq("back to default clears it", r:get("/v/a.mkv").decoder, nil)
 end
 
+-- Looks for old SD video and deinterlaced rates (D69)
+do
+    local Looks = require "dvp.looks"
+    eq("deinterlaced 29.97i on high: 60, not 90", display.choose_rate(2 * 30000 / 1001, oled, "high"), 60)
+    eq("deinterlaced 25i: 50", display.choose_rate(2 * 25, oled, "high"), 50)
+    eq("look key: local folder", Looks.memory_key("/home/deck/Videos/Show/Season 1/e01.mkv"),
+       "dir:/home/deck/Videos/Show/Season 1")
+    eq("look key: server episode by show", Looks.memory_key("https://x/1", {backend = "plex", machine = "m1",
+       kind = "episode", show = "Old Show", rating_key = "7"}), "plex:m1:show:Old Show")
+    eq("look key: DLNA folder", Looks.memory_key("http://x/v.mpg", {backend = "dlna", machine = "d1",
+       kind = "movie", parent = "64$3", rating_key = "64$3$1"}), "dlna:d1:folder:64$3")
+    eq("look key: server movie", Looks.memory_key("https://x/2", {backend = "jellyfin", machine = "j1",
+       kind = "movie", rating_key = "abc"}), "jellyfin:j1:item:abc")
+    eq("look key: a bare URL is not remembered", Looks.memory_key("http://x/y.mp4"), nil)
+    eq("source lines", Looks.source_lines(480, ""), 480)
+    eq("source lines: cropped", Looks.source_lines(480, "720x360+0+60"), 360)
+    local user_vf = {name = "lavfi", label = "mine", enabled = true, params = {graph = "eq"}}
+    local base = {shaders = {"~/mine.glsl"}, opts = {mine = "1"}, vf = {user_vf}, deband = "no", iterations = "1"}
+    local v = Looks.option_values({look = "crt"}, base, 480)
+    check("crt: user shader kept, ours after", v["glsl-shaders"][1] == "~/mine.glsl"
+        and v["glsl-shaders"][2] == "~~/shaders/dvp-crt.glsl" and #v["glsl-shaders"] == 2)
+    check("crt: line count and user options", v["glsl-shader-opts"].dvp_src_h == "480" and v["glsl-shader-opts"].mine == "1")
+    check("crt: no filters, no deband", #v.vf == 1 and v.deband == "no")
+    v = Looks.option_values({look = "crt", grain = "medium"}, base, 576)
+    check("grain before crt", v["glsl-shaders"][2] == "~~/shaders/dvp-grain.glsl"
+        and v["glsl-shaders"][3] == "~~/shaders/dvp-crt.glsl" and v["glsl-shader-opts"].dvp_grain == "0.045"
+        and v["glsl-shader-opts"].dvp_src_h == "576")
+    v = Looks.option_values({cleanup = "light"}, base, 480)
+    check("clean-up light: deband and fspp after the user's filter", v.deband == "yes"
+        and v["deband-iterations"] == "1" and #v.vf == 3 and v.vf[1] == user_vf
+        and v.vf[3].label == "dvp-cleanup" and v.vf[3].params.graph == "fspp=qp=4" and #v["glsl-shaders"] == 1)
+    -- (hardware-decoded frames must reach fspp as software frames)
+    check("clean-up: software format first", v.vf[2].name == "format" and v.vf[2].label == Looks.FORMAT_LABEL
+        and v.vf[2].params.fmt == "yuv420p")
+    v = Looks.option_values({cleanup = "strong"}, base, 480)
+    check("clean-up strong: denoise too", v["deband-iterations"] == "2" and v.vf[3].params.graph:find("hqdn3d", 1, true))
+    local stale = {shaders = {"~~/shaders/dvp-crt.glsl", "~/mine.glsl", "~~/shaders/dvp-grain.glsl"}, opts = {},
+                   vf = {{name = "format", label = "dvp-cleanup-format", params = {fmt = "yuv420p"}}, user_vf,
+                         {name = "lavfi", label = "dvp-cleanup", params = {graph = "x"}}}}
+    v = Looks.option_values({}, stale, 480)
+    check("our old filters never kept from base", #v.vf == 1 and v.vf[1] == user_vf)
+    check("our old shaders never kept from base", #v["glsl-shaders"] == 1 and v["glsl-shaders"][1] == "~/mine.glsl")
+    v = Looks.option_values({look = "crt"}, stale, 480)
+    check("crt from a stale base: once", #v["glsl-shaders"] == 2 and v["glsl-shaders"][2] == "~~/shaders/dvp-crt.glsl")
+    v = Looks.option_values({}, base, 480)
+    check("off: back to the user's options", #v["glsl-shaders"] == 1 and v["glsl-shader-opts"].mine == "1"
+        and #v.vf == 1 and v.deband == "no" and v["deband-iterations"] == "1")
+    check("off: options stay a map", (getmetatable(v["glsl-shader-opts"]) or {}).type == "MAP")
+    check("unknown look: like off", #Looks.option_values({look = "film"}, base, 480)["glsl-shaders"] == 1)
+    -- looks.json values
+    local n = Looks.normalize("crt")
+    check("v1 look string", n and n.look == "crt" and n.grain == nil)
+    eq("v1 dropped look", Looks.normalize("film"), nil)
+    n = Looks.normalize({look = "off", grain = "strong", cleanup = "huge"})
+    check("v2 choice: off and unknown values dropped", n and n.grain == "strong" and n.look == nil and n.cleanup == nil)
+    eq("all off: nothing stored", Looks.normalize({look = "off", grain = "off"}), nil)
+    eq("describe", table.concat(Looks.describe({look = "crt", grain = "light", cleanup = "strong"}), " · "),
+       "CRT · Grain: light · Clean-up: strong")
+    eq("describe off", #Looks.describe({look = "off"}), 0)
+    check("SD: DVD sizes", Looks.is_sd(720, 576) and Looks.is_sd(640, 480) and Looks.is_sd(1024, 576))
+    check("SD: not HD or unknown", not Looks.is_sd(1280, 720) and not Looks.is_sd(1920, 1080) and not Looks.is_sd(nil, 480))
+    local e = Looks.effective({look = "crt", grain = "light", cleanup = "strong"}, true, false)
+    check("HD: no clean-up, rest kept", e.cleanup == nil and e.look == "crt" and e.grain == "light")
+    check("HDR: all off", next(Looks.effective({look = "crt", cleanup = "light"}, false, true)) == nil)
+    eq("SD SDR: all kept", Looks.effective({cleanup = "light"}, true, true).cleanup, "light")
+    eq("serialize: key order", Looks.serialize({b = "1", a = {x = 2, y = "z"}}), "{a={x=2,y=z},b=1}")
+    for _, s in ipairs(Looks.SETTINGS) do
+        for _, value in ipairs(Looks.ORDER[s]) do check("label " .. s .. " " .. value, Looks.LABELS[s][value] ~= nil) end
+        check("title " .. s, Looks.TITLES[s] ~= nil)
+    end
+end
+
 print(string.format("%d checks, %d failures", count, failures))
 mp.commandv("quit", failures == 0 and "0" or "1")
