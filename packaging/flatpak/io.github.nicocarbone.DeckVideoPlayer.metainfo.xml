@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.8.1" date="2026-11-03">
+      <description>
+        <p>Fixes brightness flicker in HDR videos filmed with a phone (HDR10+), with HDR mapping set to Display.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-11-03">
       <description>
         <p>Better playback of old, low-resolution video.</p>

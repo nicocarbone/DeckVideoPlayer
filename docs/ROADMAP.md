@@ -145,6 +145,9 @@ Fixes from ISSUES.md Part X (D70): Clean-up with hardware decoding,
 grain strength on 16:9 video, CRT shader cost, screen updates while
 paused.
 
+v0.8.1 (released 2026-11-03): HDR10+ phone videos no longer flicker with
+the Display HDR mapping (D71).
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for

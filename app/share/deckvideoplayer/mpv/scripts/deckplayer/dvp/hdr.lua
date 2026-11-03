@@ -6,7 +6,13 @@
 --   (`target-colorspace-hint=no`), even HDR files on an HDR screen.
 -- HDR mapping, for HDR sources:
 --   static  mpv sends the source's whole-film metadata; gamescope / the TV
---           fits it to the display (the default, as up to v0.4.0).
+--           fits it to the display (the default, as up to v0.4.0). mpv
+--           tone-maps by the whole-film metadata too (libplacebo
+--           `tone_map_metadata=hdr10`), which then means not at all: by
+--           default it would map each frame from its HDR10+ scene peak to
+--           the whole-film peak, and phones (e.g. Samsung) write scene
+--           peaks far above the real ones that jump every few frames, so
+--           the picture dimmed and pulsed (D71).
 --   dynamic the same, with the file's per-scene metadata (Dolby Vision /
 --           HDR10+) passed to the display
 --           (`target-colorspace-hint-mode=source-dynamic`). Only offered
@@ -40,7 +46,16 @@ M.CHECK_DELAY = 1.5
 
 -- Options this module sets; their values at start are restored.
 M.PROPS = {"target-colorspace-hint", "target-colorspace-hint-mode", "target-peak", "target-trc",
-           "target-prim", "inverse-tone-mapping", "hdr-compute-peak"}
+           "target-prim", "inverse-tone-mapping", "hdr-compute-peak", "libplacebo-opts"}
+
+-- Pure: libplacebo-opts (a "key=value,…" list) with tone mapping by the
+-- whole-film metadata, unless the user's mpv.conf chose its own.
+function M.static_metadata_opts(opts)
+    opts = opts or ""
+    if opts:find("tone_map_metadata", 1, true) then return opts end
+    if opts == "" then return "tone_map_metadata=hdr10" end
+    return opts .. ",tone_map_metadata=hdr10"
+end
 
 local function is_hdr(gamma) return gamma == "pq" or gamma == "hlg" end
 M.is_hdr = is_hdr
@@ -104,7 +119,13 @@ function M.options(s, defaults)
         return o
     end
     local e = M.effective(s)
-    if not e then return o end
+    if not e then
+        -- "Display" for an HDR video, on an HDR screen (or not known yet).
+        if is_hdr(s.gamma) and s.screen ~= false then
+            o["libplacebo-opts"] = M.static_metadata_opts(defaults["libplacebo-opts"])
+        end
+        return o
+    end
     if e.mapping == "dynamic" then
         o["target-colorspace-hint-mode"] = "source-dynamic"
     elseif e.mapping == "app" then

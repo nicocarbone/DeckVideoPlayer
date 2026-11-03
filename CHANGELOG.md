@@ -5,6 +5,18 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.1 (2026-11-03)
+
+### Fixed
+
+- **HDR videos filmed with a phone no longer flicker** in brightness on
+  an HDR screen (seen with a Samsung Galaxy S24 Ultra video on a Steam
+  Deck OLED). Such videos carry per-frame HDR10+ brightness data that
+  jumps every few frames; with *HDR mapping: Display* (the default) the
+  player now uses the video's overall brightness data instead, so the
+  picture is steady and as bright as recorded. Other HDR videos look
+  the same as before.
+
 ## v0.8.0 (2026-11-03)
 
 Better playback of old, low-resolution video: DVDs, TV recordings and SD

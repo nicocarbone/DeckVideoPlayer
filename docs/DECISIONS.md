@@ -2003,3 +2003,46 @@ Reviewed on 2026-11-03; each finding has a status line in `ISSUES.md`.
   (software, unchanged), an HD file afterwards (user's filters back,
   hardware decoding zero-copy); the info panel updating while paused.
 
+## D71. HDR10+ phone videos: the Display mapping ignores scene peaks
+
+- **Report:** an HDR video filmed with a Samsung Galaxy S24 Ultra
+  pulsed in brightness on a Deck OLED with *HDR mapping: Display*;
+  *Display, per scene* was stable but dropped many frames.
+- **Cause:** the file (HEVC Main 10, PQ, 60 fps variable rate) has
+  HDR10+ metadata on every frame. Its static metadata says 1000 nits
+  (mastering and MaxCLL), and the picture indeed clips at PQ 0.752
+  (1000 nits); the HDR10+ scene peaks say 850–6700 nits and jump by
+  15–30 % every few frames (185 jumps in 36 s), while the decoded
+  picture changes by about 0.1 % from frame to frame. With the default
+  `target-colorspace-hint-mode=target`, mpv's target is the static
+  1000 nits, but libplacebo tone-maps from the per-frame HDR10+ peak
+  (`tone_map_metadata=any`), so every frame was compressed from a
+  bogus 2000–3500-nit peak down to 1000: about 11 % darker than the
+  source (PQ) and varying with each jump. Measured on gamescope's HDR
+  screenshots (AVIF, PQ) frame by frame in headless gamescope, against
+  runs where mpv doesn't tone-map.
+- **Fix:** for the Display mapping of an HDR video on an HDR screen (or
+  one not known yet), `libplacebo-opts` gets `tone_map_metadata=hdr10`:
+  mpv maps by the whole-film metadata, which for this file means not at
+  all. Output measured identical, frame by frame, to *Display, per
+  scene* (and to the source). For a file whose scene peaks stay within
+  its static metadata (the usual case) mpv didn't tone-map in this mode
+  anyway, so nothing changes. A user's own `tone_map_metadata` in
+  `libplacebo-opts` is kept; the value is restored for the next file.
+- **Not changed:** *App* mapping, SDR screens (Deck LCD, HDR off) and
+  *Display, per scene* keep libplacebo's default (per-scene metadata
+  when present): there mpv does tone-map on purpose, and real HDR10+
+  films benefit from it. Phone videos may still pulse there.
+- **Per scene and dropped frames:** that mode passes the file's
+  per-frame metadata on to gamescope, which gets new values every few
+  frames with this file. On the owner's Deck OLED it still drops
+  frames with the fix (as expected: the fix doesn't touch that mode);
+  headless gamescope on the development PC (no real HDR panel) drops
+  none, so the exact cause is not confirmed. Display now gives the
+  same picture without per-frame metadata.
+- **Tested:** 707 unit checks; in headless gamescope (HDR, Deck OLED
+  profile) the app sets the option for this file and clears it for the
+  next SDR file; output identical to the stable run on 24 consecutive
+  frames around metadata jumps; no dropped frames. On the owner's Deck
+  OLED (test build): no flicker and smooth playback with Display.
+

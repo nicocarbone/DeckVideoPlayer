@@ -721,7 +721,7 @@ eq("sync unknown entry", pres:get("plex://abc/library/metadata/99"), nil)
 local Hdr = require "dvp.hdr"
 local hd = {["target-colorspace-hint"] = "yes", ["target-colorspace-hint-mode"] = "target",
             ["target-peak"] = "auto", ["target-trc"] = "auto", ["target-prim"] = "auto",
-            ["inverse-tone-mapping"] = "no", ["hdr-compute-peak"] = "no"}
+            ["inverse-tone-mapping"] = "no", ["hdr-compute-peak"] = "no", ["libplacebo-opts"] = ""}
 local function hs(t)
     local s = {enabled = true, mapping = "static", peak = 1000, itm = 0}
     for k, v in pairs(t) do s[k] = v end
@@ -763,6 +763,17 @@ eq("no hdr screen: dynamic dropped",
 eq("no hdr screen: nothing effective",
    Hdr.effective(hs{gamma = "pq", mapping = "dynamic", dynamic = true, screen = false}), nil)
 check("defaults untouched", hd["target-peak"] == "auto")
+-- Display mapping: mpv tone-maps by the whole-film metadata (HDR10+ phone
+-- videos, D71); not for SDR videos, the app mapping or an SDR screen.
+eq("display: static metadata", Hdr.options(hs{gamma = "pq"}, hd)["libplacebo-opts"], "tone_map_metadata=hdr10")
+eq("display: screen unknown", Hdr.options(hs{gamma = "hlg", screen = nil}, hd)["libplacebo-opts"], "tone_map_metadata=hdr10")
+eq("display: sdr video", Hdr.options(hs{gamma = "bt.1886"}, hd)["libplacebo-opts"], "")
+eq("display: sdr screen", Hdr.options(hs{gamma = "pq", screen = false}, hd)["libplacebo-opts"], "")
+eq("app mapping: untouched", Hdr.options(hs{gamma = "pq", mapping = "app"}, hd)["libplacebo-opts"], "")
+eq("per scene: untouched", Hdr.options(hs{gamma = "pq", mapping = "dynamic", dynamic = true}, hd)["libplacebo-opts"], "")
+eq("hdr off: untouched", Hdr.options(hs{gamma = "pq", enabled = false}, hd)["libplacebo-opts"], "")
+eq("user's opts kept", Hdr.static_metadata_opts("deband_iterations=2"), "deband_iterations=2,tone_map_metadata=hdr10")
+eq("user's own choice wins", Hdr.static_metadata_opts("tone_map_metadata=any"), "tone_map_metadata=any")
 check("expects hdr", Hdr.expects_hdr(hs{gamma = "pq"}) and Hdr.expects_hdr(hs{gamma = "bt.1886", itm = 300})
     and not Hdr.expects_hdr(hs{gamma = "bt.1886"}) and not Hdr.expects_hdr(hs{gamma = "pq", enabled = false})
     and not Hdr.expects_hdr(hs{}))

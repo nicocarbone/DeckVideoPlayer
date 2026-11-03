@@ -70,7 +70,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-03, v0.8.0)
+## Current state (2026-11-03, v0.8.1)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -174,6 +174,11 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   battery cost not measured). Tenth audit (ISSUES.md Part X) fixed in
   D70. Test clips (`.dev/test-media/SD`, interlaced and blocky ones) are
   made with ffmpeg, not by `tools/make-test-media.sh`.
+- v0.8.1 (2026-11-03, D71): the Display HDR mapping tone-maps by the
+  whole-film metadata (`libplacebo-opts=tone_map_metadata=hdr10`), so
+  HDR10+ phone videos with bogus per-frame peaks don't flicker; checked
+  on the owner's Deck OLED. *Display, per scene* still drops frames
+  there with such files (not changed).
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

@@ -180,7 +180,7 @@ See the controls table in the [README](../README.md#controls). Notes:
 - **HDR settings** (Video menu, on a Deck OLED or an HDR TV with HDR on
   in SteamOS): *HDR* off shows HDR videos in SDR. *HDR mapping* for HDR
   videos: *Display* (default: the screen fits the picture to its
-  brightness), *Display, per scene* (it also gets the scene-by-scene
+  brightness, by the video's overall information), *Display, per scene* (it also gets the scene-by-scene
   information; offered only for Dolby Vision / HDR10+ videos, which have it), *App* (the player does it
   for the *Peak brightness* you pick). *SDR to HDR* shows SDR videos in
   HDR. Which looks best is a matter of taste; menu changes last until the

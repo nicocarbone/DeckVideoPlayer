@@ -645,7 +645,9 @@ output is expected), `check()` (reads `video-target-params/gamma`; on an
 SDR output drops every choice and calls `notify`),
 `show_menu()`, `describe()` (info panel line). Pure (unit-tested):
 `options(state, defaults)`, `effective(state)`, `expects_hdr(state)`,
-`step`, `clamp_peak`, `parse_itm`, `is_hdr`, `has_scene_metadata(vp,
+`step`, `clamp_peak`, `parse_itm`, `is_hdr`, `static_metadata_opts(opts)`
+(adds `tone_map_metadata=hdr10` to `libplacebo-opts` for the Display
+mapping of HDR videos, unless the user set it; D71), `has_scene_metadata(vp,
 track)`, `mapping_choices(dynamic)`, `shown_mapping(state)` (D54: "dynamic"
 works as "static" without per-scene metadata; `dynamic` is read once per
 file). The rows are built in
