@@ -1,6 +1,7 @@
 -- HDR choices (D52), in the Video menu with defaults from config.ini
--- ([display] hdr, hdr_mapping, hdr_peak, sdr_to_hdr). Menu changes last
--- for the session, like night mode.
+-- ([display] hdr, hdr_mapping, hdr_peak, sdr_to_hdr). A choice in the menu
+-- is remembered for the movie or season (dvp/videomemory.lua, D73) and
+-- applies to videos without a remembered one until the app closes.
 --
 -- HDR on/off: off makes mpv tone-map everything to SDR
 --   (`target-colorspace-hint=no`), even HDR files on an HDR screen.
@@ -43,6 +44,8 @@ M.DESCRIPTIONS = {dynamic = "Display maps, per-scene metadata"}                 
 M.PEAK_MIN, M.PEAK_MAX, M.PEAK_STEP = 300, 2000, 100
 M.ITM_LEVELS = {0, 300, 400, 600, 1000}
 M.CHECK_DELAY = 1.5
+-- What the user can choose: fields of a remembered entry and of the state.
+M.CHOICES = {"enabled", "mapping", "peak", "itm"}
 
 -- Options this module sets; their values at start are restored.
 M.PROPS = {"target-colorspace-hint", "target-colorspace-hint-mode", "target-peak", "target-trc",
@@ -157,7 +160,9 @@ end
 
 -- `menu`: the Video menu shows HDR choices (not on a Deck LCD, an SDR
 -- panel). `notify(text)` is called when `screen` changes: `text` is a toast
--- to show, or nil (the menu and badges only need a redraw).
+-- to show, or nil (the menu and badges only need a redraw). Set `on_choice`
+-- (a function(field, value)) to be told of a choice in the menu; value nil:
+-- it is config.ini's.
 function M.new(cfg, device, notify)
     local self = setmetatable({}, M)
     local d = cfg.display
@@ -165,6 +170,8 @@ function M.new(cfg, device, notify)
     self.menu = device ~= "deck-lcd"
     self.enabled = d.hdr ~= "off"
     self.mapping, self.peak, self.itm = d.hdr_mapping, M.clamp_peak(d.hdr_peak), M.parse_itm(d.sdr_to_hdr)
+    self.config, self.session = {}, {}
+    for _, f in ipairs(M.CHOICES) do self.config[f] = self[f] end
     self.screen = nil
     self.defaults, self.applied = {}, {}
     for _, p in ipairs(M.PROPS) do
@@ -242,25 +249,44 @@ function M:show_menu()
     return self.menu and self.screen ~= false
 end
 
-function M:toggle()
-    self.enabled = not self.enabled
+-- A new file: its remembered choices (`saved`, may be nil), else this
+-- session's, else config.ini's.
+function M:use(saved)
+    for _, f in ipairs(M.CHOICES) do
+        local v = saved and saved[f]
+        if v == nil then v = self.session[f] end
+        if v == nil then v = self.config[f] end
+        self[f] = v
+    end
     self:apply()
+end
+
+-- A choice in the menu.
+function M:choose(field, value)
+    self[field] = value
+    self.session[field] = value
+    self:apply()
+    if self.on_choice then
+        if value == self.config[field] then value = nil end
+        self.on_choice(field, value)
+    end
+end
+
+function M:toggle()
+    self:choose("enabled", not self.enabled)
     return self.enabled
 end
 
 function M:set_mapping(dir)
-    self.mapping = M.step(M.mapping_choices(self.dynamic), M.shown_mapping(self), dir)
-    self:apply()
+    self:choose("mapping", M.step(M.mapping_choices(self.dynamic), M.shown_mapping(self), dir))
 end
 
 function M:set_peak(dir)
-    self.peak = M.clamp_peak(self.peak + dir * M.PEAK_STEP)
-    self:apply()
+    self:choose("peak", M.clamp_peak(self.peak + dir * M.PEAK_STEP))
 end
 
 function M:set_itm(dir)
-    self.itm = M.step(M.ITM_LEVELS, self.itm, dir)
-    self:apply()
+    self:choose("itm", M.step(M.ITM_LEVELS, self.itm, dir))
 end
 
 -- Line for the info panel: what is done to the current file beyond plain

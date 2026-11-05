@@ -12,6 +12,7 @@
 #   W=1280 H=800       virtual screen size (try W=3840 H=2160 for a TV)
 #   HDR=1              gamescope HDR output (--hdr-enabled --hdr-debug-force-output)
 #   DEVICE=deck-oled   device profile written to the test config
+#   REMEMBER=no        [playback] remember_settings = no in the test config
 #   LOG=FILE           where to write the combined log (default: .dev/headless.log)
 #   TIMEOUT=60         hard time limit in seconds
 #   KEEP=1             keep resume data (.dev/headless/data) from the previous run
@@ -37,6 +38,10 @@
 #   tools/headless-run.sh -- gshot:/tmp/library.png
 #   HDR=1 DEVICE=deck-oled tools/headless-run.sh -- key:DOWN key:ENTER sleep:2 key:i shot:/tmp/info.png
 #   MODE=flatpak tools/headless-run.sh -- key:ENTER sleep:2 get:hwdec-current
+#
+# Exits non-zero if mpv failed: a crash, an error status, or not having
+# quit by TIMEOUT. gamescope's own status says nothing (see the gotcha about
+# "Segmentation fault" in docs/DEVELOPMENT.md).
 #
 # The IPC socket lives in /tmp/dvp-ipc.sock (Unix socket paths must stay
 # under ~108 characters). The test config/data dir is .dev/headless/ and is
@@ -84,6 +89,9 @@ fi
 if [ "${NIGHT:-0}" = 1 ]; then
     sed -i "s|^night_mode = .*|night_mode = yes|" "$CFG/config/config.ini"
 fi
+if [ -n "${REMEMBER:-}" ]; then
+    sed -i "s|^remember_settings = .*|remember_settings = $REMEMBER|" "$CFG/config/config.ini"
+fi
 if [ -n "${AWAKE:-}" ]; then
     sed -i "s|^keep_awake = .*|keep_awake = $AWAKE|" "$CFG/config/config.ini"
 fi
@@ -120,9 +128,12 @@ fi
 
 # gamescope starts its child on the first server; with XWAYLAND2 the app is
 # moved to the next display number, the second server.
-second='if [ "$DVP_XWL2" = 1 ]; then export DISPLAY=:$(( ${DISPLAY#:} + 1 )); fi; exec "$@"'
+# The app's exit status goes to a file: gamescope doesn't pass it on.
+second='if [ "$DVP_XWL2" = 1 ]; then export DISPLAY=:$(( ${DISPLAY#:} + 1 )); fi; "$@"; st=$?; echo "$st" > "$DVP_STATUS"; exit "$st"'
+status_file=$LOG.status
+rm -f "$status_file"
 # shellcheck disable=SC2086
-DVP_XWL2=${XWAYLAND2:-0} timeout "$TIMEOUT" gamescope $gs_args -- sh -c "$second" sh $cmd > "$LOG" 2>&1 &
+DVP_STATUS=$status_file DVP_XWL2=${XWAYLAND2:-0} timeout "$TIMEOUT" gamescope $gs_args -- sh -c "$second" sh $cmd > "$LOG" 2>&1 &
 gs_pid=$!
 
 python3 "$root/tools/mpv-ipc.py" "$SOCK" sleep:2.5 "$@" 'raw:["quit"]' || true
@@ -134,3 +145,10 @@ fi
 
 echo "--- app log ($LOG) ---"
 grep -E '^\[deckplayer\]|^mock:|Lua error|stack traceback|\[Gamescope WSI\].*colorspace|hdr formats exposed' "$LOG" || true
+
+status=$(cat "$status_file" 2>/dev/null || true)
+case "$status" in
+    0) echo "mpv exit status: 0" ;;
+    "") echo "FAILED: mpv had not quit after TIMEOUT=$TIMEOUT s" >&2; exit 1 ;;
+    *) echo "FAILED: mpv exit status $status (above 128: killed by signal, 139 = segfault)" >&2; exit 1 ;;
+esac

@@ -183,9 +183,10 @@ See the controls table in the [README](../README.md#controls). Notes:
   brightness, by the video's overall information), *Display, per scene* (it also gets the scene-by-scene
   information; offered only for Dolby Vision / HDR10+ videos, which have it), *App* (the player does it
   for the *Peak brightness* you pick). *SDR to HDR* shows SDR videos in
-  HDR. Which looks best is a matter of taste; menu changes last until the
-  app closes, `config.ini` sets your defaults (`hdr_mapping`, `hdr_peak`,
-  `sdr_to_hdr`, `hdr`).
+  HDR. Which looks best is a matter of taste; menu changes are remembered
+  for the movie or season and apply to other videos until the app closes;
+  `config.ini` sets your defaults (`hdr_mapping`, `hdr_peak`, `sdr_to_hdr`,
+  `hdr`). `remember_settings = no` turns the remembering off.
 - **About** (library menu or playback menu): version, build date, project
   page, licence and credits. Please include the version and build line in
   bug reports.

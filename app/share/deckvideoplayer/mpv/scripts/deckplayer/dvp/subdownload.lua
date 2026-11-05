@@ -310,6 +310,7 @@ function M:download(path, r)
     -- Same release downloaded before: don't spend quota again.
     if util.file_exists(dest) then
         select_file(dest, title, lang)
+        self.ctx.submemory:remember_track()
         toast(label)
         return
     end
@@ -323,6 +324,7 @@ function M:download(path, r)
         -- is kept and loads next time this one plays.
         if mp.get_property("path") == path then
             select_file(dest, title, lang)
+            self.ctx.submemory:remember_track()
             self.ctx.menu:refresh()   -- a menu showing the subtitle track
         end
         if res.remaining then

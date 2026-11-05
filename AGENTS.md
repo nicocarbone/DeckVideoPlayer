@@ -11,6 +11,7 @@ non-trivial.
 |---|---|
 | Library screen | `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` |
 | Playback overlay, track menus, info panel | `…/dvp/player.lua` |
+| Choices remembered per movie or season | `…/dvp/memory.lua` (store, keys), `…/dvp/submemory.lua` (subtitles, D72), `…/dvp/videomemory.lua` (Picture, HDR, D73) |
 | Menus/dialogs component | `…/dvp/menu.lua` |
 | Drawing primitives, icons, button glyphs, theme | `…/dvp/ui.lua` |
 | Button → action mapping | `…/dvp/input.lua` |
@@ -70,7 +71,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-03, v0.8.1)
+## Current state (2026-11-05, v0.8.2)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -179,6 +180,18 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   HDR10+ phone videos with bogus per-frame peaks don't flicker; checked
   on the owner's Deck OLED. *Display, per scene* still drops frames
   there with such files (not changed).
+- v0.8.2 (2026-11-05, D72, D73): subtitle settings remembered per movie or
+  season (`dvp/submemory.lua`, `subtitle-settings.json`): track matched by
+  language and flags, not id; delay per video. Picture and HDR choices
+  likewise (`dvp/videomemory.lua`, `video-settings.json`), on a store shared
+  with subtitles (`dvp/memory.lua`). `[playback] remember_settings` turns
+  all of it off, Looks and Decoding included. Tested in headless gamescope
+  with local files and mock DLNA; subtitles also with mock OpenSubtitles
+  and the owner's Jellyfin test server (read-only). The same checks passed
+  in the Flatpak build for local files, and the owner tried the test build
+  before release. Test clips in
+  `.dev/test-media/SubMemory` are made with ffmpeg, not by
+  `tools/make-test-media.sh`.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

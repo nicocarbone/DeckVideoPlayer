@@ -379,6 +379,11 @@ DECISIONS.md or the README "Known limitations".
     `download_folder` on the microSD card too. *Delete from this
     device…* removes a downloaded film (and its season folder when it
     was the last episode).
+16. Memory of choices (v0.8.2): in an episode of a Plex or Jellyfin show
+    choose a subtitle track and size, *Crop black bars*, and *SDR to HDR* or
+    an HDR mapping; the next episode starts with them, also after closing the
+    app. A movie keeps its own (D72, D73). With `remember_settings = no`
+    nothing comes back after closing the app.
 
 ## 9. Recipes for common changes
 
@@ -418,6 +423,12 @@ layout constants at the top of `browser.lua` / `menu.lua` and in
 
 ## 10. Gotchas (learned the hard way)
 
+- `Segmentation fault` at the end of a `tools/headless-run.sh` run is
+  gamescope, not the app, on the development PC (gamescope 3.16.20, NVIDIA
+  610.57.04): at exit it calls into `libnvidia-eglcore` after that library
+  was unloaded. It happens with no app at all (`gamescope --backend
+  headless -- sleep 1`, exit 139). What counts is the script's last line,
+  `mpv exit status: 0`; the script exits non-zero when mpv fails.
 - `screenshot-to-file … window` fails while mpv is idle (no video). Use
   gamescope screenshots for the library.
 - `force-window=immediate` creates the VO before scripts run. VO options

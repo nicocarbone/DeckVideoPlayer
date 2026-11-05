@@ -634,6 +634,8 @@ function M:delete(path)
     end
     self.ctx.resume:forget(path)
     self.ctx.resume:flush()
+    self.ctx.submemory:forget(path)
+    self.ctx.videomemory:forget(path)
     self.ctx.downloads:forget_path(path)
     self.ctx.toast("Deleted")
     if not self.active then return end

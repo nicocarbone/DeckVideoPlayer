@@ -226,6 +226,8 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `~/.config/deckvideoplayer/config.ini` | User settings (copied from the default on first run) | user / launcher |
 | `~/.config/deckvideoplayer/mpv.conf` | Optional raw mpv overrides (`--include`d last) | user |
 | `$XDG_DATA_HOME/deckvideoplayer/resume.json` (Flatpak: `~/.var/app/io.github.nicocarbone.DeckVideoPlayer/data/deckvideoplayer/`) | Resume positions, watched flags, chosen audio/sub track per file | `dvp/resume.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/subtitle-settings.json` | Subtitle track, size, brightness, position per movie or season, delay per video (D72) | `dvp/submemory.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/video-settings.json` | Picture and HDR choices per movie or season (D73) | `dvp/videomemory.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/plex.json` | Plex sign-in: client id, account token, servers and their addresses (mode 600) | `dvp/plex.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/jellyfin.json` | Jellyfin: device id, servers (address, user) and their device tokens (mode 600) | `dvp/jellyfin.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/dlna.json` | DLNA servers added (name, description address; nothing secret) | `dvp/dlna.lua` |

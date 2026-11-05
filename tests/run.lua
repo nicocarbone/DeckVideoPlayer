@@ -523,6 +523,7 @@ check("os base url rejected", not OS.valid_base_url("evil.example") and not OS.v
 check("os link https", OS.valid_link("https://cdn.example/f.srt", OS.API_URL))
 check("os link rejected", not OS.valid_link("file:///etc/passwd", OS.API_URL)
     and not OS.valid_link("http://cdn.example/f.srt", OS.API_URL) and not OS.valid_link(nil, OS.API_URL))
+check("season folders", OS.is_season_dir("Season 1") and OS.is_season_dir("S01") and not OS.is_season_dir("Movies"))
 check("os link mock origin", OS.valid_link("http://127.0.0.1:8080/files/x.srt", "http://127.0.0.1:8080/api/v1")
     and not OS.valid_link("http://127.0.0.1:80800/x", "http://127.0.0.1:8080/api/v1"))
 eq("plex auth url", Plex.auth_url("cid", "abc"),
@@ -1466,6 +1467,185 @@ do
         for _, value in ipairs(Looks.ORDER[s]) do check("label " .. s .. " " .. value, Looks.LABELS[s][value] ~= nil) end
         check("title " .. s, Looks.TITLES[s] ~= nil)
     end
+end
+
+-- Subtitle settings remembered per movie or season (D72)
+do
+    local SM = require "dvp.submemory"
+    local Memory = require "dvp.memory"
+    local function keys(...)
+        local video, scope = Memory.keys(...)
+        return tostring(video) .. " | " .. tostring(scope)
+    end
+    eq("sub keys: movie", keys("/v/Film (2020).mkv"), "file:/v/Film (2020).mkv | file:/v/Film (2020).mkv")
+    eq("sub keys: episode", keys("/v/Show/Show S02E03.mkv"), "file:/v/Show/Show S02E03.mkv | dir:/v/Show:season:2")
+    eq("sub keys: 1x02", select(2, Memory.keys("/v/Show/show.1x02.mkv")), "dir:/v/Show:season:1")
+    eq("sub keys: seasons in one folder differ", select(2, Memory.keys("/v/Show/S01E01.mkv")) == select(2, Memory.keys("/v/Show/S02E01.mkv")), false)
+    eq("sub keys: season folder", select(2, Memory.keys("/v/Show/Season 1/01 - Pilot.mkv")), "dir:/v/Show/Season 1")
+    eq("sub keys: bare URL", keys("http://x/y.mp4"), "nil | nil")
+    local ep = {backend = "plex", machine = "m1", rating_key = "7", kind = "episode", show = "Show", season = 2}
+    eq("sub keys: server episode", keys("https://x/1", ep), "plex:m1:item:7 | plex:m1:show:Show:season:2")
+    eq("sub keys: server special", select(2, Memory.keys("https://x/1", {backend = "jellyfin", machine = "j", rating_key = "1",
+       kind = "episode", show = "Show", season = 0})), "jellyfin:j:show:Show:season:0")
+    eq("sub keys: server movie", keys("https://x/2", {backend = "jellyfin", machine = "j", rating_key = "9", kind = "movie"}),
+       "jellyfin:j:item:9 | jellyfin:j:item:9")
+    eq("sub keys: DLNA episode by title", select(2, Memory.keys("http://x/1", {backend = "dlna", machine = "d", rating_key = "5",
+       kind = "movie", parent = "p", name = "Show S03E01"})), "dlna:d:folder:p:season:3")
+    eq("sub keys: DLNA movie", select(2, Memory.keys("http://x/1", {backend = "dlna", machine = "d", rating_key = "5",
+       kind = "movie", parent = "p", name = "A Film"})), "dlna:d:item:5")
+
+    eq("sub clean: float residue", SM.clean("scale", 1.1 + 0.1 + 0.1), 1.3)
+    eq("sub clean: other mpv.conf steps kept", SM.clean("scale", 1.25 + 0.1), 1.35)
+    eq("sub clean: clamped", SM.clean("pos", 500), 150)
+    eq("sub clean: brightness floor", SM.clean("brightness", 0.1), 0.3)
+    eq("sub clean: not a number", SM.clean("scale", "big"), nil)
+    eq("sub clean: unknown", SM.clean("volume", 1), nil)
+
+    check("sub spec: off", SM.track_spec(nil).off == true)
+    local spec = SM.track_spec({id = 2, lang = "spa", title = "Latino", codec = "subrip", forced = false, external = false})
+    check("sub spec: fields", spec.lang == "spa" and spec.title == "Latino" and spec.forced == nil and spec.external == nil)
+
+    local function sub(id, lang, extra)
+        local t = extra or {}
+        t.type, t.id, t.lang = "sub", id, lang
+        return t
+    end
+    local ep2 = {{type = "audio", id = 1, lang = "spa"}, sub(1, "spa", {forced = true}), sub(2, "fre"),
+                 sub(3, "spa", {title = "Latino"}), sub(4, "eng")}
+    eq("sub match: other id, not the forced one", SM.match_track(ep2, spec), 3)
+    eq("sub match: forced wants forced", SM.match_track(ep2, {lang = "spa", forced = true}), 1)
+    eq("sub match: language missing", SM.match_track({sub(1, "eng")}, spec), nil)
+    eq("sub match: forced only is no match", SM.match_track({sub(1, "spa", {forced = true})}, spec), nil)
+    eq("sub match: two-letter tag", SM.match_track({sub(1, "eng"), sub(2, "es")}, {lang = "spa"}), 2)
+    eq("sub match: variant", SM.match_track({sub(1, "eng"), sub(2, "es-419")}, {lang = "spa"}), 2)
+    eq("sub match: exact beats variant", SM.match_track({sub(1, "es-419"), sub(2, "spa")}, {lang = "es"}), 2)
+    eq("sub match: untagged", SM.match_track({sub(1, "eng"), sub(2, nil)}, {title = "x"}), 2)
+    eq("sub match: und is untagged", SM.match_track({sub(1, "eng"), sub(2, "und")}, {}), 2)
+    eq("sub match: tagged isn't untagged", SM.match_track({sub(1, "eng")}, {}), nil)
+    eq("sub match: same id breaks a tie", SM.match_track({sub(1, "eng"), sub(2, "eng")}, {lang = "eng", id = 2}), 2)
+    eq("sub match: not a table", SM.match_track(ep2, "spa"), nil)
+    eq("sub match: no tracks", SM.match_track(nil, spec), nil)
+
+    eq("sub normalize: junk", SM.normalize("x"), nil)
+    eq("sub normalize: nothing usable", SM.normalize({scale = "big", track = 3, t = 5}), nil)
+    local dt = SM.normalize({track = {lang = 5, title = {}, forced = "yes", id = "x"}}).track
+    check("sub normalize: damaged track", dt.lang == nil and dt.title == nil and dt.forced == nil and dt.id == nil)
+    eq("sub normalize: damaged track matches safely", SM.match_track({sub(1, "eng"), sub(2, nil)}, dt), 2)
+    check("sub normalize: off", SM.normalize({track = {off = true, lang = "x"}}).track.lang == nil)
+    local n = SM.normalize({scale = 9, delay = 1.5, t = 5})
+    check("sub normalize: clean values", n.scale == 2.5 and n.delay == 1.5 and n.t == 5 and n.track == nil)
+
+    -- The store, in a temporary folder (mpv's properties of this test run).
+    local dir = os.tmpname()
+    os.remove(dir)
+    util.mkdir_p(dir)
+    local base_scale = mp.get_property_number("sub-scale")
+    local m = SM.new(dir)
+    local a, b, c = "/v/Show/S01E01.mkv", "/v/Show/S01E02.mkv", "/v/Film.mkv"
+    local function scale() return mp.get_property_number("sub-scale") end
+    m:start(a)
+    m:set("scale", base_scale + 0.5)
+    m:set("delay", 1.5)
+    eq("sub set: applied", scale(), base_scale + 0.5)
+    m:start(b)
+    eq("sub season: next episode", scale(), base_scale + 0.5)
+    eq("sub delay: not shared in a season", m.memory.entries["file:" .. b], nil)
+    eq("sub delay: kept per video", m.memory.entries["file:" .. a].delay, 1.5)
+    m:start(c)
+    eq("sub session: carries on to an unknown video", scale(), base_scale + 0.5)
+    mp.set_property_number("sub-scale", base_scale)   -- as mpv starts
+    local fresh = SM.new(dir)
+    fresh:start(c)
+    eq("sub restart: unknown video has the default", scale(), base_scale)
+    fresh:start(b)
+    eq("sub restart: season remembered", scale(), base_scale + 0.5)
+    fresh:start(c)
+    eq("sub restart: a remembered value doesn't leak", scale(), base_scale)
+    fresh:start(a)
+    fresh:set("scale", base_scale)
+    eq("sub set: the default isn't stored", fresh.memory.entries["dir:/v/Show:season:1"], nil)
+    fresh:forget(a)
+    eq("sub forget: video entry gone", fresh.memory.entries["file:" .. a], nil)
+    eq("sub forget: file updated", SM.new(dir).memory.entries["file:" .. a], nil)
+    os.remove(util.join(dir, "subtitle-settings.json"))
+    mp.set_property_number("sub-scale", base_scale)
+
+    -- Without a data folder (remember_settings = no): until the app closes.
+    local session = SM.new(nil)
+    session:start(c)
+    session:set("scale", base_scale + 0.5)
+    eq("no memory: nothing written", util.file_exists(util.join(dir, "subtitle-settings.json")), false)
+    eq("no memory: kept for the session", session.memory.entries["file:" .. c].scale, base_scale + 0.5)
+    mp.set_property_number("sub-scale", base_scale)
+    os.remove(dir)
+end
+
+-- Video menu choices remembered per movie or season (D73)
+do
+    local VM = require "dvp.videomemory"
+    local Hdr = require "dvp.hdr"
+    eq("video normalize: junk", VM.normalize(3), nil)
+    eq("video normalize: nothing usable", VM.normalize({mapping = "x", itm = 7, picture = "zoom", enabled = "no", t = 1}), nil)
+    eq("video normalize: HDR off is a value", VM.normalize({enabled = false}).enabled, false)
+    local n = VM.normalize({mapping = "app", peak = 5000, itm = 400, picture = "fill", t = 9})
+    check("video normalize: values", n.mapping == "app" and n.peak == Hdr.PEAK_MAX and n.itm == 400 and n.picture == "fill" and n.t == 9)
+    eq("video picture: bars isn't a mode", VM.normalize_picture("bars"), nil)
+    eq("video picture: bad crop", VM.normalize_picture({crop = "1;rm", w = 1, h = 1}), nil)
+    eq("video picture: crop without size", VM.normalize_picture({crop = "960x720+160+0"}), nil)
+    eq("video picture: crop", VM.normalize_picture({crop = "960x720+160+0", w = 1280, h = 720}).crop, "960x720+160+0")
+    local crop = {crop = "960x720+160+0", w = 1280, h = 720}
+    eq("video crop: same size", VM.crop_for(crop, 1280, 720), "960x720+160+0")
+    eq("video crop: other size", VM.crop_for(crop, 1920, 1080), nil)
+    eq("video crop: size unknown", VM.crop_for(crop, nil, nil), nil)
+    eq("video crop: a mode", VM.crop_for("fill", 1280, 720), nil)
+
+    local dir = os.tmpname()
+    os.remove(dir)
+    util.mkdir_p(dir)
+    local vm = VM.new(dir)
+    local a, b, film = "/v/Show/S01E01.mkv", "/v/Show/S01E02.mkv", "/v/Film.mkv"
+    eq("video memory: nothing yet", vm:start(a), nil)
+    vm:set("itm", 400)
+    eq("video memory: next episode", vm:start(b).itm, 400)
+    eq("video memory: other movie", vm:start(film), nil)
+    vm:set("enabled", false)
+    eq("video memory: restart", VM.new(dir):start(film).enabled, false)
+    vm:start(a)
+    vm:set("itm", nil)
+    eq("video memory: entry emptied", vm:start(b), nil)
+    os.remove(util.join(dir, "video-settings.json"))
+    os.remove(dir)
+
+    -- Precedence of the HDR choices: remembered, session, config.ini.
+    local cfg = config.defaults()
+    local hdr = Hdr.new(cfg, "tv", nil)
+    local told = {}
+    hdr.on_choice = function(f, v) told[f] = v == nil and "default" or v end
+    hdr:use(nil)
+    eq("hdr use: config", hdr.mapping, "static")
+    hdr:use({mapping = "app", peak = 800})
+    check("hdr use: remembered", hdr.mapping == "app" and hdr.peak == 800)
+    hdr:use({enabled = false})
+    eq("hdr use: off is kept", hdr.enabled, false)
+    check("hdr use: rest back to config", hdr.mapping == "static" and hdr.peak == 1000)
+    hdr:use(nil)
+    eq("hdr use: remembered doesn't leak", hdr.enabled, true)
+    hdr:set_itm(1)
+    eq("hdr choose: told", told.itm, 300)
+    hdr:use(nil)
+    eq("hdr session: carries on", hdr.itm, 300)
+    eq("hdr session: remembered wins", (hdr:use({itm = 600}) or hdr.itm), 600)
+    hdr:use(nil)
+    hdr:set_itm(-1)
+    eq("hdr choose: config value isn't stored", told.itm, "default")
+    hdr:toggle()
+    eq("hdr toggle: told", told.enabled, false)
+    hdr:toggle()
+    eq("hdr toggle back: default", told.enabled, "default")
+    hdr:use(nil)
+    if hdr.check_timer then hdr.check_timer:kill() end
+    eq("config: remember_settings default", config.defaults().playback.remember_settings, true)
+    eq("config: remember_settings off", config.from_text("[playback]\nremember_settings = no\n").playback.remember_settings, false)
 end
 
 print(string.format("%d checks, %d failures", count, failures))

@@ -29,6 +29,7 @@ local SCHEMA = {
         subtitle_languages = {default = "", type = "string"},
         subtitles          = {default = "auto", type = "enum", values = {"auto", "always", "forced", "off"}},
         resume             = {default = true, type = "bool"},
+        remember_settings  = {default = true, type = "bool"},
         autoplay_next      = {default = true, type = "bool"},
         seek_short         = {default = 10, type = "number"},
         seek_long          = {default = 60, type = "number"},

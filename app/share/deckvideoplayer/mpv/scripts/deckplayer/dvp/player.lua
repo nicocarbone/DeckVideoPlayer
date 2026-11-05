@@ -12,6 +12,7 @@ local media = require "dvp.media"
 local library = require "dvp.library"
 local Menu = require "dvp.menu"
 local cropdetect = require "dvp.cropdetect"
+local VideoMemory = require "dvp.videomemory"
 local Markers = require "dvp.markers"
 local Looks = require "dvp.looks"
 
@@ -43,6 +44,7 @@ function M.new(ctx)
         keepaspect = mp.get_property_bool("keepaspect", true),
     }
     self.zoom_touched = false
+    self.default_zoom = self:zoom_mode()
     -- Decoding choice of the Video menu (D62) is file-local too: every file
     -- starts with the configured hwdec (already set by main.lua).
     self.hwdec_config = mp.get_property("hwdec")
@@ -432,6 +434,7 @@ function M:subtitle_items()
         label = "Off", checked = sid == "no" or sid == nil,
         action = function()
             mp.set_property("sid", "no")
+            self.ctx.submemory:remember_track()
             self.ctx.toast("Subtitles off")
         end,
     }}
@@ -441,6 +444,7 @@ function M:subtitle_items()
             action = function()
                 mp.set_property_number("sid", t.id)
                 mp.set_property_bool("sub-visibility", true)
+                self.ctx.submemory:remember_track()
                 self.ctx.toast("Subtitles: " .. media.track_label(t))
             end,
         }
@@ -491,10 +495,61 @@ function M:zoom_mode()
     return "custom"
 end
 
-function M:set_zoom(mode)
+function M:apply_zoom(mode)
     mp.set_property_number("panscan", mode == "fill" and 1.0 or 0.0)
     mp.set_property_bool("keepaspect", mode ~= "stretch")
     self.zoom_touched = true
+end
+
+-- The video's size as demuxed, known before decoding starts: the selected
+-- track, or before selection the first that isn't cover art.
+local function video_size()
+    local first
+    for _, t in ipairs(media.tracks("video")) do
+        if t.selected then return t["demux-w"], t["demux-h"] end
+        if not first and not t.image and not t.albumart then first = t end
+    end
+    if first then return first["demux-w"], first["demux-h"] end
+    return nil, nil
+end
+
+-- A new file (on_load, after start()): its remembered Picture mode (D73).
+-- Crop black bars waits for restore_crop(), when the video's size is known.
+function M:restore_picture(saved)
+    local picture = saved and saved.picture
+    self.saved_crop = type(picture) == "table" and picture or nil
+    if type(picture) == "string" then self:apply_zoom(picture) end
+end
+
+-- on_preloaded: applies a remembered crop to a video of the same size.
+-- Otherwise the picture stays as it is (Fit).
+function M:restore_crop()
+    if not self.saved_crop then return end
+    local crop = VideoMemory.crop_for(self.saved_crop, video_size())
+    self.saved_crop = nil
+    if crop then
+        self:apply_zoom("fit")
+        self.crop_bars = true
+        mp.set_property("file-local-options/video-crop", crop)
+    end
+end
+
+-- Remembers the mode just chosen: a crop as its rectangle; "no bars found"
+-- shows as Fit, so it is remembered as nothing.
+function M:remember_picture(mode)
+    local value = mode ~= self.default_zoom and mode or nil
+    if mode == "bars" then
+        value = nil
+        if self.crop_bars == true then
+            local w, h = video_size()
+            if w and h then value = {crop = mp.get_property("video-crop"), w = w, h = h} end
+        end
+    end
+    self.ctx.videomemory:set("picture", value)
+end
+
+function M:set_zoom(mode)
+    self:apply_zoom(mode)
     if mode == "bars" then
         -- After "no bars found" the picture is Fit but the row stays on
         -- this mode, so the next press moves on to Fill (or back to Fit);
@@ -504,6 +559,7 @@ function M:set_zoom(mode)
         self.crop_bars = false
         mp.set_property("file-local-options/video-crop", "")
     end
+    self:remember_picture(mode)
 end
 
 -- Black bars encoded into the video (e.g. a 4:3 show stored as 16:9) are
@@ -731,23 +787,9 @@ function M:open_video_menu()
     self:show_overlay()
 end
 
--- Subtitle brightness, 30-100 % (D58). Session-wide like the size.
-function M:sub_brightness()
-    return self.sub_level or 1
-end
-
-function M:set_sub_brightness(level)
-    level = util.clamp(util.round(level * 10) / 10, 0.3, 1)
-    -- The configured peak (mpv.conf), read before the first change.
-    self.sub_peak = self.sub_peak or tonumber(mp.get_property("image-subs-hdr-peak")) or 203
-    self.sub_level = level
-    local color, peak = media.sub_brightness(level, self.sub_peak)
-    mp.set_property("sub-color", color)
-    mp.set_property_number("image-subs-hdr-peak", peak)
-end
-
 function M:main_menu_items()
     local function prop_num(name, default) return mp.get_property_number(name, default) end
+    local submemory = self.ctx.submemory
     local items = {}
     local at = media.selected_track("audio")
     local st = media.selected_track("sub")
@@ -759,20 +801,16 @@ function M:main_menu_items()
                          action = function() self:open_video_menu() end}
     items[#items + 1] = {label = "Subtitle size",
         value = function() return string.format("%d%%", util.round(prop_num("sub-scale", 1) * 100)) end,
-        adjust = function(d)
-            mp.set_property_number("sub-scale", util.clamp(prop_num("sub-scale", 1) + d * 0.1, 0.5, 2.5))
-        end}
+        adjust = function(d) submemory:set("scale", prop_num("sub-scale", 1) + d * 0.1) end}
     items[#items + 1] = {label = "Subtitle brightness",
-        value = function() return string.format("%d%%", util.round(self:sub_brightness() * 100)) end,
-        adjust = function(d) self:set_sub_brightness(self:sub_brightness() + d * 0.1) end}
+        value = function() return string.format("%d%%", util.round(submemory:brightness() * 100)) end,
+        adjust = function(d) submemory:set("brightness", submemory:brightness() + d * 0.1) end}
     items[#items + 1] = {label = "Subtitle position",
         value = function() return tostring(prop_num("sub-pos", 100)) end,
-        adjust = function(d)
-            mp.set_property_number("sub-pos", util.clamp(prop_num("sub-pos", 100) + d * 2, 50, 150))
-        end}
+        adjust = function(d) submemory:set("pos", prop_num("sub-pos", 100) + d * 2) end}
     items[#items + 1] = {label = "Subtitle delay",
         value = function() return string.format("%+.1f s", prop_num("sub-delay", 0)) end,
-        adjust = function(d) mp.commandv("add", "sub-delay", tostring(d * 0.1)) end}
+        adjust = function(d) submemory:set("delay", prop_num("sub-delay", 0) + d * 0.1) end}
     items[#items + 1] = {label = "Audio delay",
         value = function() return string.format("%+.2f s", prop_num("audio-delay", 0)) end,
         adjust = function(d) mp.commandv("add", "audio-delay", tostring(d * 0.05)) end}

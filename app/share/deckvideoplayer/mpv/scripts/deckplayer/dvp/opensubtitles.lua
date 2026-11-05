@@ -108,7 +108,8 @@ end
 
 local SEASON_DIR = {"^season%s*%d+$", "^s%d+$", "^series%s*%d+$", "^specials$", "^staffel%s*%d+$", "^temporada%s*%d+$"}
 
-local function is_season_dir(name)
+-- Pure: whether a folder name is a season's ("Season 1", "S01", "Specials").
+function M.is_season_dir(name)
     local l = util.trim(name:lower():gsub("[%._]+", " "))
     for _, p in ipairs(SEASON_DIR) do
         if l:match(p) then return true end
@@ -147,7 +148,7 @@ function M.parse_release(path)
     if title == "" then
         -- "Show/Season 1/S01E02.mkv": use the show folder.
         local dir = util.dirname(path)
-        if is_season_dir(util.basename(dir)) then dir = util.dirname(dir) end
+        if M.is_season_dir(util.basename(dir)) then dir = util.dirname(dir) end
         local folder, folder_year = split_year(util.basename(dir))
         title = clean_title(folder)
         info.year = info.year or (not info.season and folder_year) or nil

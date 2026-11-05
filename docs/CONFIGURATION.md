@@ -26,7 +26,8 @@ in `dvp/config.lua`.
 | `audio_languages` | csv | `eng` (template) | mpv `alang`; preferred audio languages in order. |
 | `subtitle_languages` | csv | `eng` (template) | mpv `slang`. |
 | `subtitles` | `auto` \| `always` \| `forced` \| `off` | `auto` | Subtitle auto-selection (D9). |
-| `resume` | bool | `yes` | Offer to resume, and restore audio/subtitle choices per file. |
+| `resume` | bool | `yes` | Offer to resume; with `remember_settings`, also restore a local file's audio track. |
+| `remember_settings` | bool | `yes` | Remember choices made in the menus: subtitle track, size, brightness, position (per movie or season) and delay (per video); Picture and HDR choices (per movie or season); Look, Grain, Clean-up (per folder or show); Decoding (per video). `no`: forgotten when the app closes; what is saved stays on disk, unused (D72, D73). |
 | `autoplay_next` | bool | `yes` | Queue the following videos of the same folder. |
 | `seek_short` | seconds | `10` | D-pad ←/→ step. |
 | `seek_long` | seconds | `60` | L1/R1 step. |
@@ -45,7 +46,7 @@ in `dvp/config.lua`.
 |---|---|---|---|
 | `device` | `auto` \| `deck-oled` \| `deck-lcd` \| `tv` | `auto` | Detected from DMI (`Galileo` = OLED, `Jupiter` = LCD, else `tv`). Affects the default quality. |
 | `quality` | `auto` \| `battery` \| `balanced` \| `high` | `auto` | Rendering profile; `auto` = `balanced` on Deck, `high` on tv. |
-| `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). *HDR* in the Video menu changes it for the session (D52). |
+| `hdr` | `auto` \| `off` | `auto` | `off` forces SDR output (tone-mapped). *HDR* in the Video menu changes it for the movie or season, and other videos until the app closes (D52, D73). |
 | `hdr_mapping` | `static` \| `dynamic` \| `app` | `static` | Who fits HDR video to the screen: the display with the film's metadata (`static`), the display with per-scene metadata (`dynamic`; only Dolby Vision and HDR10+ videos have it, others use `static`, D54), or the player, tone-mapping to `hdr_peak` (`app`). Video menu: *HDR mapping* (D52). |
 | `hdr_peak` | nits | `1000` | Peak brightness for `hdr_mapping = app` (300–2000, in steps of 100). |
 | `sdr_to_hdr` | `off` \| `300` \| `400` \| `600` \| `1000` | `off` | Shows SDR video in HDR with highlights up to this many nits. Only on a screen in HDR mode; switches itself off elsewhere. Video menu: *SDR to HDR*. |

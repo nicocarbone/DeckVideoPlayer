@@ -34,6 +34,8 @@ local Jellyfin = require "dvp.jellyfin"
 local Dlna = require "dvp.dlna"
 local Downloads = require "dvp.downloads"
 local Looks = require "dvp.looks"
+local SubMemory = require "dvp.submemory"
+local VideoMemory = require "dvp.videomemory"
 
 local opts = {
     config_file = "",
@@ -174,6 +176,12 @@ local dlna = Dlna.new(opts.data_dir, {resume = resume, clean_names = cfg.interfa
 -- Media servers behind one interface (D55).
 local servers = Servers.new({plex, jellyfin, dlna})
 
+-- Decoding chosen in the Video menu (D62), with the video's resume entry.
+local function save_decoder(key)
+    if not cfg.playback.remember_settings then return end
+    resume:set_decoder(key, Player.remembered_decoder(mp.get_property("hwdec") == "no", configured_hwdec))
+end
+
 -- Saves the position of the current file: in resume.json for local files,
 -- on the server for Plex / Jellyfin videos (D37, D55). `ending`: the file is
 -- being closed (blocking report so it arrives even when the app quits; a
@@ -204,16 +212,17 @@ local function save_progress(ending)
         local key = backend.recent_key(item)
         if key then
             resume:update(key, pos, duration, nil, nil, item.title)
-            resume:set_decoder(key, Player.remembered_decoder(mp.get_property("hwdec") == "no", configured_hwdec))
+            save_decoder(key)
         end
         return
     end
     resume:update(path, pos, duration, track_id("audio"), track_id("sub"))
-    resume:set_decoder(path, Player.remembered_decoder(mp.get_property("hwdec") == "no", configured_hwdec))
+    save_decoder(path)
 end
 
 -- Decoding chosen in the Video menu for this video last time (D62).
 local function restore_decoder(key)
+    if not cfg.playback.remember_settings then return end
     local e = key and resume:get(key)
     if e and e.decoder then
         mp.set_property("file-local-options/hwdec", Player.hwdec_choice(e.decoder == "software", configured_hwdec))
@@ -295,7 +304,12 @@ local ctx = {
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
 ctx.downloads = Downloads.new(ctx, opts.data_dir)
-ctx.looks = Looks.new(opts.data_dir)
+-- Without a data folder these remember only until the app closes.
+local memory_dir = cfg.playback.remember_settings and opts.data_dir or nil
+ctx.looks = Looks.new(memory_dir)
+ctx.submemory = SubMemory.new(memory_dir)
+ctx.videomemory = VideoMemory.new(memory_dir)
+hdr.on_choice = function(field, value) ctx.videomemory:set(field, value) end
 local browser = Browser.new(ctx)
 local player = Player.new(ctx)
 -- The Video menu's rows and the info panel depend on whether the video is
@@ -370,6 +384,10 @@ mp.add_hook("on_load", 50, function()
     local start = state.pending_start[path]
     state.pending_start[path] = nil
     local item, backend = servers:item_for(path)
+    ctx.submemory:start(path, item)
+    local video_choices = ctx.videomemory:start(path, item)
+    hdr:use(video_choices)
+    player:restore_picture(video_choices)
     state.server_subs = nil
     if item then
         -- Media server: a token, if any, goes in a header (never in the
@@ -411,7 +429,7 @@ mp.add_hook("on_load", 50, function()
     if start and start > 0 then
         mp.set_property("file-local-options/start", tostring(start))
     end
-    if entry and cfg.playback.resume then
+    if entry and cfg.playback.resume and cfg.playback.remember_settings then
         if entry.aid and entry.aid ~= "no" then mp.set_property("file-local-options/aid", entry.aid) end
         if entry.sid then mp.set_property("file-local-options/sid", entry.sid) end
     end
@@ -425,6 +443,8 @@ mp.add_hook("on_preloaded", 50, function()
     for _, s in ipairs(state.server_subs or {}) do
         mp.commandv("sub-add", s.url, "auto", s.title, s.lang)
     end
+    ctx.submemory:apply_track()
+    player:restore_crop()
 end)
 
 -- Properties are still readable here, for every reason a file ends

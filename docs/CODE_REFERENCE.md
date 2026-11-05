@@ -96,6 +96,7 @@ Responsibilities:
   |---|---|
   | `cfg` | parsed config |
   | `resume`, `menu`, `display` | service instances |
+  | `submemory`, `videomemory` | remembered subtitle settings (D72), Picture and HDR choices (D73) |
   | `surround` | headphone surround (`dvp/surround.lua`) |
   | `hdr` | HDR choices (`dvp/hdr.lua`, D52) |
   | `subtitles` | online subtitle search/download (`dvp/subdownload.lua`) |
@@ -114,7 +115,12 @@ Responsibilities:
     `play`), else the resume position (auto-advanced playlist entries and
     external launches; remembered in `state.resumed_at` and announced with a
     toast on `file-loaded`); restores `aid`/`sid` from the resume entry (as
-    `file-local-options`).
+    `file-local-options`), and `submemory:start(path, item)`,
+    `hdr:use(saved)` and `player:restore_picture(saved)` apply what is
+    remembered (D72, D73).
+  - `on_preloaded` hook: adds stored and server subtitle files, then
+    `submemory:apply_track()` overrides `sid` with the remembered choice and
+    `player:restore_crop()` applies a remembered crop to a video of its size.
   - Server videos (Plex D37, Jellyfin D55; `servers:item_for(path)`):
     on_load fetches the resume point and subtitle files
     (`backend:prepare`), sets the header (Plex: transient token;
@@ -681,6 +687,39 @@ or SD/HD, to refresh the menu and info panel. Shaders in
 `dvp_grain`) runs before `dvp-crt.glsl` (takes `dvp_src_h`), both hook
 `SCALED`.
 
+## `dvp/memory.lua`: choices per movie or season (D72, D73)
+
+Pure: `keys(path, item)` → video key, shared key (the season's for an
+episode, the video's otherwise; nil, nil for a bare URL). Instance:
+`new(data_dir, name, normalize)` (`{version = 1, entries = {key = {…, t}}}`,
+at most 1000 entries; nil dir: nothing read or written, entries last until
+the app closes, which is how `remember_settings = no` works), `get(key)`,
+`set(key, field, value)` (nil removes; an entry left empty goes),
+`forget(path)` (the video's own entry, not its season's).
+
+## `dvp/submemory.lua`: remembered subtitle settings (D72)
+
+`new(data_dir)`, on a Memory in `subtitle-settings.json`; a value at its
+default isn't stored. Pure: `track_spec(track)`;
+`match_track(track_list, spec)` → id or nil (language and forced flag must
+agree; title, hearing-impaired, external, codec and id rank the candidates);
+`clean(field, value)`; `normalize(entry)`. `FIELDS`: range and mpv property
+of `scale`, `pos`, `brightness`, `delay`. Instance: `start(path, item)`
+(on_load), `apply_track()` (on_preloaded), `remember_track()` (after a choice
+in the subtitle menu or a download), `set(field, value)` (menu rows: applies
+and stores), `brightness()`, `set_brightness(level)`, `forget(path)`.
+
+## `dvp/videomemory.lua`: remembered Picture and HDR choices (D73)
+
+`new(data_dir)`, on a Memory in `video-settings.json`: per movie or season,
+fields `enabled`, `mapping`, `peak`, `itm` (`Hdr.CHOICES`) and `picture`
+("fit" / "fill" / "stretch", or `{crop, w, h}`). Pure: `normalize(entry)`,
+`normalize_picture(p)`, `crop_for(picture, w, h)`. Instance:
+`start(path, item)` → the entry or nil, `set(field, value)`, `forget(path)`.
+The HDR rows report through `hdr.on_choice`; `hdr:use(saved)` applies at each
+file (remembered, else session, else config.ini). Picture: `player:set_zoom`
+→ `remember_picture(mode)`; `restore_picture(saved)`, `restore_crop()`.
+
 ## `dvp/videoinfo.lua`: Video info panel (D50)
 
 Pure (unit-tested): `format_fps`, `format_bitrate` (bits/s), `format_size`,
@@ -761,6 +800,7 @@ D28/D29. Pure helpers (all unit-tested):
 | `moviehash_from(size, head, tail)` / `moviehash(path)` | OpenSubtitles hash (64-bit sum done as two 32-bit halves for Lua 5.1). `moviehash` returns `nil, size` for files < 128 KiB. |
 | `parse_name(name)` | `{title, year, season, episode}` from a name without extension (episode markers, years, release junk); title `""` when nothing is left. Also used for DLNA titles. |
 | `parse_release(path)` | The same from a file path, with the show folder for bare `S01E02` names. |
+| `is_season_dir(name)` | Whether a folder name is a season's (`Season 1`, `S01`, `Specials`…). |
 | `languages(slang)` | ISO 639-2 list → OpenSubtitles codes (`pob` → `pt-br`), English if empty. |
 | `query_string(params)` | sorted, lowercase, URL-encoded. |
 | `curl_quote(s)` | quoted string for a curl config file. |
@@ -917,7 +957,7 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   5 s grace.
   `open_main_menu` (live values through `rebuild`): tracks, *Video*
   (`video_summary()`), subtitle size/brightness/position/delay
-  (`set_sub_brightness(level)`, 30–100 %, D58), audio delay, volume,
+  (through `ctx.submemory`, D58, D72), audio delay, volume,
   speed, next video, info, stats, stop, quit.
 - `render()`: blurred top/bottom gradients, title, badges (resolution, HDR
   state, HW, matched Hz), pause icon, progress bar with buffered range and
@@ -951,7 +991,7 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `scripts/steam_shortcut.py add\|artwork\|remove\|repair\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). `repair` (also done by `add`) removes a `--branch=…` from the app's own shortcut (D44); `status` reports a pinned branch. Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `PLEX_WRITE=1` / `JELLYFIN_WRITE=1` allow progress reports to Plex / Jellyfin (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `REMEMBER=no` sets `remember_settings`; `PLEX_WRITE=1` / `JELLYFIN_WRITE=1` allow progress reports to Plex / Jellyfin (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
 | `helper/build.sh [OUTDIR]` | Builds the native helpers: refresh rate (D31), keep awake (D43), Jellyfin discovery (D55). |
 | `scripts/make-source-archive.py OUT [--manifest M]` | GPL corresponding-source archive of a release from the manifest's pinned sources (D36). |

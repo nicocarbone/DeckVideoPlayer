@@ -5,6 +5,27 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.2 (2026-11-05)
+
+### New
+
+- **Subtitle settings are remembered.** The subtitle track you choose (or
+  *Off*), and its size, brightness and position, come back when you play
+  the movie again. For a series they apply to the whole season, so the
+  next episode starts with the same choice, even if its tracks are in
+  another order. The subtitle delay is remembered for each video. Works
+  for local files, Plex, Jellyfin and DLNA, and for downloaded subtitles.
+  If an episode has no track in the language you chose, the player
+  selects subtitles as usual for that episode.
+- **Picture and HDR choices are remembered** the same way, per movie or
+  season: *Picture* (Fit, Crop black bars, Fill, Stretch) and *HDR*, *HDR
+  mapping*, *Peak brightness* and *SDR to HDR* in the Video menu. A crop
+  found in one episode applies to the season's videos of the same size.
+- **New setting, `remember_settings`** in `config.ini` (`[playback]`, on by
+  default): turn it off and all these choices, as well as Look, Grain,
+  Clean-up and Decoding, are forgotten when the app closes. What was
+  already saved is kept for when you turn it on again.
+
 ## v0.8.1 (2026-11-03)
 
 ### Fixed

@@ -2046,3 +2046,104 @@ Reviewed on 2026-11-03; each finding has a status line in `ISSUES.md`.
   frames around metadata jumps; no dropped frames. On the owner's Deck
   OLED (test build): no flicker and smooth playback with Display.
 
+## D72. Subtitle settings remembered per movie or season (v0.8.2)
+
+- **Request (owner):** movies and episodes, maybe seasons, should remember
+  their subtitle settings. Before, `resume.json` kept a track id for local
+  files only (meaningless in another episode), and size, position and
+  brightness lasted for the session.
+- **Scope:** track, size, brightness and position per movie, or per season
+  for episodes, because a viewer usually wants one choice for a whole
+  season and the next episode is where it pays off. The delay stays per
+  video: it depends on the video and subtitle file, so carrying it to the
+  next episode would often be wrong.
+- **What is an episode:** Plex and Jellyfin say so (`kind`, show, season
+  number). Files and DLNA titles: `S01E02` / `1x02` in the name
+  (`OpenSubtitles.parse_name`), with the season number in the key so a show
+  kept in one folder stays apart by season; files in a folder named like a
+  season count too. Anything else is a movie, kept per video: a shared
+  choice for a folder of unrelated films would be wrong, whereas a missed
+  season (`Show - 05.mkv` outside a season folder) only asks for one more
+  choice per episode.
+- **Tracks by description, not id:** ids differ between episodes. A choice
+  is kept as language, title, forced, hearing-impaired, external and codec.
+  Language (`es` = `spa`; a variant such as `es-419` also counts, ranked
+  lower) and the forced flag must agree, so a viewer who asked for full
+  subtitles doesn't get a forced-only track; the rest ranks the candidates.
+  No match: mpv's usual selection for that episode, not a guess. *Off* is a
+  choice too and overrides `[playback] subtitles`, as a choice in the menu
+  should; it also applies regardless of `[playback] resume`, like looks
+  (D69), since it isn't about the position.
+- **Only menu choices are stored,** never mpv's automatic selection, which
+  would otherwise freeze today's guess over a later config change. The
+  track id in `resume.json` stays for files with no remembered choice (it
+  is all that older data has); a remembered choice wins over it.
+- **Selection in `on_preloaded`:** the track list is known there, including
+  external and server subtitles, and mpv hasn't selected or decoded yet, so
+  there is no flash of the wrong subtitle and no second track switch.
+- **The session carry-over stays:** a size chosen on one video still applies
+  to later videos without a remembered value until the app closes (as D58
+  had it), and a value restored from memory doesn't leak to the next video.
+  Otherwise someone watching several films would set the size every time.
+  So every file sets size, position and brightness at load: remembered,
+  else this session's choice, else `mpv.conf`.
+- **Own file, no new UI:** `subtitle-settings.json`, 1000 entries at most,
+  written on each change like `looks.json` (a few presses, not a timer).
+  `remember_settings` turns it off (D73). Deleting a local video forgets its
+  entry; its season's stays.
+- **Tested** in headless gamescope through the real menus with clips whose
+  tracks differ per episode (a forced Spanish track before the full one, an
+  episode without Spanish): next episode, replay, restart, per-movie
+  separation, *Off*. Also mock DLNA episodes, mock OpenSubtitles downloads
+  (chosen again after a restart) and episodes on the owner's Jellyfin test
+  server, read-only. The local flow also in the Flatpak build. Plex shares
+  Jellyfin's item fields but was not run here. The owner tried the test build
+  before release.
+
+## D73. Picture and HDR choices remembered; `remember_settings` (v0.8.2)
+
+- **Request (owner):** video options should be remembered like subtitles,
+  with a config setting to turn such memory off. Before: *Look*, *Grain*,
+  *Clean-up* per folder or show (D69) and *Decoding* per video (D62) were
+  remembered; *Picture* was per file (D42) and the HDR choices lasted for the
+  session (D52, which this changes).
+- **Picture and HDR per movie or season,** with the keys of D72 and the same
+  precedence for HDR: remembered, else this session's choice, else
+  `config.ini`. So a choice still carries on to other videos until the app
+  closes, as D52 had it, and config.ini stays what the app never writes.
+  *Picture* has no session value (it never had): remembered, else `mpv.conf`.
+- **Crop black bars stores the rectangle, not the mode.** Detecting needs a
+  bright frame (D42), and a video's start is often dark, so detecting again
+  at each start would fail or find too little. The rectangle is kept with
+  the video's size (`demux-w`/`demux-h`, known before decoding) and applied
+  to videos of that size, so the rest of a season follows without a press.
+  Another size means another master: Fit. Accepted risk: an episode of the
+  same size with different bars gets the first one's crop and can lose some
+  picture; the row shows *Crop black bars*, and changing it updates the
+  season. "No bars found" shows as Fit and stores nothing.
+- **Not changed:** Looks keep their wider scope (D69): an old show or a
+  folder of old tapes wants one look, and existing `looks.json` choices keep
+  working. Decoding stays per video, since it depends on the file's codec
+  and bitrate. *Match refresh rate* isn't remembered: it depends on the
+  screen, not the video. An HDR choice is not per screen either: *App* or
+  *SDR to HDR* chosen on a TV also applies on the Deck's own OLED panel,
+  though not on an SDR screen, where D52's check drops them.
+- **`[playback] remember_settings`** (default yes) covers all such memory:
+  subtitles, Picture, HDR, Looks and Decoding. No data folder makes the stores
+  session-only (`dvp/memory.lua`), so "no" is one condition in `main.lua`,
+  plus Decoding and the old per-file track ids in `resume.json`, whose restore
+  now needs both `resume` and this setting. Saved files aren't read, written
+  or deleted, so turning it on again brings them back. Positions and watched
+  marks stay under `resume`; they are progress, not choices.
+- **Shared store:** `dvp/memory.lua`, taken out of `dvp/submemory.lua` so
+  video choices don't copy it. Separate files for subtitles and video (they
+  have separate normalizers). Everything was unreleased when this was done.
+- **Tested** in headless gamescope with an HDR output and the Deck OLED
+  profile, through the real menus: crop across episodes of equal and different
+  size, Fill per movie, SDR to HDR per season, HDR off for one video without
+  leaking to the next, a restart, and `REMEMBER=no` (saved values unused,
+  saved files byte-identical, no `looks.json` written, values back on the next
+  run with memory on). Fill across episodes on mock DLNA too. The same local
+  runs gave the same results in the Flatpak build. Picture and HDR were not run
+  here on Plex or Jellyfin (same keys as subtitles, which ran on Jellyfin). The
+  owner tried the test build before release.

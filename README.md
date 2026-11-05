@@ -39,6 +39,9 @@ library artwork).
   playback info panel.
 - **Resume playback** per file, watched markers, recently played list,
   auto-play next video in the folder.
+- **Your choices remembered** per movie or season: subtitle track, size,
+  brightness and position (delay per video), Picture and HDR choices. Can
+  be turned off in `config.ini`.
 - **Headphone surround**: 5.1/7.1 soundtracks as 3D sound on headphones
   (toggle in the audio menu).
 - **About** panel (library and playback menus) with version, build,
@@ -301,6 +304,8 @@ helper/                                  dvp-gamescope-refresh (gamescope_contro
     dvp/config.lua  config.ini parser       dvp/input.lua   gamepad/keyboard → actions
     dvp/surround.lua headphone surround     dvp/opensubtitles.lua  OpenSubtitles API client
     dvp/subdownload.lua subtitle download menu + storage
+    dvp/memory.lua      choices per movie or season: storage and keys
+    dvp/submemory.lua   ...subtitles        dvp/videomemory.lua  ...Picture, HDR
 app/share/deckvideoplayer/hrtf/          HRTF data for headphone surround
 packaging/flatpak/    Flatpak manifest, .desktop, metainfo
 packaging/steam/      Steam library artwork (SVG sources + PNG)

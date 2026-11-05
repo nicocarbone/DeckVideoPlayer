@@ -148,6 +148,10 @@ paused.
 v0.8.1 (released 2026-11-03): HDR10+ phone videos no longer flicker with
 the Display HDR mapping (D71).
 
+v0.8.2 (released 2026-11-05): subtitle track, size, brightness and position remembered per movie
+or season, delay per video (D72); Picture and HDR choices too, and
+`remember_settings` to turn all such memory off (D73).
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for
