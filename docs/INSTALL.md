@@ -123,7 +123,7 @@ See the controls table in the [README](../README.md#controls). Notes:
   as in XviD/DivX AVI files, and MPEG-2): the row then says *Software
   (GPU can't)*. That is normal, and cheap for SD video.
 - **Picture** (Fit / Crop black bars / Fill / Stretch) in the Video menu
-  applies to the current video only; the next one starts with your normal
+  is remembered for the movie or season; other videos start with your normal
   setting. **Crop black bars** is for bars that are part of the video file
   (a 4:3 show stored as 16:9, a widescreen film with bars above and below):
   Fit and Fill treat them as picture. It looks at the current frame, so
