@@ -5,6 +5,33 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.4 (2026-11-14)
+
+### New
+
+- **TV speakers** (audio menu, Y): for films with 5.1 or 7.1 sound played on
+  a TV's own speakers or other stereo speakers. Dialogue comes out 3 dB
+  louder and music and effects 3 dB quieter than in the usual stereo mix,
+  so you don't have to turn the volume up for voices and down for
+  explosions. Stereo videos are not changed. It can't be on together with
+  *Headphone surround*: switching one on switches the other off. *Night
+  mode* works with it. Leave it off with an AV receiver or a surround
+  soundbar. `tv_speakers = yes` in `config.ini` starts with it on.
+
+### Fixed
+
+- **DLNA folders showing "No videos here"** with some servers (reported with
+  minidlna). A server with more than one network address can list its videos
+  under a different address than the one the app found it at, and the app
+  left those videos out. Any address on your home network is now accepted;
+  addresses outside it still aren't. If a folder's videos still can't be
+  played, it now says *No playable videos here* and why, and the log names
+  each one.
+- **A crash while quitting** after a menu had been open during playback.
+  It happened as the app closed, so it was mostly invisible, but it could
+  leave a crash report behind. The first start after updating can take about a
+  second longer while the app indexes the system's fonts for itself.
+
 ## v0.8.3 (2026-11-14)
 
 ### Changed

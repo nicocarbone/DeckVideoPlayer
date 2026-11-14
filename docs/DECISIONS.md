@@ -2170,3 +2170,172 @@ Reviewed on 2026-11-03; each finding has a status line in `ISSUES.md`.
   4 of 20 on 25.08, alternating under the same load. The log shows
   `VK_ERROR_OUT_OF_DEVICE_MEMORY` from libplacebo before the crash. Not changed.
 - **Before release** the owner tried the test build and found no problems.
+
+## D75. TV speakers: a stereo mix of 5.1/7.1 with clearer dialogue
+
+- **Decision:** *TV speakers* in the audio menu (`tv_speakers` in
+  `config.ini`, off by default): 5.1/7.1 audio is mixed to stereo by the app
+  with an FFmpeg `pan` filter, centre channel (dialogue) at full level into
+  each side, fronts at −3 dB, surrounds at −6 dB, LFE at −9 dB, then a
+  limiter at −1 dBFS (`dvp/tvmix.lua`).
+- **Why not virtual surround, as on headphones:** with speakers both ears
+  hear both speakers, which undoes an HRTF. Getting it back needs crosstalk
+  cancellation, which depends on where the viewer sits and on the speaker
+  spacing (narrow on a TV), and fights the TV's own processing. The common
+  problem on TV speakers is quieter dialogue than effects, which a mix can fix
+  reliably.
+- **Levels**, against the usual downmix (fronts 0 dB, centre and surrounds
+  −3 dB, LFE −6 dB: PipeWire's defaults and ITU-R BS.775), measured with
+  pink noise in a 5.1(side) file, through mpv with the app's own filter
+  string (EBU R128 integrated loudness): dialogue alone +3.0 dB, fronts alone
+  −3.0 dB, surrounds alone −3.0 dB, LFE alone −3.0 dB, all channels at once
+  −0.6 dB. So voices stand 6 dB clearer of the rest and switching it on
+  doesn't change the loudness of a busy scene. Peaks are lower than in the
+  usual downmix (coefficients sum to 2.56 per side instead of 2.91); the
+  limiter catches what is left, as after headphone surround.
+- **`pan`, not `aresample`'s `clev`/`slev`:** swresample also handles any
+  layout, but scales the LFE level differently and can renormalise the
+  matrix; `pan` states every coefficient. It takes channel names in any
+  order, so the module only needs the layout's speaker names (mpv's standard
+  layout table, or the `fl-fr-…` form).
+- **Only audio with a centre channel** (5.0 and up): without one there is no
+  dialogue channel to lift, so quad and 2.1 stay with the usual downmix.
+  Stereo and mono are never touched. Unknown speakers (`na`) leave the
+  filter out.
+- **The user switches it on**, as with headphone surround (D27): mpv sends
+  5.1 to PipeWire as 5.1 (`audio-out-params` shows 5.1 even on a stereo
+  sink) and PipeWire downmixes, so the app can't see the output's channels
+  from mpv. With a receiver or a surround soundbar it should stay off.
+- **Exclusive with headphone surround:** both turn 5.1 into stereo, so
+  switching one on switches the other off (toast says so); if
+  `config.ini` has both, headphone surround wins with a log warning. Night
+  mode stays independent: it compresses the source channels first (`af
+  pre`), then this mix.
+- **Automatic choice (headphones or not): later.** `pactl -f json` works in
+  the sandbox (runtime tool, PulseAudio socket) and reports the default
+  sink's channels, active port type and form factor, but what a Deck reports
+  for its jack, Bluetooth and HDMI must be logged on a Deck first, and
+  noticing a change mid-film needs an event source (mpv's `audio-device-list`
+  doesn't change when only the port does) rather than polling, which the
+  battery rule forbids.
+- **Tested** in headless gamescope (system mpv 0.41, dev mode): filter in
+  `af` with 5.1(side) and an unlabelled 6-channel AAC track (5.1),
+  `audio-out-params` stereo, info panel `· TV speakers`; stereo and mono
+  tracks unfiltered; switching tracks adds and removes it; switching with
+  headphone surround and night mode; both on in `config.ini`. 1280×800 and
+  3840×2160 menus. The owner tried the test build before release. The
+  same checks passed in
+  the Flatpak build (isolated install, 26.08). There, mpv crashed while
+  quitting in runs where a menu had been opened, with or without this mix;
+  v0.8.2 and v0.8.3 did the same. Fixed in D77.
+
+## D76. DLNA videos on another home-network address
+
+- **Problem (user report, v0.8.2, minidlna 1.3.3):** folders of a found
+  server listed, but every folder said *No videos here*; the same server
+  worked in Kodi.
+- **Cause found:** D66 used a video only if its URL was on the very host the
+  server was found at. minidlna 1.3.3 writes video URLs with one of its own
+  interface addresses, chosen by the request's `Host` header (prefix match)
+  or else by the client's subnet (`upnphttp.c`, `minissdp.c`). Reached at an
+  address it doesn't list, it answers with another, and the app dropped every
+  video without a word. Reproduced here with a real minidlna 1.3.3 (Ubuntu
+  package) on loopback, reached as `127.0.0.2`: URLs come back on
+  `127.0.0.1`. Servers with several addresses (wired and Wi-Fi, a NAS's or
+  router's bridges) are the likely real-world case. Not confirmed on the
+  reporter's network.
+- **Decision:** a video URL on any private IPv4 address is accepted
+  (`lan_host`); the server's own host is still preferred when it offers both.
+  Internet addresses and names stay refused, so a server (or anyone
+  answering on the LAN) still can't send playback outside the home network.
+  This widens D66 a little: a LAN device could point the app at another LAN
+  host's URL, which it could already do by naming its own.
+- **Visible instead of silent:** `pick_res` returns why nothing fitted
+  (no address, not HTTP, not a video type, address outside the home
+  network); the log has a `dlna: skipped` line per video (with each `res` at
+  verbose level, and a line per Browse page with counts), and a folder whose
+  only videos were skipped says *No playable videos here* with the count and
+  the first reason.
+- **Tested:** unit tests (another LAN host used when it's the only one,
+  own host preferred, internet address and name refused, each reason); the
+  app against minidlna 1.3.3 on `127.0.0.1` (all formats listed and played,
+  covers, subtitles, thumbnails) and on `127.0.0.2` (message and log lines,
+  loopback being outside the home network).
+
+## D77. Flatpak fonts: no font caches from the host
+
+- **Problem:** in the Flatpak, mpv often crashed while quitting (exit status
+  139, once `munmap_chunk(): invalid pointer`) after a menu had been open
+  during playback. Found while testing v0.8.4; v0.8.2 (runtime 25.08) and
+  v0.8.3 did the same, with or without any audio filter.
+- **Cause, narrowed down:** gdb (SDK, `--devel`) shows the script thread
+  `lua/deckplayer` in `ass_renderer_done` → `FcConfigDestroy` →
+  `FcFontSetDestroy` → `FcPatternDestroy`, with every other thread idle: an
+  OSD overlay's libass renderer freeing its fontconfig setup at exit (mpv
+  gives each overlay its own renderer and fontconfig configuration). Not
+  libass's version (0.17.4 built for the test crashed 6/6 like 0.17.5), not
+  fontconfig's (2.16 in 25.08, 2.17 in 26.08), not the system mpv on the
+  host (no crash). What only the Flatpak has: the runtime's
+  `50-flatpak.conf` reads the host's font caches (`/run/host/fonts-cache`,
+  `user-fonts-cache`) through `remap-dir`; the freed patterns are in those
+  mapped files. With the same fonts and rules but caches built inside the
+  sandbox: 0/14 crashes (6 + 8 runs, against 4/4 and 6/6 before).
+- **Decision:** inside the Flatpak the launcher writes
+  `$XDG_CACHE_HOME/deckvideoplayer/fonts.conf` at each start and sets
+  `FONTCONFIG_FILE`: the runtime's `fonts.conf` folders and aliases, every
+  `conf.d` file except `50-flatpak.conf`, and that file's folders and cache
+  folders without the host's caches and `remap-dir`. Generated, not shipped,
+  so a runtime that renames or adds rule files is followed. The fontconfig
+  cache for the host's fonts is then built once in the app's cache folder:
+  0.7 s for 3460 fonts (966 MB) on the development PC, 17 ms on later starts;
+  a font change on the host rebuilds only that folder's cache.
+  `DVP_HOST_FONT_CACHE=1` restores the runtime's setup (for comparisons).
+- **Rejected:** `osd-font-provider=none` with Inter from `osd-fonts-dir`
+  (also stopped the crash, and drawings needed `osd-font="Inter"`): titles
+  in Hebrew, Arabic, Chinese, Japanese, Korean and emoji became empty
+  boxes, as only Inter's scripts are left. Keeping overlays instead of
+  removing them when hidden: still 6/6 crashes.
+- **Tested** with the launcher in a copy of the 0.8.4 Flatpak: 0/8 crashes
+  in the menu-then-quit sequence; library titles in nine scripts render as
+  before (screenshots compared); subtitles with Latin and Japanese lines;
+  the generated file and cache land in the app's own cache folder.
+
+## D78. Eleventh audit (ISSUES.md Part XI, v0.8.4)
+
+Gemini's review of the v0.8.4 changes (D75–D77). Each finding was checked
+against the code; the Status lines in ISSUES.md give the outcome.
+
+- **22.2 audio (XI 1.1, solved):** FFmpeg's `pan` reads channel names as
+  letters only, so the TV mix's `LFE2` term made the whole graph a syntax
+  error, and the failure turned *TV speakers* off for the rest of the
+  session. The second LFE is left out (same bass as the first); a test runs
+  every generated graph's names through the letters-only rule, and all 27
+  graphs were run through FFmpeg. Both TV speakers and headphone surround
+  now remember a layout FFmpeg refuses (`failed`) and play it with the usual
+  downmix, staying on for other tracks. Only a refusal before the filter has
+  ever worked, on a layout of at most 8 channels, still means the filter is
+  missing from the build and hides the option, as before. A second way to
+  fail, found while checking: FFmpeg 9's sofalizer refuses 22.2 only when
+  configuring, after `af add` succeeded; mpv then disables the filter itself
+  (`Disabling filter <label> because it has failed`, error level) while
+  `af` still lists it as enabled, and the app kept reporting headphone
+  surround. main.lua now subscribes to error-level messages (rare, so no
+  cost) and passes that line to the module (`filter_failed()`), which
+  remembers the layout and removes the filter. Checked in the Flatpak with a
+  22.2 + 5.1 test file: 22.2 plays with the usual downmix, 5.1 rendered,
+  22.2 not retried.
+- **Info panel after a track switch while paused (XI 1.2, solved):**
+  observers on `af` and `audio-out-params/channels` redraw it when open.
+- **DLNA (XI 2.1–2.4):** `protocolInfo`/MIME matched case-insensitively;
+  an empty URL says so, an unreadable one gets a fixed label instead of the
+  server's text; IPv4 octets checked to 255; the folder message shows the
+  most common reason (`main_reason`). IPv6 URLs declined until a report:
+  discovery is IPv4 and every server seen lists IPv4 URLs.
+- **Generated fonts.conf (XI 3.1, partly):** now in the runtime's order
+  (`50-flatpak.conf`'s replacement where that file stands, the runtime's
+  cache folders after `conf.d`), with `/usr/local/share/fonts` and
+  `~/.fontconfig` restored, and replaced only when its content changes.
+  Checked in the sandbox: no parse warnings, `Inter` resolves to the bundled
+  file, CJK fallback still found, file untouched on a second start.
+  Pre-indexing the two bundled font files at build time declined.
+- **CHANGELOG date (XI 3.2):** set when tagging, as for every release.

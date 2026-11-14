@@ -77,6 +77,52 @@ if [ -f /.flatpak-info ] || "$MPV" --list-options 2>/dev/null | grep -q -- '--in
     set -- --input-gamepad=yes "$@"
 fi
 
+# Fonts in the Flatpak (D77): the runtime's fontconfig setup, minus the font
+# caches mapped in from the host (50-flatpak.conf's /run/host/*-cache and
+# remap-dir). With those, mpv crashed while quitting once a menu had been
+# open: freeing a libass renderer's fontconfig setup freed memory inside a
+# mapped host cache. The same fonts and rules are used; their caches are
+# built once in the app's own cache folder. DVP_HOST_FONT_CACHE=1 skips this.
+fc_runtime=/etc/fonts/conf.d
+if [ -f /.flatpak-info ] && [ -f "$fc_runtime/50-flatpak.conf" ] && [ "${DVP_HOST_FONT_CACHE:-0}" != 1 ]; then
+    fc_dir="${XDG_CACHE_HOME:-$HOME/.cache}/deckvideoplayer"
+    fc_file="$fc_dir/fonts.conf"
+    # In the order of the runtime's fonts.conf: folders, aliases, conf.d (with
+    # 50-flatpak.conf replaced where it stands), then its cache folders.
+    if mkdir -p "$fc_dir" && {
+        printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">' \
+            '<!-- Written by the Deck Video Player launcher (D77). -->' '<fontconfig>' \
+            '  <dir>/usr/share/fonts</dir>' '  <dir>/usr/local/share/fonts</dir>' \
+            '  <dir prefix="xdg">fonts</dir>' '  <dir>~/.fonts</dir>'
+        for pair in mono:monospace "sans serif:sans-serif" sans:sans-serif "system ui:system-ui"; do
+            printf '  <match target="pattern"><test qual="any" name="family"><string>%s</string></test><edit name="family" mode="assign" binding="same"><string>%s</string></edit></match>\n' \
+                "${pair%%:*}" "${pair#*:}"
+        done
+        for f in "$fc_runtime"/*.conf; do
+            if [ "$f" = "$fc_runtime/50-flatpak.conf" ]; then
+                # 50-flatpak.conf without the host's caches and remap-dir.
+                printf '%s\n' '  <cachedir>/usr/lib/fontconfig/cache</cachedir>' '  <dir>/app/share/fonts</dir>' \
+                    '  <cachedir>/app/cache/fontconfig</cachedir>' \
+                    '  <include ignore_missing="yes">/app/etc/fonts/local.conf</include>' \
+                    '  <dir>/run/host/fonts</dir>' '  <dir>/run/host/local-fonts</dir>' \
+                    '  <dir>/run/host/user-fonts</dir>' '  <cachedir prefix="xdg">fontconfig</cachedir>'
+            else
+                printf '  <include ignore_missing="yes">%s</include>\n' "$f"
+            fi
+        done
+        printf '%s\n' '  <cachedir>/usr/lib/fontconfig/cache</cachedir>' '  <cachedir prefix="xdg">fontconfig</cachedir>' \
+            '  <cachedir>~/.fontconfig</cachedir>' '  <config><rescan><int>30</int></rescan></config>' '</fontconfig>'
+    } > "$fc_file.tmp"; then
+        # Replaced only when it changed (a runtime update).
+        if [ -f "$fc_file" ] && [ "$(cat "$fc_file")" = "$(cat "$fc_file.tmp")" ]; then
+            rm -f "$fc_file.tmp"
+        else
+            mv "$fc_file.tmp" "$fc_file"
+        fi
+        export FONTCONFIG_FILE="$fc_file"
+    fi
+fi
+
 # Optional user overrides for mpv itself.
 if [ -f "$CONFIG_DIR/mpv.conf" ]; then
     set -- "$@" --include="$CONFIG_DIR/mpv.conf"

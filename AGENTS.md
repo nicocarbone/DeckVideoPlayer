@@ -25,6 +25,7 @@ non-trivial.
 | Plex / Jellyfin behind one interface | `…/dvp/servers.lua` (router used by browser, main, player, subtitles, video info) |
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
+| TV speaker mix (5.1/7.1 to stereo, clearer dialogue) | `…/dvp/tvmix.lua` (D75), rows in `player:audio_items()` |
 | About panel, version, build info | `…/dvp/about.lua`, `…/dvp/version.lua`, `scripts/build-info.sh` |
 | HDR choices (Video menu) | `…/dvp/hdr.lua` (D52), rows in `player:hdr_items()` |
 | Video info panel (library) | `…/dvp/videoinfo.lua` (ffprobe / Plex / Jellyfin metadata, D50) |
@@ -71,7 +72,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-14, v0.8.3)
+## Current state (2026-11-14, v0.8.4)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -196,10 +197,20 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   unchanged. Regression-tested in headless gamescope on an isolated Flatpak
   install (upgrade from 0.8.2 through the installer included); the owner
   tried the test build before release.
+- v0.8.4 (2026-11-14): *TV speakers* in the audio menu
+  (`dvp/tvmix.lua`, D75), exclusive with headphone surround; tested in
+  headless gamescope (`TVMIX=1`) and the Flatpak, and the owner tried the
+  test build before release (TV listening: checklist 17). DLNA videos
+  on another LAN address of the server accepted, skipped ones explained (D76;
+  tested against a real minidlna 1.3.3 run from the Ubuntu package, not
+  committed). Flatpak crash at quit fixed in the launcher (D77: own
+  fontconfig setup without the host's mapped font caches). Eleventh audit
+  (ISSUES.md Part XI) reviewed in D78.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
-  Flathub publication floating.
+  v0.9.0: mpv 0.42 once 0.42.1 exists, first FlatPark version. Flathub
+  publication floating.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

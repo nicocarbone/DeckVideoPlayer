@@ -44,6 +44,8 @@ library artwork).
   be turned off in `config.ini`.
 - **Headphone surround**: 5.1/7.1 soundtracks as 3D sound on headphones
   (toggle in the audio menu).
+- **TV speakers**: 5.1/7.1 soundtracks mixed to stereo with clearer
+  dialogue, for a TV's own speakers (toggle in the audio menu).
 - **About** panel (library and playback menus) with version, build,
   licence and credits.
 - **Plex**: sign in with a code, browse your Plex servers next to your

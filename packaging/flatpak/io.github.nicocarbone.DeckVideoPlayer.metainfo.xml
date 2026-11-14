@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.8.4" date="2026-11-14">
+      <description>
+        <p>New TV speakers option in the audio menu: 5.1 and 7.1 soundtracks mixed to stereo with clearer dialogue. Fixes DLNA folders showing no videos with some servers.</p>
+      </description>
+    </release>
     <release version="0.8.3" date="2026-11-14">
       <description>
         <p>Updated to the Freedesktop 26.08 runtime. No changes to features.</p>

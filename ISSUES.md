@@ -1,11 +1,159 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-11-03, v0.8.0 work):** every finding in Parts I–X was checked
+**Status review (2026-11-14, v0.8.4 work):** every finding in Parts I–XI was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
 reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59, IX: D68, X: D70).
+VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78).
+
+---
+
+# Part XI — v0.8.4 Audit: TV Speakers Mix, DLNA Host Handling & Flatpak Fontconfig (2026-11-14)
+
+All unit tests in `tests/run.sh` pass, and the v0.8.4 changes (`D75`–`D77`) were verified against FFmpeg `n9.0.1` (`org.freedesktop.Platform//26.08`), live `mpv`, and `dvp.dlna`:
+* **TV speakers stereo mix (`dvp/tvmix.lua`, D75):** 31 of the 32 channel layouts in `TvMix.LAYOUTS` generate valid FFmpeg `pan=stereo|...,alimiter` graphs in FFmpeg `n9.0.1`, `dvp-night` (`af pre`) stays ordered ahead of `dvp-tvmix` (`af add`), and headphone surround / TV speakers toggle mutually exclusively.
+* **DLNA LAN-host acceptance (`dvp/dlna.lua`, D76):** cross-subnet private IPv4 `<res>` URLs are accepted while the server's own host stays preferred, internet addresses stay rejected, and `entries.skipped` survives `library.sort_entries` in-place sorting.
+* **Flatpak fontconfig (`app/bin/deckvideoplayer`, D77):** writing a host-cache-free `fonts.conf` in `org.freedesktop.Platform//26.08` resolves `Inter` to `/app/share/fonts/inter/Inter-Regular.ttf` (instead of falling back to `/run/host/fonts/woff/ebgaramond/EBGaramond08-Italic.woff`), and rewriting `fonts.conf` on start does not invalidate the XDG font cache (~680 ms cold vs ~21 ms warm in tests).
+
+Below are the verified bugs, hardening issues, optimization opportunities, and pre-release bookkeeping found in v0.8.4.
+
+---
+
+## 1. TV Speakers Mix, Headphone Surround & Playback Info (`dvp/tvmix.lua`, `dvp/surround.lua`, `dvp/player.lua`)
+
+### 1.1. `dvp/tvmix.lua` & `dvp/surround.lua`: `22.2` channel layout fails FFmpeg filter creation and permanently locks out the filter for the entire session
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/tvmix.lua` (`M.LAYOUTS["22.2"]` line 55, `SPEAKERS` line 66, `M.graph` lines 92–107, `M:update` lines 139–146)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/surround.lua` (`M:update`)
+* **Problem:**
+  1. `TvMix.LAYOUTS["22.2"]` includes `lfe` and `lfe2`, both mapped to `LFE`, and `TvMix.graph` emits `num(gain) .. "*" .. name:upper()` (`... +0.354*LFE+...+0.354*LFE2+...`). Against FFmpeg `n9.0.1` (`org.freedesktop.Platform//26.08`), **31/32 layouts pass** while **`22.2` fails**: FFmpeg's `pan` filter rejects `LFE2` (`Can not reference in channel 3 twice`; isolated `FC+LFE2` gives `Syntax error near "2"`, and mixing named channels with indices such as `FL+LFE+c18` gives `Can not mix named and numbered channels`, whereas all-indexed `c0..c23` succeeds).
+  2. In `TvMix:update()`, any failure of `mp.commandv("af", "add", M.filter_string(graph))` logs `"TV speaker mix: the pan/alimiter filters are not available"` and executes `self.available, self.enabled = false, false`. When verified live in `mpv` playing a multi-track file (`22.2` -> `5.1(side)`), encountering the `22.2` track permanently disabled **TV speakers** (`available = false`, `enabled = false`) for the subsequent `5.1(side)` track and the rest of the session.
+  3. Sibling bug in `dvp/surround.lua`: FFmpeg `n9.0.1`'s `sofalizer` (with `mit_kemar_normal_pinna_dfeq.sofa`) works on `5.1(side)`, `7.1`, and `octagonal`, but fails on `22.2` (`Couldn't get speaker positions. Input channel configuration not supported.`), triggering the identical `self.available, self.enabled = false, false` session-wide lockout.
+* **Suggested Fix:**
+  * Separate per-layout filter rejection from global `pan`/`alimiter`/`sofalizer` availability: do not set `self.available = false, self.enabled = false` for the rest of the session when `af add` fails on a single track/layout (clear `self.active = false` and optionally ignore that layout for the track instead).
+  * In `dvp/tvmix.lua`, either exclude `22.2` / skip `lfe2` when using named channels (note that switching to positional `c0..c23` indices would assume channel order matches `M.LAYOUTS["22.2"]`, unlike FFmpeg's named channel matching). In `dvp/surround.lua`, reject unsupported layouts such as `22.2` before invoking `sofalizer` (or fall back gracefully without disabling `self.available`).
+
+
+> **Status: Solved** (D78). Confirmed: `pan` reads channel names as letters only, so `LFE2` is a syntax error. The TV mix leaves the second LFE out (the same bass as the first); all 27 generated graphs (every layout with a centre channel) now run in FFmpeg, and a 22.2 track plays with the mix in the app. Both filters no longer give up for the session when FFmpeg refuses one layout: that layout is remembered and plays with the usual downmix, and the option stays on for other tracks. Only a failure before the filter ever worked, on a layout of at most 8 channels, still means the filter is missing from the build and turns the option off, as before. In the Flatpak, sofalizer's refusal of 22.2 doesn't make `af add` fail at all: mpv accepts the filter, then disables it when FFmpeg can't configure it (`Disabling filter dvp-surround because it has failed`), so there was no lockout there, but the app went on reporting headphone surround as active. The app now subscribes to error-level log messages and, on that line for one of its filters, remembers the layout and removes the filter (verified: 22.2 left as it is, 5.1 rendered, 22.2 again not retried).
+
+---
+
+### 1.2. `dvp/player.lua` & `main.lua`: Switching audio tracks while paused leaves *Playback info* (`Audio out` and filter tag) stale
+
+* **Severity:** Low–Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`M.new`, `audio_items` line 391, `info_lines`)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`render` / `render_info` on menu actions, lines 357–359)
+* **Problem:**
+  `Player.new` observes `chapter-list`, `hwdec-current`, `video-target-params/gamma`, and `frame-drop-count` (with `deinterlace-active` observed in `main.lua`), but does not observe `audio-params`, `audio-out-params`, or `af`.
+  When switching audio tracks in `audio_items` (`mp.set_property_number("aid", t.id)`), `main.lua` calls `player:render()` and `player:render_info()` synchronously before `mpv` finishes reconfiguring its audio filter graph. Verified in paused `mpv` switching from `5.1(side)` (`aid=1`) to `stereo` (`aid=3`): immediately after `set_property_number("aid", 3)`, `aid` is `3` while `audio-params/channels` is `nil`, `audio-out-params/channels` still reads `5.1`, and `af` still holds `dvp-tvmix`; the swap to `stereo` and filter removal happen asynchronously ~0.2 s later, leaving *Playback info* stale until another trigger redraws it.
+* **Suggested Fix:**
+  Observe `audio-out-params` (or `audio-params/channels`) and `af` in `Player.new`, calling `self:render_info()` only when the info panel is open (preserving the idle/battery rule).
+
+
+> **Status: Solved** (D78). Confirmed: the 0.5 s refresh doesn't run while paused. `Player.new` now observes `af` and `audio-out-params/channels` and redraws the info panel when it is open (event-driven, no timer).
+
+---
+
+## 2. DLNA LAN Filtering & Skipped-Video Messages (`dvp/dlna.lua`, `dvp/browser.lua`)
+
+### 2.1. `dvp/dlna.lua`: `Dlna.pick_res` matches `http-get:` and `video/` case-sensitively
+
+* **Severity:** Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`pick_res`, lines 260–268)
+* **Problem:**
+  `Dlna.pick_res` checks `proto:match("^http%-get:")` and `mime:match("^video/")` (plus `!mime:match("^text/")` and `!mime:match("^image/")`) without lowercasing, unlike `Dlna.download_file` (lines 344–345), which already uses `mime:lower()`, and `Dlna.safe_id`, which accepts mixed-case `UUID:`.
+  Verified with `dvp.dlna`: `pick_res({{url = "http://192.168.1.50:8200/v.mp4", protocol = "http-get:*:VIDEO/MP4:*"}}, "192.168.1.50")` rejects the video and returns `nil, "sent as VIDEO/MP4, not as video"`.
+* **Suggested Fix:**
+  Lowercase the parsed protocol/MIME values (`local lproto = proto:lower()`, `local lmime = mime:lower()`) when matching prefixes while preserving the original `mime` for diagnostics if desired.
+
+
+> **Status: Solved** (D78). `protocolInfo` and the MIME type are lowercased before matching, including `DLNA.ORG_CI`.
+
+---
+
+### 2.2. `dvp/dlna.lua`: Empty `<res>` URLs produce `"address outside the home network ()"`, and failed `split_url` falls back to printing raw `r.url` in the UI
+
+* **Severity:** Low–Medium (Bug / Hardening)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`pick_res`, lines 257–271) and `dvp/browser.lua` (`render` skipped empty state, lines 1306–1307)
+* **Problem:**
+  1. `pick_res` initializes `why = "the server gives no address"`, yet for an empty `<res protocolInfo="http-get:*:video/mp4:*"></res>`, `http_get` and `mime` pass, `M.lan_host(nil, host)` fails, and `why` is overwritten with `"address outside the home network (" .. tostring(rhost or r.url) .. ")"` — verified to return `"address outside the home network ()"` instead of `"the server gives no address"`.
+  2. When `M.split_url(r.url)` returns `nil, nil` (for any non-empty malformed or non-HTTP URL), `rhost or r.url` embeds the unvalidated `r.url` text verbatim into `skipped.why`, which `browser.lua` displays in `"%d %s skipped: %s."`.
+* **Suggested Fix:**
+  Check `(r.url or "") == ""` first (keeping `"the server gives no address"`), and when `rhost == nil`, report a fixed label (or truncated sanitized string) instead of raw `r.url`.
+
+
+> **Status: Solved** (D78). An empty URL reports *the server gives no address*; a URL that isn't a readable http(s) address reports *not a web address* instead of the server's text; host and MIME type in messages are cut to 40 characters.
+
+---
+
+### 2.3. `dvp/dlna.lua`: `private_ipv4` accepts out-of-range IPv4 octets (`> 255`), and `split_url` / `lan_host` reject bracketed IPv6 ULA literals (`[fd00::/8]`)
+
+* **Severity:** Low (Bug / Compatibility)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`private_ipv4` lines 128–133, `lan_host` lines 247–249)
+* **Problem:**
+  1. `private_ipv4` parses `a, b` with `"^(%d+)%.(%d+)%.%d+%.%d+$"` and checks `a == 10`, `a == 192 and b == 168`, `172.16..31`, and `169.254` without bounds-checking all four octets to `0..255`. Verified: `lan_host("192.168.999.1", "192.168.1.50")` returns `true`.
+  2. Verified: `lan_host("fd00::1", "192.168.1.50")` returns `false` and `split_url("http://[fd00::1]:8200/v.mp4")` returns `nil, nil`. While `helper/dvp-discover.c` discovers servers over IPv4 SSDP today, dual-stack DLNA servers can still advertise local ULA (`fc00::/7`) or link-local (`fe80::`) URLs in `<res>`.
+* **Suggested Fix:**
+  Validate all four octets (`0 <= o <= 255`) in `private_ipv4`. Optionally support bracketed IPv6 hosts in `split_url` alongside `fc00::/7` / `fe80::/10` if IPv6 DLNA URLs are ever encountered.
+
+
+> **Status: Partly solved** (D78). All four octets are checked (0–255). IPv6 declined for now: servers are found over IPv4 SSDP and every server tested lists IPv4 URLs; supporting bracketed IPv6 hosts would also need `split_url`, the browse requests and the download path. To revisit on a report.
+
+---
+
+### 2.4. `dvp/dlna.lua`: `entries_from` keeps only the first skipped item's reason in the folder empty-state summary
+
+* **Severity:** Low (Diagnostic UX)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/dlna.lua` (`entries_from`, lines 576–579) and `dvp/browser.lua` (`render`, lines 1306–1307)
+* **Problem:**
+  `skipped.why = skipped.why or why` retains the reason from the first skipped item only, while incrementing `skipped.count` for all subsequent skipped videos (verified: mixed skipped entries produce `count = 2` with only the first item's reason). A single malformed promo/placeholder item at the top of a folder masks the reason all remaining videos were skipped in `"%d %s skipped: %s."`.
+* **Suggested Fix:**
+  Track counts per reason and display the dominant reason (or include distinct reasons if few) when all videos are skipped.
+
+
+> **Status: Solved** (D78). Reasons are counted; the message shows the most common one (`main_reason`, ties alphabetical for a stable message).
+
+---
+
+## 3. Flatpak Fontconfig Launcher & Pre-Release Bookkeeping (`app/bin/deckvideoplayer`, `CHANGELOG.md`)
+
+### 3.1. `app/bin/deckvideoplayer`: `conf.d` evaluation order and per-launch `fonts.conf` rewrite
+
+* **Severity:** Low (Robustness / Optimization)
+* **Location:** `app/bin/deckvideoplayer` (lines 86–112) and `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml`
+* **Problem & Verified Behavior:**
+  1. In `org.freedesktop.Platform//26.08`, `app/bin/deckvideoplayer` inserts all `/etc/fonts/conf.d/*.conf` files (except `50-flatpak.conf`) **before** `<dir>/app/share/fonts</dir>`, `/app/etc/fonts/local.conf`, `/run/host/*-fonts`, and `<cachedir prefix="xdg">fontconfig</cachedir>` (whereas standard `/etc/fonts/fonts.conf` lists directories and cache paths around `conf.d` so `50-user.conf` / `51-local.conf` apply after the base `<dir>` entries). Also, `/usr/local/share/fonts` and `~/.fontconfig` from `/etc/fonts/fonts.conf` are dropped.
+  2. `deckvideoplayer` rewrites `$XDG_CACHE_HOME/deckvideoplayer/fonts.conf` on every startup (`mv "$fc_file.tmp" "$fc_file"`), and the Flatpak image has no prebuilt `/app/cache/fontconfig` for the bundled `/app/share/fonts/inter` directory. (Testing in 26.08 confirmed that `touch "$fc_file"` keeps warm `fc-match Inter` at ~21 ms vs ~680 ms cold, so rewriting `fonts.conf` does **not** trigger cache rebuilds, making the per-launch rewrite only minor unnecessary I/O.)
+* **Suggested Fix:**
+  * Preserve `/etc/fonts/fonts.conf` ordering (base `<dir>`s and aliases before `conf.d/*.conf`, with `50-flatpak.conf`'s safe host `<dir>`/`<cachedir>` entries before user/local overrides).
+  * Only write `$fc_file` when missing or changed, and optionally run `fc-cache` on `/app/share/fonts` into `/app/cache/fontconfig` during the Flatpak build so immutable app fonts ship pre-indexed.
+
+
+> **Status: Partly solved** (D78). The replacement of `50-flatpak.conf` now stands where that file does among the `conf.d` rules, the runtime's cache folders follow `conf.d` as in its `fonts.conf`, `/usr/local/share/fonts` and `~/.fontconfig` are back, and the file is replaced only when its content changes. Pre-indexing `/app/share/fonts` at build time declined: two font files, indexed in a few milliseconds once.
+
+---
+
+### 3.2. `CHANGELOG.md`: Heading still reads `(unreleased)` alongside dated metainfo and bumped version
+
+* **Severity:** Info (Release checklist)
+* **Location:** `CHANGELOG.md` line 8 (`## v0.8.4 (unreleased)`), vs `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/version.lua` (`"0.8.4"`) and `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` line 63 (`date="2026-11-14"`).
+* **Note:** `scripts/release-notes.sh 0.8.4` already extracts the section cleanly; replace `(unreleased)` with the release date when tagging `v0.8.4`.
+
+
+> **Status: Accepted** (release checklist). The date goes in when `v0.8.4` is tagged.
+
+---
+
+## 4. v0.8.4 (Part XI) Summary Checklist
+
+- [x] **Audio DSP (`dvp/tvmix.lua`, `dvp/surround.lua`):** Handle `22.2` cleanly (avoid invalid `LFE2` `pan` graph / unsupported `sofalizer` layout) and do not permanently set `self.available = false` for the rest of the session when `af add` rejects a specific track's layout.
+- [x] **Playback Info (`dvp/player.lua`):** Observe `audio-out-params` (or `audio-params/channels`) and `af` when the info panel is open so switching audio tracks while paused updates `Audio out` and filter tags once `mpv` reconfigures audio.
+- [x] **DLNA Filtering (`dvp/dlna.lua`):** Match `http-get:` and `video/` case-insensitively in `pick_res`; report empty `<res>` URLs as `"the server gives no address"` without leaking raw malformed `r.url` values into the UI; validate all four IPv4 octets (`0–255`) in `private_ipv4`; consider showing the dominant skip reason when all items in a folder are skipped.
+- [x] **Flatpak Launcher & Release (`app/bin/deckvideoplayer`, `CHANGELOG.md`):** Keep base font `<dir>` ordering ahead of `conf.d` rules (avoid rewriting `fonts.conf` when unchanged, optionally pre-cache `/app/share/fonts` into `/app/cache/fontconfig`), and update `CHANGELOG.md` `(unreleased)` when tagging `v0.8.4`.
 
 ---
 

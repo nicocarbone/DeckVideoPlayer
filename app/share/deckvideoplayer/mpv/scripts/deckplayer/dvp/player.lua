@@ -57,6 +57,14 @@ function M.new(ctx)
         if self.overlay_visible then self:render() end
         if self.info_visible then self:render_info() end
     end)
+    -- An audio track switch reconfigures the output and the filters (TV
+    -- speakers, headphone surround) a moment later, also while paused when
+    -- no timer runs: the info panel's Audio out row follows (ISSUES.md XI 1.2).
+    local function audio_changed()
+        if self.active and self.info_visible then self:render_info() end
+    end
+    mp.observe_property("af", "native", audio_changed)
+    mp.observe_property("audio-out-params/channels", "string", audio_changed)
     self.timer = mp.add_periodic_timer(0.5, function() self:tick() end)
     self.timer:kill()
     self.hide_timer = nil
@@ -394,8 +402,10 @@ function M:audio_items()
         }
     end
     if #items == 0 then items[1] = {label = "No audio tracks", disabled = true} end
-    local surround, night = self.ctx.surround, self.ctx.night
-    if surround.available or night.available then items[#items + 1] = {separator = true} end
+    local surround, night, tvmix = self.ctx.surround, self.ctx.night, self.ctx.tvmix
+    if surround.available or night.available or tvmix.available then
+        items[#items + 1] = {separator = true}
+    end
     if night.available then
         items[#items + 1] = {
             label = "Night mode",
@@ -404,6 +414,13 @@ function M:audio_items()
                 self.ctx.toast(night:toggle() and "Night mode on: quieter loud scenes, clearer dialogue"
                                or "Night mode off")
             end,
+        }
+    end
+    if tvmix.available then
+        items[#items + 1] = {
+            label = "TV speakers",
+            value = function() return tvmix.enabled and "On" or "Off" end,
+            adjust = function() self:toggle_tvmix() end,
         }
     end
     if surround.available then
@@ -416,15 +433,40 @@ function M:audio_items()
     return items
 end
 
+-- Headphone surround and the TV speaker mix are exclusive (D75): switching
+-- one on switches the other off first, so their filters never stack.
 function M:toggle_surround()
-    local surround = self.ctx.surround
+    local surround, tvmix = self.ctx.surround, self.ctx.tvmix
+    local was_tv = false
+    if not surround.enabled and tvmix.enabled then
+        tvmix:set(false)
+        was_tv = true
+    end
     if not surround:toggle() then
         self.ctx.toast("Headphone surround off")
     elseif surround.active then
-        self.ctx.toast("Headphone surround on")
+        self.ctx.toast(was_tv and "Headphone surround on, TV speakers off" or "Headphone surround on")
     else
         -- Stereo source: nothing to virtualise, the filter waits for 5.1/7.1.
         self.ctx.toast("Headphone surround on (for 5.1 and 7.1 audio)")
+    end
+end
+
+function M:toggle_tvmix()
+    local surround, tvmix = self.ctx.surround, self.ctx.tvmix
+    local was_hp = false
+    if not tvmix.enabled and surround.enabled then
+        surround:set(false)
+        was_hp = true
+    end
+    if not tvmix:toggle() then
+        self.ctx.toast("TV speakers off")
+    elseif tvmix.active then
+        self.ctx.toast(was_hp and "TV speakers on, headphone surround off"
+                       or "TV speakers on: clearer dialogue")
+    else
+        -- Stereo, or no centre channel: nothing to remix until a 5.1/7.1 track.
+        self.ctx.toast("TV speakers on (for 5.1 and 7.1 audio)")
     end
 end
 
@@ -1040,7 +1082,8 @@ function M:info_lines()
     local ao = mp.get_property("current-ao")
     if ao then
         add("Audio out", ao .. (self.ctx.night.active and " · night mode" or "")
-            .. (self.ctx.surround.active and " · headphone surround" or ""))
+            .. (self.ctx.surround.active and " · headphone surround" or "")
+            .. (self.ctx.tvmix.active and " · TV speakers" or ""))
     end
     for _, l in ipairs(self.ctx.keepawake:info_lines()) do add(l[1], l[2]) end
     -- frame-drop-count is the video output's drops (video behind audio, from

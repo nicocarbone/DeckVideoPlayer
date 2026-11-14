@@ -24,6 +24,7 @@ local Browser = require "dvp.browser"
 local Player = require "dvp.player"
 local Surround = require "dvp.surround"
 local NightMode = require "dvp.nightmode"
+local TvMix = require "dvp.tvmix"
 local Hdr = require "dvp.hdr"
 local KeepAwake = require "dvp.keepawake"
 local SubDownload = require "dvp.subdownload"
@@ -109,6 +110,21 @@ apply_playback_options()
 local app_dir = script_dir and util.dirname(util.dirname(util.dirname(script_dir)))
 local surround = Surround.new(cfg, app_dir and (app_dir .. "/hrtf/mit_kemar_normal_pinna_dfeq.sofa"))
 local night = NightMode.new(cfg)
+local tvmix = TvMix.new(cfg)
+-- Headphone surround and the TV speaker mix both make stereo from 5.1/7.1:
+-- only one at a time (D75), headphones first if config.ini asks for both.
+-- A filter mpv disables after it failed to configure (a layout FFmpeg
+-- refuses at that point, not when added): only errors are subscribed to.
+mp.enable_messages("error")
+mp.register_event("log-message", function(e)
+    local label = tostring(e.text):match("^Disabling filter (%S+) because it has failed")
+    if label == Surround.LABEL then surround:filter_failed()
+    elseif label == TvMix.LABEL then tvmix:filter_failed() end
+end)
+if surround.enabled and tvmix.enabled then
+    msg.warn("config: headphone_surround and tv_speakers are both on; using headphone surround")
+    tvmix:set(false)
+end
 
 local resume = Resume.new(opts.data_dir)
 local keepawake = KeepAwake.new(cfg, opts.data_dir)
@@ -296,7 +312,8 @@ end
 local ctx = {
     cfg = cfg, resume = resume, menu = menu, display = display,
     play = play, stop = stop_playback, quit = quit, quit_dialog = quit_dialog,
-    help = help, toast = toast, dismiss_toast = dismiss_toast, surround = surround, night = night, keepawake = keepawake,
+    help = help, toast = toast, dismiss_toast = dismiss_toast, surround = surround, night = night, tvmix = tvmix,
+    keepawake = keepawake,
     hdr = hdr,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, dlna = dlna, servers = servers,
     finished = function() state.finished_path = state.current_path end,

@@ -1298,6 +1298,14 @@ function M:render()
                 {size = 20, align = 5, color = t.subtext})
             a:text(W / 2, cy + 74, ui.fit_text(self.cfg.path or "config.ini", 20, W - 160),
                 {size = 20, align = 5, color = t.accent})
+        elseif self.entries.skipped then
+            -- A DLNA folder whose videos have no address the app can play
+            -- (dvp/dlna.lua logs each one).
+            local sk = self.entries.skipped
+            a:text(W / 2, cy, "No playable videos here", {size = 30, bold = true, align = 5})
+            local line = string.format("%d %s skipped: %s.", sk.count, sk.count == 1 and "video" or "videos",
+                                       tostring(sk.why))
+            a:text(W / 2, cy + 44, ui.fit_text(line, 20, W - 160), {size = 20, align = 5, color = t.subtext})
         else
             a:text(W / 2, cy, "No videos here", {size = 30, bold = true, align = 5})
             a:text(W / 2, cy + 44, "This folder has no video files or subfolders.",

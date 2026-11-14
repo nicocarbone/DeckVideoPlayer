@@ -618,11 +618,17 @@ ContentDirectory control URL on the description's host),
 `browse_body(id, flag, start, count)`, `parse_browse(xml)` → `{didl,
 returned, total}` or nil + the SOAP fault, `parse_didl(didl)` →
 containers and video items (by class or video MIME type) with `pos`
-(document order), `pick_res(res, host)` (http(s) on the server's host, a
-video type, the original before a converted copy, then the largest),
+(document order), `lan_host(rhost, host)` (the server's host or another
+private IPv4 address, D76), `pick_res(res, host)` → res, or nil and the
+reason (http(s) on the LAN, a video type, matched case-insensitively; the
+server's own host first, then the original before a converted copy, then
+the largest), `main_reason(by)` (the most common skip reason, D78),
 `parse_duration`, `recent_key` / `parse_recent_key` / `recent_ref`
 (`dlna://<id>/<percent-encoded object id>`).
-Instance (`new(data_dir, {resume, clean_names})`, `dlna.json`):
+Instance (`new(data_dir, {resume, clean_names})`, `dlna.json`). `list`
+logs each skipped video with its reason and sets `entries.skipped =
+{count, why}`, which the browser shows when a folder has nothing else.
+
 `servers()`, `server(id)`, `signed_in()` (any added), `sources()`,
 `discover(cb)` (dvp-discover, then each description), `add(info)`,
 `remove(id)`, `connect(id, cb)` (control URL from the saved description;
@@ -749,6 +755,25 @@ Constants: `REPO`, `LICENSE`, `DEVELOPER`, `COPYRIGHT`.
 
 [luaqrcode](https://github.com/speedata/luaqrcode), BSD-3-Clause, unchanged
 (D38). `qrcode(text)` → `ok, matrix` (`matrix[x][y] > 0` = dark).
+
+## `dvp/tvmix.lua`: TV speaker mix (D75)
+
+Gains `FRONT` 0.7071, `CENTER` 1, `SURROUND` 0.5, `LFE` 0.3536 (into each
+stereo side), `LIMITER` (alimiter −1 dBFS). `LAYOUTS`: mpv's standard
+layout names → speaker lists. `speakers(layout)` → speaker names of a
+layout name or a `fl-fr-…` string, nil if any is unknown. `graph(layout)` →
+`pan=stereo|FL=…|FR=…,alimiter…`, or nil for stereo, layouts without `fc`
+and unknown speakers; other centre speakers (`bc`, `tc`, …) go to both sides
+at −3 dB of their gain. `filter_string(graph)` (`@dvp-tvmix:lavfi=…`).
+`new(cfg)` (`available` unless `audio_passthrough`; `enabled` at start with
+`tv_speakers`; one `audio-params` observer, like `dvp/surround.lua`),
+`update()` (adds, replaces or removes the filter with `af add`, so it comes
+after night mode; a layout FFmpeg refuses is remembered in `failed` and
+plays with the usual downmix, D78; `lfe2` is left out of the graph),
+`filter_failed()` (main.lua calls it, as for `dvp/surround.lua`, when mpv
+logs that it disabled the filter after a failed configuration), `set(on)`, `toggle()`; `enabled` / `active` (the layout
+the filter was added for) for the menu and the info panel. `main.lua`
+switches it off when `headphone_surround` is also on.
 
 ## `dvp/nightmode.lua`: night mode (D46)
 
@@ -939,8 +964,10 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   Short seeks are `relative+exact`, long seeks `relative+keyframes`.
   `chapter(dir)`: going back first jumps to the start of the current chapter
   when more than 3 s into it; with no chapters it seeks ±300 s.
-- Menus: `open_audio_menu` (tracks, then the *Headphone surround* toggle
-  when `ctx.surround.available`; `toggle_surround()` toasts the result),
+- Menus: `open_audio_menu` (tracks, then the *Night mode*, *TV speakers* and
+  *Headphone surround* toggles when available; `toggle_surround()` and
+  `toggle_tvmix()` switch the other one off first (D75) and toast the
+  result),
   `open_subtitle_menu` (with "Off", then *Download subtitles…* when
   `ctx.subtitles:available(path)`),
   `open_video_menu` (D52: video tracks when there is more than one,

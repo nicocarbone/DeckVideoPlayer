@@ -152,7 +152,22 @@ v0.8.2 (released 2026-11-05): subtitle track, size, brightness and position reme
 or season, delay per video (D72); Picture and HDR choices too, and
 `remember_settings` to turn all such memory off (D73).
 
-v0.8.3: Freedesktop 26.08 runtime, as a release of its own (D74).
+v0.8.3 (released 2026-11-14): Freedesktop 26.08 runtime, as a release of
+its own (D74).
+
+v0.8.4 (released 2026-11-14): **TV speakers** in the audio menu, a stereo mix
+of 5.1/7.1 with dialogue 3 dB louder and the rest 3 dB quieter than the usual
+downmix, for a TV's own speakers (D75). Tested in headless gamescope and the
+Flatpak; the owner tried the test build (TV listening: checklist 17). Also: DLNA videos listed on
+another home-network address of the server are no longer dropped, and a
+folder whose videos can't be played says why (D76, user report with
+minidlna). And a crash of the Flatpak while quitting after a menu was open,
+there since at least v0.8.2, is fixed (D77).
+
+v0.9.0 (planned): mpv 0.42 and libplacebo 7.387, once mpv 0.42.1 is out,
+with streaming tests for mpv's new libcurl backend (`--curl-enabled=no` as
+the fallback). Meant to be the first version offered through FlatPark (see
+*Publish on Flathub* below).
 
 ## Next, in this order
 
@@ -203,7 +218,12 @@ v0.8.3: Freedesktop 26.08 runtime, as a release of its own (D74).
 
 ## Later (not scheduled)
 
-- **Automatic headphone detection** for surround (PipeWire port type), if
-  it proves reliable through the sandbox.
+- **Automatic headphone detection**: *Auto* for headphone surround and the
+  TV speaker mix, choosing by the output. `pactl` is in the runtime and
+  works through the sandbox's PulseAudio socket; `pactl -f json` gives the
+  default sink's channels, active port type (Headphones, Speaker, HDMI) and
+  form factor (Bluetooth headsets). Open: what a Deck reports for its jack,
+  Bluetooth and a dock's HDMI (to be logged on a Deck first), and how to
+  notice a change mid-film without polling (D75).
 - **Thumbnails / posters** in the browser.
 - **Touchscreen** input.

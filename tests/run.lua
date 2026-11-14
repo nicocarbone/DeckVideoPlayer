@@ -258,6 +258,38 @@ eq("surround 7.1 default speakers", Surround.filter_string("/x/h.sofa", 8, "7.1"
 eq("surround gain 7.1", Surround.gain(8), 18.5)
 eq("surround gain 4.0", Surround.gain(4), 6.5)
 
+-- TV speaker mix (D75) ------------------------------------------------------------
+local TvMix = require "dvp.tvmix"
+local lim = "," .. TvMix.LIMITER
+eq("tvmix 5.1(side)", TvMix.graph("5.1(side)"),
+   "pan=stereo|FL=0.7071*FL+1*FC+0.3536*LFE+0.5*SL|FR=0.7071*FR+1*FC+0.3536*LFE+0.5*SR" .. lim)
+eq("tvmix 5.1 back", TvMix.graph("5.1"),
+   "pan=stereo|FL=0.7071*FL+1*FC+0.3536*LFE+0.5*BL|FR=0.7071*FR+1*FC+0.3536*LFE+0.5*BR" .. lim)
+eq("tvmix 7.1", TvMix.graph("7.1"),
+   "pan=stereo|FL=0.7071*FL+1*FC+0.3536*LFE+0.5*BL+0.5*SL|FR=0.7071*FR+1*FC+0.3536*LFE+0.5*BR+0.5*SR" .. lim)
+-- order-independent: ALSA order gives the same terms in its own order
+check("tvmix 5.1(alsa)", TvMix.graph("5.1(alsa)"):find("pan=stereo|FL=0.7071*FL+0.5*BL+1*FC+0.3536*LFE|", 1, true) == 1)
+-- centre-type channels other than dialogue go to both sides at -3 dB
+check("tvmix back centre", TvMix.graph("6.1"):find("FL=0.7071*FL+1*FC+0.3536*LFE+0.3536*BC+0.5*SL|", 1, true) ~= nil)
+eq("tvmix explicit layout", TvMix.graph("fl-fr-fc"), "pan=stereo|FL=0.7071*FL+1*FC|FR=0.7071*FR+1*FC" .. lim)
+eq("tvmix stereo", TvMix.graph("stereo"), nil)
+eq("tvmix mono", TvMix.graph("mono"), nil)
+eq("tvmix no centre", TvMix.graph("quad"), nil)
+eq("tvmix 2.1", TvMix.graph("2.1"), nil)
+eq("tvmix unknown speaker", TvMix.graph("fl-fr-fc-na"), nil)
+eq("tvmix unknown layout", TvMix.graph("unknown6"), nil)
+eq("tvmix nil", TvMix.graph(nil), nil)
+check("tvmix 22.2", TvMix.graph("22.2") ~= nil)
+-- pan reads names as letters only: no LFE2 term (ISSUES.md XI 1.1)
+check("tvmix 22.2 without LFE2", not TvMix.graph("22.2"):find("LFE2", 1, true)
+    and TvMix.graph("22.2"):find("0.3536*LFE+", 1, true) ~= nil)
+-- every generated graph uses only letter-only channel names
+for name in pairs(TvMix.LAYOUTS) do
+    local g = TvMix.graph(name)
+    if g then check("tvmix names " .. name, not g:match("%*%u+%d")) end
+end
+eq("tvmix filter", TvMix.filter_string("pan=x"), "@dvp-tvmix:lavfi=graph=%5%pan=x")
+
 -- intro / credits markers (D47) --------------------------------------------------
 local Markers = require "dvp.markers"
 local mks = Markers.from_plex({Marker = {
@@ -1339,7 +1371,44 @@ do
     check("res: duration and size", r.duration == 3723.5 and r.size == 9000)
     eq("res: by video mime in a generic item", D.pick_res(videos[2].res, "192.168.1.50").url,
        "http://192.168.1.50:9000/v2.mp4")
-    eq("res: other host only -> none", D.pick_res(videos[3].res, "192.168.1.50"), nil)
+    -- Another home-network address is used when it is the only one (a
+    -- server with several addresses, D76); never one outside the LAN.
+    eq("res: other LAN host only -> used", D.pick_res(videos[3].res, "192.168.1.50").url,
+       "http://192.168.1.66/v3.mp4")
+    local function res1(url, proto)
+        return {{url = url, protocol = proto or "http-get:*:video/mp4:*"}}
+    end
+    local none, why = D.pick_res(res1("http://8.8.8.8/v.mp4"), "192.168.1.50")
+    check("res: internet host refused", none == nil and why:find("address outside the home network (8.8.8.8)", 1, true) ~= nil)
+    none, why = D.pick_res(res1("http://nas.example/v.mp4"), "192.168.1.50")
+    check("res: name refused", none == nil and why:find("outside", 1, true) ~= nil)
+    none, why = D.pick_res({}, "192.168.1.50")
+    check("res: none at all", none == nil and why:find("no address", 1, true) ~= nil)
+    none, why = D.pick_res(res1("rtsp://192.168.1.50/v", "rtsp-rtp-udp:*:video/mp4:*"), "192.168.1.50")
+    check("res: not http", none == nil and why:find("over HTTP", 1, true) ~= nil)
+    none, why = D.pick_res(res1("http://192.168.1.50/v", "http-get:*:application/octet-stream:*"), "192.168.1.50")
+    check("res: other type named", none == nil and why:find("application/octet-stream", 1, true) ~= nil)
+    none, why = D.pick_res({{url = "http://192.168.1.50/c.jpg", protocol = "http-get:*:image/jpeg:*"}}, "192.168.1.50")
+    check("res: cover art alone", none == nil and why:find("no address", 1, true) ~= nil)
+    check("lan host", D.lan_host("10.0.0.2", "192.168.1.50") and D.lan_host("192.168.1.50", "192.168.1.50")
+        and not D.lan_host("1.2.3.4", "192.168.1.50") and not D.lan_host(nil, "192.168.1.50"))
+    -- ISSUES.md XI 2.1–2.4
+    check("lan host: octets checked", not D.lan_host("192.168.999.1", "192.168.1.50")
+        and not D.lan_host("10.0.0.256", "192.168.1.50") and D.lan_host("10.255.255.255", "192.168.1.50"))
+    check("res: protocolInfo case-insensitive",
+        (D.pick_res(res1("http://192.168.1.50/v.mp4", "HTTP-GET:*:VIDEO/MP4:*"), "192.168.1.50") or {}).url
+        == "http://192.168.1.50/v.mp4")
+    local conv = D.pick_res({{url = "http://192.168.1.50/t.mp4", protocol = "http-get:*:video/mp4:DLNA.ORG_CI=1", size = 9},
+                             {url = "http://192.168.1.50/o.mkv", protocol = "http-get:*:video/x-matroska:dlna.org_ci=0", size = 1}},
+                            "192.168.1.50")
+    eq("res: converted copy, any case", conv and conv.url, "http://192.168.1.50/o.mkv")
+    none, why = D.pick_res(res1(""), "192.168.1.50")
+    eq("res: empty address", why, "the server gives no address")
+    none, why = D.pick_res(res1("{\\an8}weird text"), "192.168.1.50")
+    eq("res: unreadable address not shown", why, "not a web address")
+    eq("main reason: most common", D.main_reason({a = 1, ["address outside"] = 5, c = 2}), "address outside")
+    eq("main reason: tie, alphabetical", D.main_reason({b = 2, a = 2}), "a")
+    eq("main reason: none", D.main_reason({}), nil)
     check("didl: empty elements skipped", #videos[1].res == 3 and videos[3].id == "v3")
     eq("didl: date", videos[1].date, 20240501000000)
     check("didl: document order kept", containers[1].pos < videos[1].pos and videos[1].pos < videos[2].pos)

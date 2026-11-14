@@ -9,7 +9,8 @@
 -- address that sent it; descriptions and listings are size-capped and
 -- read by the small XML reader below (no DTDs; only the predefined
 -- entities and numeric references are decoded); a video URL must be
--- http(s) on the server's own host.
+-- http(s) on the home network (the server's address or another private
+-- one, D76).
 --
 -- Same interface as dvp/plex.lua and dvp/jellyfin.lua (dvp/servers.lua),
 -- including download_info for dvp/downloads.lua (v0.7.1): a video's own
@@ -125,10 +126,15 @@ function M.split_url(url)
 end
 
 local function private_ipv4(host)
-    local a, b = tostring(host):match("^(%d+)%.(%d+)%.%d+%.%d+$")
-    a, b = tonumber(a), tonumber(b)
-    return a ~= nil and (a == 10 or (a == 192 and b == 168) or (a == 172 and b >= 16 and b <= 31)
-        or (a == 169 and b == 254))
+    local o = {tostring(host):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")}
+    if #o ~= 4 then return false end
+    for i = 1, 4 do
+        o[i] = tonumber(o[i])
+        if o[i] > 255 then return false end
+    end
+    local a, b = o[1], o[2]
+    return a == 10 or (a == 192 and b == 168) or (a == 172 and b >= 16 and b <= 31)
+        or (a == 169 and b == 254)
 end
 
 -- Pure: answers of `dvp-discover --ssdp` (one per line: sender address,
@@ -238,25 +244,69 @@ local function date_key(s)
     return y and tonumber(y .. mo .. d .. "000000") or nil
 end
 
--- Pure: the <res> of an item to play, or nil: http(s) on `host`, a video
+-- Pure: whether a video URL's host is acceptable for a server at `host`:
+-- the server's own address, or another home-network address. A server
+-- with several addresses (wired and Wi-Fi, a router's or NAS's bridges)
+-- may write its video URLs with another of them than the one that
+-- answered the search (D76). Never an address outside the LAN.
+function M.lan_host(rhost, host)
+    return rhost ~= nil and (rhost == host or private_ipv4(rhost))
+end
+
+-- Pure: the <res> of an item to play, or nil and why not (for the log
+-- and the empty-folder message): http(s) on the LAN (M.lan_host), a video
 -- type; the original before a converted copy (DLNA.ORG_CI=1), then the
 -- largest.
 function M.pick_res(res_list, host)
     local best
+    local why = "the server gives no address"
     for _, r in ipairs(res_list) do
-        local proto = r.protocol or ""
+        -- protocolInfo and MIME types are case-insensitive.
+        local proto = (r.protocol or ""):lower()
         local mime = proto:match("^[^:]*:[^:]*:([^:]*)") or ""
-        local _, rhost = M.split_url(r.url)
+        local url = r.url or ""
+        local _, rhost = M.split_url(url)
         local http_get = proto == "" or proto:match("^http%-get:") ~= nil
-        if rhost and rhost == host and http_get and (mime == "" or mime:match("^video/")) then
-            r.converted = proto:find("DLNA.ORG_CI=1", 1, true) ~= nil
-            if not best or (best.converted and not r.converted)
-                or (best.converted == r.converted and (r.size or 0) > (best.size or 0)) then
+        if not http_get then
+            why = "not offered over HTTP"
+        elseif not (mime == "" or mime:match("^video/")) then
+            -- Subtitles, cover art: not a reason worth reporting if a
+            -- video address follows.
+            if not mime:match("^text/") and not mime:match("^image/") then
+                why = "sent as " .. util.utf8_truncate(mime, 40) .. ", not as video"
+            end
+        elseif url == "" then
+            why = "the server gives no address"
+        elseif not rhost then
+            -- Not shown as it is: the server's text, maybe anything.
+            why = "not a web address"
+        elseif not M.lan_host(rhost, host) then
+            why = "address outside the home network (" .. util.utf8_truncate(rhost, 40) .. ")"
+        else
+            -- Ranked: the server's own host first, then the original
+            -- before a converted copy, then the largest.
+            r.converted = proto:find("dlna.org_ci=1", 1, true) ~= nil
+            r.own_host = rhost == host
+            if not best or (r.own_host and not best.own_host)
+                or (r.own_host == best.own_host and ((best.converted and not r.converted)
+                    or (best.converted == r.converted and (r.size or 0) > (best.size or 0)))) then
                 best = r
             end
         end
     end
-    return best
+    if best then return best end
+    return nil, why
+end
+
+-- Pure: the reason most skipped videos share ({reason = count}), so one odd
+-- item first in a folder doesn't hide why the rest were left out; ties go
+-- to the alphabetically first, for a stable message.
+function M.main_reason(by)
+    local top, top_n
+    for why, n in pairs(by or {}) do
+        if not top or n > top_n or (n == top_n and why < top) then top, top_n = why, n end
+    end
+    return top
 end
 
 -- Pure: a DIDL-Lite document → containers {id, title, parent, count}
@@ -525,8 +575,10 @@ end
 -- Browser entries from one page of a listing, in the server's order.
 -- Titles are often file names ("The.Movie.2024.1080p"): cleaned like
 -- local names when clean_names is on (never an extension cut: they have
--- none, or a dot in the title would look like one).
-function M:entries_from(id, containers, videos)
+-- none, or a dot in the title would look like one). Videos without a
+-- playable address are left out and counted in `skipped` ({count, by =
+-- {reason = count}}), each logged with the reason.
+function M:entries_from(id, containers, videos, skipped)
     local out = {}
     local host = select(2, M.split_url(self.control[id] or ""))
     local function label(title)
@@ -538,8 +590,17 @@ function M:entries_from(id, containers, videos)
                          server = {backend = M.ID, machine = id, key = c.id, kind = "container"}}
     end
     for _, v in ipairs(videos) do
-        local r = M.pick_res(v.res, host)
-        if r then
+        local r, why = M.pick_res(v.res, host)
+        if not r then
+            msg.warn(string.format("dlna: skipped \"%s\": %s", tostring(v.title), why))
+            for _, res in ipairs(v.res) do
+                msg.verbose("dlna:   res " .. tostring(res.protocol) .. " " .. tostring(res.url))
+            end
+            if skipped then
+                skipped.count = skipped.count + 1
+                skipped.by[why] = (skipped.by[why] or 0) + 1
+            end
+        else
             local l = label(v.title)
             -- name: the cleaned title (subtitle search, download file name).
             local item = {backend = M.ID, machine = id, key = v.id, rating_key = v.id, kind = "movie",
@@ -554,20 +615,35 @@ function M:entries_from(id, containers, videos)
 end
 
 -- loc: {machine, key}. cb(entries or nil, err). Pages through the
--- container (at most MAX_ENTRIES entries).
+-- container (at most MAX_ENTRIES entries). `entries.skipped` = {count,
+-- why} when videos were left out (the browser says so when nothing else
+-- is there).
 function M:list(loc, cb)
     local all = {}
+    local skipped = {count = 0, by = {}}
     local function page(start)
         self:browse(loc.machine, loc.key, "BrowseDirectChildren", start, function(p, err)
             if not p then return cb(nil, err) end
             local containers, videos = M.parse_didl(p.didl)
-            for _, e in ipairs(self:entries_from(loc.machine, containers, videos)) do
+            msg.verbose(string.format("dlna: %s from %d: %d returned of %s, %d folders, %d videos",
+                                      tostring(loc.key), start, p.returned, tostring(p.total),
+                                      #containers, #videos))
+            if p.returned > 0 and #containers + #videos == 0 then
+                -- Entries the reader found nothing in: the start of the
+                -- document tells what the server sent.
+                msg.verbose("dlna: DIDL starts: " .. p.didl:sub(1, 600))
+            end
+            for _, e in ipairs(self:entries_from(loc.machine, containers, videos, skipped)) do
                 all[#all + 1] = e
                 if not e.is_dir then self.items[e.path] = e.server end
             end
             local next_start = start + p.returned
             if p.returned > 0 and next_start < (p.total or 0) and next_start < MAX_ENTRIES then
                 return page(next_start)
+            end
+            if skipped.count > 0 then
+                skipped.why = M.main_reason(skipped.by)
+                all.skipped = skipped
             end
             cb(all)
         end)

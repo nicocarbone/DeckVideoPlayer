@@ -232,6 +232,7 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `$XDG_DATA_HOME/deckvideoplayer/jellyfin.json` | Jellyfin: device id, servers (address, user) and their device tokens (mode 600) | `dvp/jellyfin.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/dlna.json` | DLNA servers added (name, description address; nothing secret) | `dvp/dlna.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
+| `$XDG_CACHE_HOME/deckvideoplayer/fonts.conf` (Flatpak only), and fontconfig's caches in `$XDG_CACHE_HOME/fontconfig` | The runtime's fontconfig setup without the host's mapped font caches, rewritten at each start (D77) | launcher |
 | `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
 
 `resume.json` format:
@@ -276,6 +277,10 @@ rename).
   (`lavfi` → FFmpeg `sofalizer`) inserted only while the decoded audio has
   more than two channels. Purely event-driven (one property observer), no
   timers.
+- **TV speakers** (`dvp/tvmix.lua`, D75): the same pattern with a
+  `pan` filter (5.1/7.1 to stereo, dialogue louder) and a limiter, only for
+  layouts with a centre channel. Exclusive with headphone surround; after
+  night mode in the chain.
 - **Online subtitles** (`dvp/opensubtitles.lua` + `dvp/subdownload.lua`,
   D28–D30): network work happens only when the user opens
   *Download subtitles…*. HTTP is an asynchronous curl subprocess, so the UI

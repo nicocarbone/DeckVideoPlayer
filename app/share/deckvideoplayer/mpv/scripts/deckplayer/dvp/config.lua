@@ -38,6 +38,7 @@ local SCHEMA = {
         audio_passthrough  = {default = "", type = "string"},
         hwdec              = {default = "auto", type = "string"},
         headphone_surround = {default = false, type = "bool"},
+        tv_speakers        = {default = false, type = "bool"},
         night_mode       = {default = false, type = "bool"},
         skip_intro       = {default = "ask", type = "enum", values = {"ask", "auto", "off"}},
         skip_credits     = {default = "ask", type = "enum", values = {"ask", "off"}},

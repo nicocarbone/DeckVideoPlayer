@@ -73,6 +73,8 @@ function M.new(cfg, sofa_path)
     self.enabled = pb.headphone_surround and self.available
     self.active = false   -- "<channels> <layout>" the filter was added for, or false
     self.channels, self.layout = nil, nil
+    self.failed = {}      -- "<channels> <layout>" sofalizer refused this session
+    self.worked = false   -- the filter was added at least once
     -- Channel count and layout of the decoder output (before filters), so
     -- inserting the filter doesn't feed back into these observers.
     -- (One observer for both, so the filter isn't added before the layout
@@ -91,6 +93,7 @@ end
 
 function M:update()
     local want = self:wanted() and (self.channels .. " " .. tostring(self.layout))
+    if want and self.failed[want] then want = false end
     if want == self.active then return end
     -- A different layout needs a different gain or speakers: replace the filter.
     if self.active then
@@ -99,23 +102,43 @@ function M:update()
     end
     if want then
         if mp.commandv("af", "add", M.filter_string(self.sofa, self.channels, self.layout)) then
-            self.active = want
+            self.active, self.worked = want, true
             msg.info(string.format("headphone surround on (%d channels, %s)", self.channels,
                                    tostring(self.layout)))
-        else
+        elseif not self.worked and self.channels <= 8 then
             -- e.g. an mpv/FFmpeg build without libmysofa: stop offering it.
             msg.warn("headphone surround: the sofalizer filter is not available")
             self.available, self.enabled = false, false
+        else
+            -- A layout sofalizer has no speaker positions for (22.2): that
+            -- track plays with the usual downmix (ISSUES.md XI 1.1).
+            msg.warn("headphone surround: can't render " .. want .. "; left as it is")
+            self.failed[want] = true
         end
     end
 end
 
+-- mpv disabled the filter after `af add` had succeeded: FFmpeg refused this
+-- layout only when configuring it (sofalizer has no speaker positions for
+-- 22.2). Audio plays on with the usual downmix; the layout is remembered and
+-- the filter removed, so the info panel stops claiming it (D78).
+function M:filter_failed()
+    if not self.active then return end
+    msg.warn("headphone surround: can't process " .. tostring(self.active) .. "; left as it is")
+    self.failed[self.active] = true
+    mp.commandv("af", "remove", "@" .. M.LABEL)
+    self.active = false
+end
+
 -- Returns the new state.
-function M:toggle()
-    if not self.available then return false end
-    self.enabled = not self.enabled
+function M:set(on)
+    self.enabled = on and self.available or false
     self:update()
     return self.enabled
+end
+
+function M:toggle()
+    return self:set(not self.enabled)
 end
 
 return M

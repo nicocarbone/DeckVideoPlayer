@@ -18,6 +18,7 @@
 #   KEEP=1             keep resume data (.dev/headless/data) from the previous run
 #   SURROUND=1         start with headphone_surround = yes
 #   NIGHT=1            start with night_mode = yes
+#   TVMIX=1            start with tv_speakers = yes
 #   AWAKE=yes|no       keep_awake setting (default yes)
 #   XWAYLAND2=1        two Xwayland servers, app on the second one (like
 #                      SteamOS game mode, where Steam has the first)
@@ -88,6 +89,9 @@ if [ "${SURROUND:-0}" = 1 ]; then
 fi
 if [ "${NIGHT:-0}" = 1 ]; then
     sed -i "s|^night_mode = .*|night_mode = yes|" "$CFG/config/config.ini"
+fi
+if [ "${TVMIX:-0}" = 1 ]; then
+    sed -i "s|^tv_speakers = .*|tv_speakers = yes|" "$CFG/config/config.ini"
 fi
 if [ -n "${REMEMBER:-}" ]; then
     sed -i "s|^remember_settings = .*|remember_settings = $REMEMBER|" "$CFG/config/config.ini"

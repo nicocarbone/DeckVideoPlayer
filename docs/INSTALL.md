@@ -153,6 +153,15 @@ See the controls table in the [README](../README.md#controls). Notes:
   Stereo videos are not changed. The info panel shows
   `Audio out: … · headphone surround` while it is working. Turn it off for
   the speakers.
+- **TV speakers** (audio menu, Y): for 5.1 and 7.1 soundtracks played on a
+  TV's own speakers or other stereo speakers. Dialogue comes out 3 dB louder
+  and music and effects 3 dB quieter than in the usual stereo mix, so you
+  don't have to turn the volume up for voices and down for explosions.
+  Stereo videos are not changed. Switching it on turns headphone surround
+  off, and the other way round; night mode works with either. Leave it off
+  with an AV receiver or a surround soundbar that gets all the channels.
+  The info panel shows `Audio out: … · TV speakers`; `tv_speakers = yes`
+  in `config.ini` starts with it on.
 - **Download subtitles** (subtitle menu, X → *Download subtitles…*): lists
   OpenSubtitles results in your `subtitle_languages`; "Exact" marks
   subtitles made for this very file. A downloads and selects one, and it
@@ -534,12 +543,14 @@ Nothing on the NAS changes.
 | Software decoding (`Decoder: Software`) | Some formats have no hardware decoder (e.g. H.264 4:4:4, 10-bit H.264, MPEG-4 ASP). That's expected; it costs more battery. |
 | Folder missing from the library | The path in `config.ini` must exist. The Flatpak can only see `~/Videos`, `~/Downloads`, the microSD card / USB drives (`/run/media`, `/media`) and `/mnt` (since v0.3, so a malicious video can't read the rest of your files). For another folder, run once in Konsole: `flatpak override --user --filesystem=/home/deck/Movies io.github.nicocarbone.DeckVideoPlayer` (your path; add `:ro` at the end of the path to keep the app from downloading to or deleting there). |
 | *Download* fails with "Can't create …" | `download_folder` in `config.ini` must be inside one of the folders above. |
+| DLNA folder says *No playable videos here* | The server lists those videos with an address the app won't use (shown under the message): outside the home network, not over HTTP, or not a video type. The log (see *Need logs* below) has a `dlna: skipped` line for each. Please report it with that line. |
 | No *Download* entry | Only on Plex, Jellyfin and DLNA videos (not on network shares). Plex: a shared server must allow downloads (the owner's setting); Jellyfin: the user needs download permission. |
 | No *Delete from this device…* entry | Only for video files in a library folder or on a drive of this device; never for server videos or network shares. |
 | Need logs | Desktop Mode: `flatpak run io.github.nicocarbone.DeckVideoPlayer --msg-level=all=v --log-file=$HOME/Downloads/dvp.log`. In game mode, add `--msg-level=all=v --log-file=/home/deck/Downloads/dvp.log` to the end of the shortcut's launch options (after the app id). The log must go in Downloads or Videos: the app can't write to the home folder itself. |
 | No *Download subtitles…* entry | No API key yet (see [above](#online-subtitles-opensubtitles)), or the video isn't a local file. |
 | "No internet connection" when searching subtitles | The Deck is offline, or the Flatpak lacks network access: `flatpak info --show-permissions io.github.nicocarbone.DeckVideoPlayer` must list `network`. |
 | "OpenSubtitles rejected the API key" / "login failed" | Check `api_key`, and use your username (not e-mail) with the right password. |
+| No *TV speakers* or *Night mode* entry in the audio menu | `audio_passthrough` is set (compressed audio can't be filtered). |
 | No *Headphone surround* entry in the audio menu | `audio_passthrough` is set (surround can't filter compressed audio), or the build lacks the `sofalizer` filter (log: `headphone surround: the sofalizer filter is not available`). |
 | Plex server missing or "Can't reach …" | Menu → Plex account → Refresh server list. At home the Deck must reach the server on the LAN; away from home the server needs Remote Access. The app only uses encrypted `*.plex.direct` connections; some routers block those names (DNS rebinding protection). Allow `plex.direct` in the router, or set `allow_insecure_lan = yes` under `[plex]` in `config.ini` (plain http, home networks only). |
 | Jellyfin server not listed in *Add a Jellyfin server…* | The search only reaches servers on the same network that answer Jellyfin's discovery (UDP port 7359; not Docker bridge networking). Add the server's address to `config.ini` (`server = http://…:8096` under `[jellyfin]`). |

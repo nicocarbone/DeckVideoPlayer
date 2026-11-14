@@ -158,6 +158,13 @@ KEEP=1 tools/headless-run.sh -- "raw:[\"loadfile\",\"$PWD/.dev/test-media/Videos
 SURROUND=1 tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
     'raw:["set_property","aid",2]' sleep:1 get:af key:y shot:/tmp/audio.png key:BS key:i sleep:1 shot:/tmp/info.png
 
+# TV speakers: the same film with TVMIX=1; expect the dvp-tvmix lavfi filter
+# (pan=stereo|…) in "af", audio-out-params/channels "stereo", and
+# "· TV speakers" in the info panel. Switching Headphone surround on in the
+# audio menu replaces it (and the other way round).
+TVMIX=1 tools/headless-run.sh -- key:DOWN key:DOWN key:DOWN key:DOWN key:ENTER sleep:2 \
+    'raw:["set_property","aid",2]' sleep:1 get:af get:audio-out-params/channels key:BS key:i sleep:1 shot:/tmp/info.png
+
 # Online subtitles against the mock API (no key or quota needed): X, UP to
 # "Download subtitles…", A, A on the first result. Expect the mock's request
 # log ("mock: GET /api/v1/subtitles…") and the new track selected.
@@ -384,6 +391,12 @@ DECISIONS.md or the README "Known limitations".
     an HDR mapping; the next episode starts with them, also after closing the
     app. A movie keeps its own (D72, D73). With `remember_settings = no`
     nothing comes back after closing the app.
+17. TV speakers (D75): docked to a TV, using its own speakers, a film with
+    a 5.1 track and a dialogue scene followed by a loud one. Toggle *TV
+    speakers* in the audio menu: voices clearer and louder, loud scenes
+    no louder than before, no distortion or pumping in loud scenes; the
+    info panel says `· TV speakers`. A stereo video sounds the same
+    either way.
 
 ## 9. Recipes for common changes
 
@@ -434,6 +447,13 @@ layout constants at the top of `browser.lua` / `menu.lua` and in
   decoder may also fall back first (`vdpau-copy`, `vulkan`). Compare builds by
   alternating them under the same load, since the load changes over time.
 
+- **Flatpak: mpv exit status 139 at quit after a menu was open** (v0.8.2 to
+  v0.8.4-test1; fixed in the launcher, D77): fontconfig freeing memory inside
+  a host font cache mapped into the sandbox. To debug a crash in the
+  Flatpak: `flatpak run --devel --command=gdb … --args /bin/sh
+  /app/bin/deckvideoplayer …` (gdb follows the launcher's exec into mpv;
+  `thread apply all bt`). Runs under gdb change timing, so repeat a few
+  times.
 - `Segmentation fault` at the end of a `tools/headless-run.sh` run is
   gamescope, not the app, on the development PC (gamescope 3.16.20, NVIDIA
   610.57.04): at exit it calls into `libnvidia-eglcore` after that library
