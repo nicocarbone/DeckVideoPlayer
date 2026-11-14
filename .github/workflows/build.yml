@@ -24,7 +24,7 @@ jobs:
   flatpak:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
       options: --privileged
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

@@ -256,14 +256,14 @@ Manifest maintenance:
 - mpv option names are in mpv's `meson.options`. `vaapi-drm` was dropped:
   it needs mpv's DRM feature, which requires libdisplay-info, and the player
   never uses DRM output.
-- Keep the runtime branch (25.08) in sync with the gamescope layer branch
+- Keep the runtime branch (26.08) in sync with the gamescope layer branch
   in `scripts/install-steamos.sh` (`RUNTIME_BRANCH`).
 
 ## 7. CI and releases
 
 `.github/workflows/build.yml`:
 - `tests`: installs mpv on Ubuntu and runs `tests/run.sh`.
-- `flatpak`: builds the bundle in `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08`.
+- `flatpak`: builds the bundle in `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08`.
 - `release` (tags `v*`): attaches `DeckVideoPlayer.flatpak`,
   `DeckVideoPlayer-<tag>.tar.gz` (bundle + scripts + artwork + README) and
   `DeckVideoPlayer-<tag>-sources.tar.gz` (complete corresponding source,
@@ -422,6 +422,17 @@ layout constants at the top of `browser.lua` / `menu.lua` and in
 **Add a setting**: see CONFIGURATION.md "Adding a new setting".
 
 ## 10. Gotchas (learned the hard way)
+
+- **`flatpak run --app-path=build-dir/files` keeps the installed app's
+  runtime and permissions.** It can't test a runtime change. Install the
+  bundle in an isolated folder instead: `FLATPAK_USER_DIR=DIR flatpak --user
+  install BUNDLE`, with `FLATPAK_USER_DIR` set for `MODE=flatpak` too (a
+  `flatpak` wrapper early in `PATH` does it).
+- **mpv exit status 139 with `VK_ERROR_OUT_OF_DEVICE_MEMORY` in the log:** the
+  GPU's memory is full, usually from another program (check `nvidia-smi`).
+  libplacebo can't allocate a texture and mpv crashes, at any runtime; the
+  decoder may also fall back first (`vdpau-copy`, `vulkan`). Compare builds by
+  alternating them under the same load, since the load changes over time.
 
 - `Segmentation fault` at the end of a `tools/headless-run.sh` run is
   gamescope, not the app, on the development PC (gamescope 3.16.20, NVIDIA

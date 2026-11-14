@@ -251,7 +251,7 @@ rename).
 ## 9. Packaging
 
 - **Flatpak** `io.github.nicocarbone.DeckVideoPlayer` on runtime
-  `org.freedesktop.Platform//25.08`. It builds LuaJIT, libXpresent,
+  `org.freedesktop.Platform//26.08`. It builds LuaJIT, libXpresent,
   uchardet, libass, zimg, a decode-only FFmpeg (with libmysofa for the
   headphone-surround filter), libplacebo, mpv 0.41 (with
   `sdl2-gamepad`, `lua=luajit`) and installs the Inter font plus the app

@@ -286,7 +286,7 @@ Steam (game mode) ─ launches ─▶ flatpak run … deckvideoplayer (launcher 
 - **Why a custom Flatpak:** Flathub's mpv is built without SDL2 gamepad
   support, which the controller input relies on. The manifest builds mpv
   0.41 (LuaJIT, SDL2 gamepad, Vulkan, VA-API), libplacebo and a decode-only
-  FFmpeg on the Freedesktop 25.08 runtime.
+  FFmpeg on the Freedesktop 26.08 runtime.
 
 ## Project layout
 

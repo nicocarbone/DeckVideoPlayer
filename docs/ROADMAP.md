@@ -152,6 +152,8 @@ v0.8.2 (released 2026-11-05): subtitle track, size, brightness and position reme
 or season, delay per video (D72); Picture and HDR choices too, and
 `remember_settings` to turn all such memory off (D73).
 
+v0.8.3: Freedesktop 26.08 runtime, as a release of its own (D74).
+
 ## Next, in this order
 
 1. **Rename library sources**: *Rename…* in the start screen's menu for
@@ -189,9 +191,12 @@ or season, delay per video (D72); Picture and HDR choices too, and
 ## Floating (any time)
 
 - **Publish on Flathub**: install from Discover in Desktop Mode, automatic
-  updates, much wider reach. Reuses the existing Flatpak; the cost is
-  Flathub's review (justify the filesystem and network permissions, build
-  the refresh helper in their CI) and maintaining the listing. The Steam
+  updates, much wider reach. Flathub's rules on AI-generated material decide
+  how: the AI use must be disclosed, reviewers may reject on its extent, and
+  the Flathub manifest, PR text and replies must be written by a person, so
+  this repository's manifest can't be reused. Check the current text of the
+  requirements before starting. FlatPark (AI-built apps accepted, downloads a
+  release file instead of building) is the plan B. The Steam
   shortcut and artwork still need `install-steamos.sh` or manual steps.
   Publishing on Steam itself is possible later but needs a second build
   for the Steam Linux Runtime.

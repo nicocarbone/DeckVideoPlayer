@@ -71,7 +71,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-05, v0.8.2)
+## Current state (2026-11-14, v0.8.3)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -192,6 +192,10 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   before release. Test clips in
   `.dev/test-media/SubMemory` are made with ffmpeg, not by
   `tools/make-test-media.sh`.
+- v0.8.3 (2026-11-14, D74): Freedesktop 26.08 runtime, module versions
+  unchanged. Regression-tested in headless gamescope on an isolated Flatpak
+  install (upgrade from 0.8.2 through the installer included); the owner
+  tried the test build before release.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

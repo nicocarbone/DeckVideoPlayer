@@ -63,7 +63,7 @@ of deleting them.
   `VK_COLOR_SPACE_HDR10_ST2084_EXT` formats when gamescope outputs HDR. This
   is the same path DXVK/Proton games use, so it's the best-tested one.
   Inside Flatpak the layer comes from the Flathub extension
-  `org.freedesktop.Platform.VulkanLayer.gamescope//25.08` (installed by the
+  `org.freedesktop.Platform.VulkanLayer.gamescope//26.08` (installed by the
   installer) and needs the `xdg-run/gamescope-0` permission.
 - **Verified:** headless gamescope with `--hdr-enabled
   --hdr-debug-force-output`, both with the source tree and the installed
@@ -2147,3 +2147,26 @@ Reviewed on 2026-11-03; each finding has a status line in `ISSUES.md`.
   runs gave the same results in the Flatpak build. Picture and HDR were not run
   here on Plex or Jellyfin (same keys as subtitles, which ran on Jellyfin). The
   owner tried the test build before release.
+
+## D74. Freedesktop 26.08 runtime, as a release of its own (v0.8.3)
+
+- **Decision:** move from 25.08 to 26.08, including the gamescope layer branch
+  (3.16.31 to 3.17.0) and the CI image, and change nothing else: LuaJIT, FFmpeg,
+  libplacebo, mpv and the other modules stay on their pinned versions, though
+  Flathub's `io.mpv.Mpv` has moved on. They all built unchanged.
+- **Why now:** Flathub requires the latest runtime for a new submission, and
+  the app should have time in use on it first. A release of its own keeps any
+  regression on a Deck easy to trace.
+- **Existing users:** the installer takes the new layer branch from
+  `RUNTIME_BRANCH`. The old runtime and layer aren't removed, as other apps may
+  use them.
+- **Tested** on an isolated Flatpak install, after upgrading from 0.8.2 with the
+  installer: HDR passthrough and the Display mapping's `tone_map_metadata`, CRT,
+  Grain, Clean-up, deinterlacing, headphone surround, refresh requests (both
+  Xwayland layouts), mock OpenSubtitles, Video info, https from the sandbox, and
+  the remembered settings of D72 and D73, in headless gamescope on an NVIDIA PC.
+- **Crash found while testing, not caused by this:** with another program
+  holding nearly all the GPU's memory, mpv crashed in 4 of 20 plays on 26.08 and
+  4 of 20 on 25.08, alternating under the same load. The log shows
+  `VK_ERROR_OUT_OF_DEVICE_MEMORY` from libplacebo before the crash. Not changed.
+- **Before release** the owner tried the test build and found no problems.

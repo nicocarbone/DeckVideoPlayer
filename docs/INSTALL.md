@@ -26,8 +26,8 @@
    The script, all per-user with no `sudo`:
    1. adds the Flathub remote for the user (`flatpak remote-add --user`),
    2. installs `dist/DeckVideoPlayer.flatpak` (Flatpak pulls the Freedesktop
-      25.08 runtime from Flathub),
-   3. installs `org.freedesktop.Platform.VulkanLayer.gamescope//25.08`
+      26.08 runtime from Flathub),
+   3. installs `org.freedesktop.Platform.VulkanLayer.gamescope//26.08`
       (required for HDR),
    4. creates `~/.config/deckvideoplayer/config.ini` if missing,
    5. adds a **Non-Steam game** "Deck Video Player" with artwork:
@@ -70,7 +70,7 @@
 ```sh
 # Just the Flatpak, without the Steam shortcut:
 flatpak install --user dist/DeckVideoPlayer.flatpak
-flatpak install --user flathub org.freedesktop.Platform.VulkanLayer.gamescope//25.08
+flatpak install --user flathub org.freedesktop.Platform.VulkanLayer.gamescope//26.08
 flatpak run io.github.nicocarbone.DeckVideoPlayer
 
 # Shortcut and artwork later (Steam closed):
@@ -527,7 +527,7 @@ Nothing on the NAS changes.
 | Symptom | Check / fix |
 |---|---|
 | Controller does nothing, keyboard works | The mpv build lacks SDL2 gamepad support (only possible when running from source with a distro mpv). Use the Flatpak. In Steam, make sure the controller template is a gamepad layout. |
-| HDR video looks washed out / badge says `HDR10 → SDR` | HDR is off in Steam display settings, or the gamescope layer extension is missing: `flatpak list --runtime \| grep VulkanLayer.gamescope`. Install it with the command above (branch must be `25.08`). |
+| HDR video looks washed out / badge says `HDR10 → SDR` | HDR is off in Steam display settings, or the gamescope layer extension is missing: `flatpak list --runtime \| grep VulkanLayer.gamescope`. Install it with the command above (branch must be `26.08`). |
 | HDR works in other games but not here | Check that `gpu_context = auto` (it must resolve to `x11vk` in game mode). Run from Konsole inside a nested gamescope and look for `[Gamescope WSI] … hdr formats exposed to client: true`. |
 | Refresh rate doesn't change | Only in game mode, only on Deck panels, not while VRR is on. Check Steam's **performance overlay** (it shows the real panel rate); the Quick Access Menu's refresh slider always shows Steam's own setting, not ours. The info panel (View) shows `48 Hz (requested)` on a Deck (gamescope's confirmation isn't visible to games there), `48 Hz (matched)` where it can confirm, `90 Hz (asked for 48 Hz)` if gamescope refused. Moving Steam's slider takes the rate back; the app asks again on the next file or when you unpause. Logs: `refresh rate: …` lines. To turn matching off: playback menu → *Match refresh rate*. |
 | 4K AV1 video stutters on a Steam Deck (*Dropped* in the info panel keeps rising) | The Deck's hardware decoder can't keep up with some 4K AV1 videos. *Menu → Video → Decoding: Software* plays them smoother, at about twice the power. HEVC and 1080p AV1 are fine in hardware. |

@@ -5,6 +5,17 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.3 (2026-11-14)
+
+### Changed
+
+- **Updated to the Freedesktop 26.08 runtime**, the base system the app runs
+  on. Nothing in the app is meant to look or work differently. The installer
+  downloads the new runtime and a newer version of the gamescope layer used
+  for HDR. Your settings, resume points and sign-ins are kept. The previous
+  runtime stays on disk until nothing needs it; `flatpak uninstall --unused`
+  lists what it would remove before asking.
+
 ## v0.8.2 (2026-11-05)
 
 ### New

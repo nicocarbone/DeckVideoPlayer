@@ -12,7 +12,7 @@
 set -euo pipefail
 
 APP_ID=io.github.nicocarbone.DeckVideoPlayer
-RUNTIME_BRANCH=25.08
+RUNTIME_BRANCH=26.08
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 root=$(cd -- "$here/.." && pwd)
 config_dir="$HOME/.config/deckvideoplayer"
