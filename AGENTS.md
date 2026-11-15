@@ -72,7 +72,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-14, v0.8.4)
+## Current state (2026-11-15, v0.8.5)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -206,6 +206,13 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   committed). Flatpak crash at quit fixed in the launcher (D77: own
   fontconfig setup without the host's mapped font caches). Eleventh audit
   (ISSUES.md Part XI) reviewed in D78.
+- v0.8.5 (2026-11-15): CRT look strengths (*CRT, light lines* / *CRT* /
+  *CRT, strong lines*, spread apart after the owner's test), beam widths
+  and gap depth the same on every screen, mask sized by the screen (2 px
+  stripes at 4K), scanlines follow the lines shown in every picture mode
+  and aspect ratio (D79, D80). Measured in headless gamescope at several
+  sizes and in the Flatpak; the owner tried the test builds before
+  release. Twelfth audit (ISSUES.md Part XII) reviewed in D80.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

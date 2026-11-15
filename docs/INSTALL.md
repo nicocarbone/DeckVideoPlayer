@@ -170,9 +170,13 @@ See the controls table in the [README](../README.md#controls). Notes:
   low-quality video. All off by default, and remembered together for
   the folder (or the show, for Plex and Jellyfin episodes).
   - *Look: CRT* gives video made for CRT televisions scanlines, a
-    phosphor mask and a little glow, at the same average brightness. The
-    Deck's 800-line screen draws each scanline two pixels tall; a 4K TV
-    draws them closer to a real CRT.
+    phosphor mask and a little glow, at about the same average brightness.
+    Three strengths: *CRT, light lines* (close to a home TV showing
+    broadcast or DVD video), *CRT* (medium) and *CRT, strong lines* (clear
+    gaps between lines even in white, more like a studio monitor or an old
+    console; highlights get a little dimmer). The lines look
+    the same on the Deck, a laptop or a 4K TV; the Deck draws each
+    scanline two pixels tall, a 4K TV four or five.
   - *Grain* (Light / Medium / Strong) adds fine moving film grain, which
     also hides banding and faint blocks on smooth areas.
   - *Clean-up* (Light / Strong, SD videos only) smooths the square

@@ -1,11 +1,92 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-11-14, v0.8.4 work):** every finding in Parts I–XI was checked
+**Status review (2026-11-14, v0.8.5 work):** every finding in Parts I–XII was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
 reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78).
+VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78, XII: D80).
+
+---
+
+# Part XII — v0.8.5 CRT Shader Audit (2026-11-14)
+
+Audited the uncommitted `v0.8.5` CRT shader changes (`dvp-crt.glsl`, `dvp/looks.lua`, `dvp/player.lua`, `tests/run.lua`, and `docs/DECISIONS.md` D79). All `859` Lua checks and `10` Python tests in `tests/run.sh` pass. In headless gamescope at 4K (`3840×2160`, `Old Show 480p.mp4`), cycling *Look* (`CRT, light lines` → `CRT` → `CRT, strong lines`) updates `file-local-options/glsl-shader-opts` (`dvp_scanlines` `"0"` → `"1"` → `"2"`, `dvp_src_h` `"480"`) without recompiling the shader or logging libplacebo errors, and `beam_mean` matches exact `n`-row sums within `0.4106%` across `n = 2..9` and `s = 0.19..0.46`.
+
+Below are the edge cases and optimization opportunities identified in the `v0.8.5` CRT changes.
+
+---
+
+## 1. Edge Cases & Minor Issues (`dvp-crt.glsl`, `dvp/looks.lua`)
+
+### 1.1. `dvp-crt.glsl`: Aperture-grille `stripe` and `dark` use `HOOKED_size.y` instead of display size, downgrading cropped widescreen video on 4K/1440p
+
+* **Severity:** Low–Medium (Bug / Visual inconsistency)
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-crt.glsl` (`hook`, lines 115–116)
+* **Problem:**
+  ```glsl
+  float dark = h >= 1400.0 ? 0.70 : 0.80;
+  float stripe = max(1.0, floor(h / 1080.0 + 0.25));
+  ```
+  Because `HOOK SCALED` runs on the active video area (`h = HOOKED_size.y`, excluding black bars), a 2.35:1 / 2.39:1 film played with *Picture → Crop black bars* (or encoded without bars) on a 4K TV (`3840×2160`) has `HOOKED_size = 3840×1606`: `floor(1606 / 1080.0 + 0.25) = 1.0`, so `stripe` drops from `2` pixels back to `1` pixel despite the 4K panel width and viewing distance. Likewise, on a 1440p screen (`2560×1071`), `h < 1400.0` flips `dark` from `0.70` to `0.80`.
+* **Suggested Fix:** Derive the screen-height proxy from both axes (e.g. `float screen_h = max(h, HOOKED_size.x * 0.5625);`, or `OUTPUT_size.y` if available in `SCALED`) when computing `dark` and `stripe`.
+
+
+> **Status: Solved** (D80). Confirmed: SCALED sees only the video's area, and libplacebo's `target_size` is that area too, so the shader can't read the screen size. The app now passes the window's height (`dvp_screen_h`, from `osd-dimensions`), and `max(h, width × 9/16)` is only the fallback. Verified across 31 cases (7 video aspect ratios including 2.39:1, portrait and anamorphic DVD; 16:9, 16:10, 5:4 and 4:3 screens from 1280×800 to 4K; Fit and Fill): the mask repeats every 6 pixels at 4K and every 3 below, in every case. Found while checking: with *Fill*, scanlines didn't follow the video's lines (the app passed the full 480 lines while 360 were shown); the shader now takes the shown source height from libplacebo's `input_size` (after Fill's crop or *Crop black bars*), so each scanline is one video line in every mode.
+
+---
+
+### 1.2. `dvp/looks.lua`: `base.opts` does not filter stale `dvp_*` shader options
+
+* **Severity:** Low (Robustness / Hygiene)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/looks.lua` (`M.option_values`, lines 119–126)
+* **Problem:**
+  `M.option_values` strips `OUR_SHADERS` from `base.shaders` and `OUR_FILTERS` from `base.vf`, but copies all entries from `base.opts` verbatim (`for k, v in pairs(base.opts or {}) do opts[k] = v end`). If `base.opts` (e.g., from a user's `mpv.conf` or stale state) contains `dvp_scanlines`, `dvp_src_h`, or `dvp_grain`, it stays in `glsl-shader-opts` even when looks are `"off"`. (Harmless unless a user loads `dvp-crt.glsl` outside `Looks`.)
+* **Suggested Fix:** Filter `OUR_OPTS` (`dvp_grain`, `dvp_scanlines`, `dvp_src_h`) when copying `base.opts`, matching `OUR_SHADERS` and `OUR_FILTERS`.
+
+
+> **Status: Solved** (D80). `option_values` drops `dvp_grain`, `dvp_scanlines` and `dvp_src_h` from the starting options, as it already did for our shaders and filters; unit tests added.
+
+---
+
+### 1.3. `dvp-crt.glsl`: Minor tolerance comment mismatch (`0.75%` vs `0.41%`)
+
+* **Severity:** Info (Documentation)
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-crt.glsl` (line 62) vs `docs/DECISIONS.md` (D79, lines 2378–2379)
+* **Problem:**
+  `dvp-crt.glsl` line 62 states `beam_mean` is `"within 0.75% of summing the rows for widths 0.19-0.46"`, whereas `docs/DECISIONS.md` D79 states `"within 0.41 %"`. Direct evaluation over `n = 2..9` and `s = 0.19..0.46` shows a worst-case relative error of `-0.4106%` (at `n = 4, s = 0.46`).
+
+
+> **Status: Solved** (D80). After 2.1 the bound is 0.42 % (cubic for the integral); the shader comment says within 0.5 % and D79 has both numbers.
+
+---
+
+## 2. Optimization Opportunities (`dvp-crt.glsl`)
+
+### 2.1. Per-pixel `erf_pos` and repeated divisions in `beam_mean` for `n >= 3` (1440p and 4K)
+
+* **Severity:** Medium (GPU Performance at 4K)
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-crt.glsl` (`erf_pos` lines 52–57, `beam_mean` lines 65–72, `hook` lines 105–108)
+* **Problem:**
+  At 1440p (`n = 3`) and 4K (`n = 4` or `5`, ~8.3M pixels/frame), `beam_mean(s, n)` takes the `n >= 3.0` branch for every pixel and evaluates `erf_pos(0.70710678 / s)` **twice** per pixel (`s1` and `s2`, both `vec3`). Combined with `beam()` and `s1`/`s2`, the beam/`beam_mean` math for every 1440p/4K fragment executes **12 scalar `exp()` calls**, **6 `sqrt()` calls**, and **24 `vec3`-component divisions** (`0.70710678 / s`, `1 / (1 + ...)`, `d * d / (s * s)`, and `/ beam_mean`), alongside **10 texture fetches** per pixel. Measured in headless gamescope at 4K on an RTX 4090 (`vo-passes`), `Deck Video Player: CRT` averages `89.1 µs/frame` (`89084 ns`); cost will be substantially higher on the Steam Deck's RDNA2 iGPU when docked at 4K.
+* **Suggested Fix:**
+  1. Precompute `vec3 is1 = 1.0 / s1;` and `vec3 is2 = 1.0 / s2;` once in `hook()` so `beam` and `beam_mean` multiply by `is1`/`is2` instead of performing repeated `vec3` divisions.
+  2. Over the shader's narrow width range `s ∈ [0.20, 0.46]` (`1 / (s * sqrt(2)) ∈ [1.537, 3.536]`), `s * sqrt(2 * pi) * erf(1 / (s * sqrt(2)))` is smooth and monotonic (`0.501` to `1.119`); replacing `erf_pos` with a low-degree polynomial fit in `s` eliminates both `vec3` `exp`s and divisions inside `beam_mean` at 1440p/4K with negligible error.
+
+
+> **Status: Partly solved** (D80). Not a regression: measured with `vo-passes` at 4K, the v0.8.5 shader took 88 µs per frame against 101 µs for the released v0.8.4 one. Both suggestions applied anyway: 1/(2σ²) is computed once per beam and shared by the beam and its average, and `erf` is replaced by a cubic in σ (0.08 % from the integral). Now 81 µs, with gap depth and brightness unchanged to two decimals at 1280×800, 1440p and 4K.
+
+---
+
+### 2.2. Redundant per-scanline `line_color` / `sqrt` / `beam_mean` work across rows
+
+* **Severity:** Low (GPU Performance, trade-off)
+* **Location:** `app/share/deckvideoplayer/mpv/shaders/dvp-crt.glsl` (`hook`, lines 96–108)
+* **Problem:**
+  For every scanline `k`, `c1`/`c2` (`6` texture fetches), `sqrt`, and `beam_mean` are identical across all `n` rows of the scanline and are evaluated again as neighbour `c2` (`10×` redundant per-scanline evaluations at 4K `n = 5`, `4×` at `n = 2`). A 2-pass split would trade ALU for an extra render target/pass, so `2.1` is the lower-risk optimization first unless docked 4K GPU cost on Deck proves high.
+
+
+> **Status: Not solved (declined)** (D80). A second pass would need its own render target and a hook order to keep right, for a shader that is already cheaper than the released one; to revisit if a docked Deck at 4K drops frames with the CRT look.
 
 ---
 

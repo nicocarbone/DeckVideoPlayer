@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.8.5" date="2026-11-15">
+      <description>
+        <p>CRT look with light, medium or strong scanlines, the same on every screen size.</p>
+      </description>
+    </release>
     <release version="0.8.4" date="2026-11-14">
       <description>
         <p>New TV speakers option in the audio menu: 5.1 and 7.1 soundtracks mixed to stereo with clearer dialogue. Fixes DLNA folders showing no videos with some servers.</p>

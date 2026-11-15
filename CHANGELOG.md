@@ -5,6 +5,24 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.8.5 (2026-11-15)
+
+### New
+
+- **CRT look strength.** *Menu → Video → Look* now offers *CRT, light lines*,
+  *CRT* and *CRT, strong lines*. Light is close to how a home TV showed
+  broadcast or DVD video, with faint lines; strong has clear gaps between
+  lines even in white, like a studio monitor or an old games console, and
+  makes highlights a little dimmer. Your current CRT choice becomes the
+  middle one, which looks about as the CRT look did on the Steam Deck.
+
+### Changed
+
+- **The CRT look is the same on every screen.** Its scanlines were much
+  fainter on a 4K TV than on a laptop or the Steam Deck; they now look alike
+  everywhere. On a 4K screen the red, green and blue mask is coarser, about
+  as fine as on a real CRT television, so it can be seen from the couch.
+
 ## v0.8.4 (2026-11-14)
 
 ### New

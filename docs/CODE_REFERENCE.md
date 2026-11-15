@@ -667,7 +667,9 @@ file). The rows are built in
 
 ## `dvp/looks.lua`: looks for old SD video (D69)
 
-Three settings, `SETTINGS` = look (off / crt), grain (off / light /
+Three settings, `SETTINGS` = look (off / crt_light / crt / crt_strong:
+scanline strength, the shader's `dvp_scanlines` 0 / 1 / 2, D79; the
+window's height goes to `dvp_screen_h` for the mask, D80), grain (off / light /
 medium / strong), cleanup (off / light / strong), with `ORDER`, `LABELS`,
 `TITLES`. `Looks.new(data_dir)`: choices kept in `looks.json`
 (`{version = 2, looks = {key = {look, grain, cleanup}}}`, only settings

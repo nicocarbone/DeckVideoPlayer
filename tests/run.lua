@@ -1489,6 +1489,25 @@ do
         and v["glsl-shaders"][2] == "~~/shaders/dvp-crt.glsl" and #v["glsl-shaders"] == 2)
     check("crt: line count and user options", v["glsl-shader-opts"].dvp_src_h == "480" and v["glsl-shader-opts"].mine == "1")
     check("crt: no filters, no deband", #v.vf == 1 and v.deband == "no")
+    -- Scanline strengths (D79); "crt" is medium, as remembered by v0.8.0–v0.8.4
+    eq("crt: medium lines", v["glsl-shader-opts"].dvp_scanlines, "1")
+    eq("crt: light lines", Looks.option_values({look = "crt_light"}, base, 480)["glsl-shader-opts"].dvp_scanlines, "0")
+    local vs = Looks.option_values({look = "crt_strong"}, base, 480)
+    check("crt: strong lines, same shader", vs["glsl-shader-opts"].dvp_scanlines == "2"
+        and vs["glsl-shaders"][2] == "~~/shaders/dvp-crt.glsl" and vs["glsl-shader-opts"].dvp_src_h == "480")
+    check("off: no scanline option", Looks.option_values({}, base, 480)["glsl-shader-opts"].dvp_scanlines == nil)
+    -- Our options in the starting values are dropped, the user's kept (ISSUES.md XII 1.2)
+    local dirty = {shaders = {}, opts = {mine = "1", dvp_scanlines = "2", dvp_src_h = "576", dvp_grain = "0.1"}, vf = {}}
+    local dv = Looks.option_values({}, dirty, 480)["glsl-shader-opts"]
+    check("stale dvp options dropped", dv.mine == "1" and dv.dvp_scanlines == nil and dv.dvp_src_h == nil
+        and dv.dvp_grain == nil)
+    eq("crt: screen height passed", Looks.option_values({look = "crt"}, base, 480, 1440.0)["glsl-shader-opts"].dvp_screen_h, "1440")
+    check("crt: no screen height when unknown", Looks.option_values({look = "crt"}, base, 480, nil)["glsl-shader-opts"].dvp_screen_h == nil)
+    check("off: no screen height", Looks.option_values({}, base, 480, 1440)["glsl-shader-opts"].dvp_screen_h == nil)
+    eq("stale dvp options replaced", Looks.option_values({look = "crt_light"}, dirty, 480)["glsl-shader-opts"].dvp_scanlines, "0")
+    check("crt strengths remembered", (Looks.normalize({look = "crt_strong"}) or {}).look == "crt_strong"
+        and (Looks.normalize({look = "crt_light"}) or {}).look == "crt_light")
+    eq("crt strength described", table.concat(Looks.describe({look = "crt_light"}), " · "), "CRT, light lines")
     v = Looks.option_values({look = "crt", grain = "medium"}, base, 576)
     check("grain before crt", v["glsl-shaders"][2] == "~~/shaders/dvp-grain.glsl"
         and v["glsl-shaders"][3] == "~~/shaders/dvp-crt.glsl" and v["glsl-shader-opts"].dvp_grain == "0.045"

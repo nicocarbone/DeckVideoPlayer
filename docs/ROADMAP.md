@@ -139,7 +139,7 @@ timeout for Video info on DLNA.
 | Feature | Status | Notes |
 |---|---|---|
 | **Deinterlacing** | Released (D69) | `deinterlace=auto`: interlaced video (480i/576i TV and DVDs) shown at a frame per field; refresh matching follows the doubled rate. |
-| **Looks** | Released (D69); battery cost of Clean-up on a Deck not measured | Video menu, SDR videos: *Look* (Off / CRT), *Grain* (Off / Light / Medium / Strong), *Clean-up* (Off / Light / Strong, SD only: debanding, `fspp` deblocking, `hqdn3d` when strong), remembered together per folder or show. Sharp and Film dropped after the owner's tests; CRT made stronger on the Deck. Test builds tried by the owner on a Deck. |
+| **Looks** | Released (D69); battery cost of Clean-up on a Deck not measured | Video menu, SDR videos: *Look* (Off / CRT, with light, medium or strong lines since v0.8.5, D79), *Grain* (Off / Light / Medium / Strong), *Clean-up* (Off / Light / Strong, SD only: debanding, `fspp` deblocking, `hqdn3d` when strong), remembered together per folder or show. Sharp and Film dropped after the owner's tests; CRT made stronger on the Deck. Test builds tried by the owner on a Deck. |
 
 Fixes from ISSUES.md Part X (D70): Clean-up with hardware decoding,
 grain strength on 16:9 video, CRT shader cost, screen updates while
@@ -163,6 +163,12 @@ another home-network address of the server are no longer dropped, and a
 folder whose videos can't be played says why (D76, user report with
 minidlna). And a crash of the Flatpak while quitting after a menu was open,
 there since at least v0.8.2, is fixed (D77).
+
+v0.8.5 (released 2026-11-15): CRT look with *light*, *medium* and *strong*
+lines, the same on every screen size (they were much fainter on a 4K TV than
+on a 1080p screen) and in every picture mode and aspect ratio, and a
+phosphor mask scaled to the screen (D79, D80). Tested in headless gamescope
+and the Flatpak; the owner tried the test builds.
 
 v0.9.0 (planned): mpv 0.42 and libplacebo 7.387, once mpv 0.42.1 is out,
 with streaming tests for mpv's new libcurl backend (`--curl-enabled=no` as

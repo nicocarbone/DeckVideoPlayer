@@ -2339,3 +2339,110 @@ against the code; the Status lines in ISSUES.md give the outcome.
   file, CJK fallback still found, file untouched on a second start.
   Pre-indexing the two bundled font files at build time declined.
 - **CHANGELOG date (XI 3.2):** set when tagging, as for every release.
+
+## D79. CRT look: the same on every screen, with three strengths (v0.8.5)
+
+- **Report (owner):** the CRT beams looked "small" on a 46" 4K TV and
+  bigger on a 14" 1080p laptop.
+- **Cause:** the shader draws each video line over a whole number of screen
+  rows (2 on 800p and 1080p, 3 at 1440p, 5 at 4K) and had two beam-width
+  sets: narrow with 2 rows, wide with more. Measured from the shader's own
+  formulas, the darkest row between lines was 0.25 / 0.49 / 0.67 of the
+  beam's peak (dark / mid / bright colours) with 2 rows, but 0.53 / 0.80 /
+  0.94 at 4K: on the TV the beams nearly filled the gaps.
+- **How it should look:** the same relative to the picture's own lines on
+  any screen; a bigger screen is watched from further away, so line
+  pitch in degrees of view is about the same on the TV and the laptop.
+  How strong is partly taste: a home CRT showing 480i/576i had faint lines
+  (each field's lines filled the other's gaps); clear black gaps are a
+  240p console or studio-monitor look. So three strengths, chosen in the
+  Look row (not a separate row that would come and go with the Look):
+  *CRT, light lines*, *CRT* (the middle; remembered "crt" choices of
+  v0.8.0–v0.8.4 become this) and *CRT, strong lines*. The shader gets
+  `dvp_scanlines` (0 / 1 / 2) next to `dvp_src_h`. Widths after the
+  owner's test below.
+- **Strengths spread apart (owner's test of test2):** the first widths
+  (sigma 0.30–0.46, 0.24–0.38, 0.20–0.34 of a line, dark to bright colours)
+  looked much the same. They differed only in dark and mid tones: as seen
+  (sRGB), the gap at mid-grey was 9 / 23 / 35 %, at 75 % grey 3 / 14 / 24 %,
+  and in white 0 / 2 / 7 %, because bright beams widen until they meet and
+  the glow fills what is left. Now 0.30–0.42, 0.23–0.31 and 0.18–0.25, with
+  the glow's share 0.12 / 0.10 / 0.06: measured in headless gamescope
+  (sRGB, grey bands 64 / 128 / 192 / 255), light 20 / 12 / 7 / 2 %, medium
+  46 / 36 / 28 / 12 %, strong 71 / 59 / 50 / 29 % at 1280×800, within 2
+  points at 4K. Medium is about the old strong, i.e. what the Deck showed
+  in v0.8.0–v0.8.4. Strong keeps gaps in white, so bright beams clip and
+  highlights lose some light: white averages 86 % of the original at
+  1280×800 and 91 % at 4K (medium 94 / 96 %, light 99 / 98 %), mid-grey 92 /
+  96 %; accepted for the strongest setting, as on a real set with sharp
+  scanlines.
+- **Same widths for every row count**, plus one placement fix: with an odd
+  number of rows per line (3 at 1440p) no row fell on the gap between
+  beams, so those lines stayed lighter; the line centre now sits between two
+  rows when the count is odd, so one row always lands on the gap.
+  Measured gap depth in headless gamescope (flat grey bands of an SD clip,
+  linear light, dark / mid / light band), medium: 0.20 / 0.41 / 0.55 at
+  1280×800 and 1080p, 0.26 / 0.49 / 0.62 at 1440p, 0.22 / 0.44 / 0.58 at
+  4K (the released shader at 4K: 0.28 / 0.51 / 0.67, at 1280×800 0.07 /
+  0.24 / 0.38, now *strong*'s exact numbers there).
+- **Brightness kept:** the per-beam normalization had closed forms checked
+  only for the old widths; for wider beams the Gaussian integral
+  over-counted what the shader adds up (two beams), up to 3.8 % darker. Now
+  the integral over -1..1 line (s·√(2π)·erf(1/(s√2)), erf by Abramowitz and
+  Stegun 7.1.26, one exp), and with 2 rows 0.5 + q + q⁴/2; within 0.41 % of
+  summing the rows for every row count and widths 0.19–0.46. After the
+  twelfth audit (D80) the integral is a cubic in s instead (within 0.08 % of
+  it, 0.42 % of the summed rows; with strong's narrowest beams, 0.18, 0.8 %
+  with 3 rows per line and 0.2 % otherwise).
+- **Mask:** the aperture grille's stripes are 1 pixel up to 1440p and 2 at
+  4K (`floor(h / 1080 + 0.25)`), so a 4:3 picture is about 480 triads
+  across on 1080p and on 4K, as on a CRT TV (1-pixel stripes at 4K were 960
+  triads, too fine to see from a couch, and can beat against the TV's own
+  subpixels).
+- **Not added:** phosphor decay. TV phosphors faded within a millisecond, so
+  trails are not what a TV showed; the sharp motion of an impulse display
+  would need black-frame insertion at 120 Hz or more (the Deck OLED tops
+  out at 90 Hz, mpv has none); a `lagfun` trail would run on the CPU at the
+  video's frame rate.
+- **Open, not changed:** in flat dark areas the CRT look reads brighter than
+  the original (+7 % light to +15 % strong at 1280×800, +4 % in mid and light
+  areas, the glow's share), the same in the v0.8.4 shader. Forcing
+  `linear-upscaling` changed it a lot (+52 % dark), so the light level the
+  SCALED hook sees isn't settled; D69's real-video measurement was within
+  3 %.
+- **Tested:** 859 unit checks (option values per strength, remembered names,
+  description). The shader at 1280×800, 1080p, 1440p and 4K for each
+  strength (gap depth and brightness above), a real SD clip at 1280×800 and
+  4K, the Video menu at both sizes, and cycling the Look row live
+  (light → medium → strong → off → light, saved).
+
+## D80. Twelfth audit (ISSUES.md Part XII, the v0.8.5 CRT changes)
+
+- **Mask on cropped widescreen video (XII 1.1, solved):** the SCALED hook
+  gets the video's area, not the screen (libplacebo's `target_size` is the
+  same area), so a 2.39:1 film at 4K (3840×1606) got 1-pixel stripes. The
+  app now passes the window's height (`dvp_screen_h`, observed from
+  `osd-dimensions`, re-applied only when it changes); `max(h, width ×
+  9/16)` is the fallback when it's unknown.
+- **Every aspect ratio and picture mode (owner's request):** the line count
+  now comes from libplacebo's `input_size` (the source area shown), not the
+  app's `dvp_src_h` (kept as a fallback): with *Fill* a 4:3 video on a 16:9
+  screen shows 360 of its 480 lines, and scanlines were finer than the
+  video's lines. Checked in headless gamescope, flat grey clips of 4:3,
+  16:9, 5:4, 16:10, 2.39:1, 9:16 portrait and anamorphic 16:9 DVD (720×480)
+  on 1280×800, 1080p, 4K, 1280×1024, 1600×1200, 1440p and 2560×1600, Fit
+  and Fill, plus *Crop black bars* on a letterboxed 4:3 frame: scanline
+  repeat = round(shown height ÷ shown lines) (min. 2) and mask repeat 6 px
+  at 4K, 3 px below, in all 34 cases; gap depth 0.56 with 2 rows per line,
+  0.62 with 3, 0.56–0.58 with 4–6 (test2's medium widths).
+- **Stale shader options (XII 1.2, solved):** `option_values` drops our own
+  `dvp_*` options from the options a file started with.
+- **Cost (XII 2.1, partly):** not a regression (vo-passes at 4K: 88 µs per
+  frame for the v0.8.5 shader, 101 µs for v0.8.4's). Still, 1/(2σ²) is
+  computed once per beam, and the brightness integral for 3+ rows per line
+  is a cubic in σ, ((−3.619387 σ + 2.689191) σ + 1.843326) σ + 0.054162,
+  within 0.08 % of
+  s·√(2π)·erf(1/(s√2)) over σ 0.19–0.47, 0.42 % of the summed rows
+  overall: 81 µs, same gap depth and brightness to two decimals. A 2-pass
+  version (XII 2.2) declined for now.
+- **Comment (XII 1.3):** the shader's bound updated to 0.5 % (1 % since the strengths were spread apart, D79).

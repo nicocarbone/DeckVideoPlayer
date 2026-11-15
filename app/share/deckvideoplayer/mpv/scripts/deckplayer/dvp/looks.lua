@@ -1,5 +1,6 @@
 -- Looks for old SD video (D69), three settings of the Video menu:
---   look     "CRT": scanlines (a shader on the scaled video)
+--   look     "CRT": scanlines (a shader on the scaled video), with light,
+--            medium or strong lines (D79)
 --   grain    film grain (a shader on the scaled video)
 --   cleanup  compression clean-up: debanding (renderer) plus deblocking
 --            and, when strong, light denoising (FFmpeg filters, CPU)
@@ -18,12 +19,13 @@ M.__index = M
 
 M.SETTINGS = {"look", "grain", "cleanup"}
 M.ORDER = {
-    look = {"off", "crt"},
+    look = {"off", "crt_light", "crt", "crt_strong"},
     grain = {"off", "light", "medium", "strong"},
     cleanup = {"off", "light", "strong"},
 }
 M.LABELS = {
-    look = {off = "Off", crt = "CRT"},
+    -- "crt" (medium) keeps the v0.8.0 name, so remembered choices stay.
+    look = {off = "Off", crt_light = "CRT, light lines", crt = "CRT", crt_strong = "CRT, strong lines"},
     grain = {off = "Off", light = "Light", medium = "Medium", strong = "Strong"},
     cleanup = {off = "Off", light = "Light", strong = "Strong"},
 }
@@ -33,6 +35,8 @@ local CRT_SHADER = "~~/shaders/dvp-crt.glsl"
 local GRAIN_SHADER = "~~/shaders/dvp-grain.glsl"
 -- Grain amounts (the shader's dvp_grain).
 local GRAIN = {light = "0.025", medium = "0.045", strong = "0.075"}
+-- Scanline strength of each CRT look (the shader's dvp_scanlines).
+local SCANLINES = {crt_light = "0", crt = "1", crt_strong = "2"}
 -- Clean-up: libplacebo debanding passes, and the FFmpeg filters. fspp at a
 -- fixed strength (mpv gives filters no quantizers, D69); hqdn3d at half
 -- its default strength.
@@ -48,6 +52,9 @@ M.FILTER_LABEL = "dvp-cleanup"
 M.FORMAT_LABEL = "dvp-cleanup-format"
 local OUR_FILTERS = {[M.FILTER_LABEL] = true, [M.FORMAT_LABEL] = true}
 local OUR_SHADERS = {[CRT_SHADER] = true, [GRAIN_SHADER] = true}
+-- Our shaders' options: never carried over from the options a file
+-- started with (ISSUES.md XII 1.2), like our shaders and filters.
+local OUR_OPTS = {dvp_grain = true, dvp_scanlines = true, dvp_src_h = true, dvp_screen_h = true}
 
 local function is_hdr(gamma) return gamma == "pq" or gamma == "hlg" end
 
@@ -107,15 +114,18 @@ end
 -- Pure: the file-local option values for `choice` (a table, missing
 -- settings off), on top of `base` (the options at the start of the file:
 -- {shaders = list, opts = map, vf = list, deband = "yes"/"no",
--- iterations = string}). `lines`: the video's visible lines (CRT).
-function M.option_values(choice, base, lines)
+-- iterations = string}). `lines`: the video's visible lines (CRT);
+-- `screen_h`: the window's height in pixels (the CRT mask's size).
+function M.option_values(choice, base, lines, screen_h)
     choice = choice or {}
     -- (opts marked as a map for mpv: an empty Lua table would be a list.)
     local shaders, opts = {}, setmetatable({}, {type = "MAP"})
     for _, s in ipairs(base.shaders or {}) do
         if not OUR_SHADERS[s] then shaders[#shaders + 1] = s end
     end
-    for k, v in pairs(base.opts or {}) do opts[k] = v end
+    for k, v in pairs(base.opts or {}) do
+        if not OUR_OPTS[k] then opts[k] = v end
+    end
     local vf = {}
     for _, f in ipairs(base.vf or {}) do
         if not OUR_FILTERS[f.label] then vf[#vf + 1] = f end
@@ -127,9 +137,11 @@ function M.option_values(choice, base, lines)
         shaders[#shaders + 1] = GRAIN_SHADER
         opts.dvp_grain = GRAIN[choice.grain]
     end
-    if choice.look == "crt" then
+    if SCANLINES[choice.look] then
         shaders[#shaders + 1] = CRT_SHADER
+        opts.dvp_scanlines = SCANLINES[choice.look]
         if lines then opts.dvp_src_h = tostring(math.floor(lines)) end
+        if screen_h and screen_h > 0 then opts.dvp_screen_h = tostring(math.floor(screen_h)) end
     end
     local clean = CLEANUP[choice.cleanup]
     if clean then
@@ -187,6 +199,15 @@ function M.new(data_dir)
     end
     self.current = {}
     mp.observe_property("video-params", "native", function(_, p) self:video_changed(p) end)
+    -- The window's height, for the CRT mask (only re-applied when it
+    -- changes: a new screen or window size).
+    mp.observe_property("osd-dimensions", "native", function(_, d)
+        local h = type(d) == "table" and tonumber(d.h) or nil
+        if h and h > 0 and h ~= self.screen_h then
+            self.screen_h = h
+            self:apply()
+        end
+    end)
     -- Crop black bars changes the visible lines.
     mp.observe_property("video-crop", "string", function()
         self:video_changed(mp.get_property_native("video-params"))
@@ -251,7 +272,8 @@ end
 -- the filters; a changed shader list recompiles shaders).
 function M:apply()
     if not self.base then return end
-    local values = M.option_values(M.effective(self.current, self.sdr, self.sd), self.base, self.lines)
+    local values = M.option_values(M.effective(self.current, self.sdr, self.sd), self.base, self.lines,
+                                   self.screen_h)
     for _, name in ipairs({"deband", "deband-iterations", "vf", "glsl-shaders", "glsl-shader-opts"}) do
         local value = values[name]
         local key = M.serialize(value)
