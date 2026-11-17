@@ -248,5 +248,24 @@ repository on GitHub Pages (D81), so installs update themselves:
   form factor (Bluetooth headsets). Open: what a Deck reports for its jack,
   Bluetooth and a dock's HDMI (to be logged on a Deck first), and how to
   notice a change mid-film without polling (D75).
+- **Frame pacing with `VK_EXT_present_timing`** (waiting on mpv): SteamOS
+  3.10 (Preview, November 2026) supports the Vulkan extension in Game
+  Mode. It tells a program when each frame actually reached the screen and
+  lets it ask for a frame to be shown at a set time. Nothing in the app can
+  use it: mpv / libplacebo would have to (no sign of it in their code or
+  issues so far). What it could fix:
+  - *A repeated frame every ~42 s on the Deck*: 23.976 fps on a 48 Hz
+    panel is 2.002 refreshes per frame, so with `video-sync=audio` (D7) a
+    frame is held for 3 refreshes about every 42 s (calculated, not
+    measured). `display-resample` avoids it but stays optional because mpv
+    can't measure the refresh exactly under gamescope; the extension's
+    feedback would give it that, and it could become the default.
+  - *VRR on a TV*: frames shown at their own time instead of whenever
+    they are handed over, so uneven render times don't become uneven frames.
+
+  Needs an mpv with support, then the gamescope Vulkan layer and Mesa in
+  the Flatpak recent enough to pass it through. Can be checked now on a
+  Deck: a 23.976 fps film for a few minutes with mpv's stats page (frame
+  timing), default against `display_resample = yes`.
 - **Thumbnails / posters** in the browser.
 - **Touchscreen** input.
