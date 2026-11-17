@@ -2446,3 +2446,29 @@ against the code; the Status lines in ISSUES.md give the outcome.
   overall: 81 µs, same gap depth and brightness to two decimals. A 2-pass
   version (XII 2.2) declined for now.
 - **Comment (XII 1.3):** the shader's bound updated to 0.5 % (1 % since the strengths were spread apart, D79).
+
+## D81. Publishing: the app's own Flatpak repository on GitHub Pages (v0.9.0)
+
+- **Goal:** installs that update themselves (Discover in Desktop Mode,
+  `flatpak update`), without work by hand for each release.
+- **Chosen:** a signed OSTree repository built by CI on each tag and served
+  from GitHub Pages, with a `.flatpakrepo` / `.flatpakref`; the installer
+  adds it as a remote. Same manifest and build as the release bundle, no
+  third-party review, nothing to do per release beyond the tag. Limits:
+  a Pages site up to 1 GB and about 100 GB of traffic a month (soft), so
+  the repository is pruned to a few versions and serves static deltas.
+  Plan in ROADMAP (v0.9.0).
+- **Not chosen, Flathub:** since May 2026 its rules turn away apps made
+  mostly with AI, and its manifest, pull requests and replies must be
+  written by a person, so this repository's manifest can't be reused and
+  each update needs manual work. Too much to maintain (owner's call).
+- **Not chosen, FlatPark:** it accepts AI-built apps and follows releases by
+  itself, but it never builds apps: it wraps a release download (`.deb`,
+  tarball, AppImage) as extra data, with its own manifest deciding the
+  sandbox permissions. This app is built from source with its own mpv,
+  FFmpeg and libplacebo, so it would need a second release file of the
+  built tree and a package outside our control, for what tag-triggered CI
+  already gives. A young project, too. Either could be added later as a
+  second channel.
+- **Kept:** the GitHub release with the `.flatpak` bundle and the
+  installer archive, for offline installs.

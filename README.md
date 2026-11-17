@@ -334,7 +334,7 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md): renaming library sources, SMB
 shares without a system mount, next episode from *Continue watching*;
-Flathub publication at some point. Past releases:
+automatic updates from the app's own Flatpak repository (v0.9.0). Past releases:
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Questions

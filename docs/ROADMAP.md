@@ -172,8 +172,28 @@ and the Flatpak; the owner tried the test builds.
 
 v0.9.0 (planned): mpv 0.42 and libplacebo 7.387, once mpv 0.42.1 is out,
 with streaming tests for mpv's new libcurl backend (`--curl-enabled=no` as
-the fallback). Meant to be the first version offered through FlatPark (see
-*Publish on Flathub* below).
+the fallback). Also the first version published in the app's own Flatpak
+repository on GitHub Pages (D81), so installs update themselves:
+
+- **CI:** on a tag, the build CI already makes goes into an OSTree
+  repository, signed with the app's GPG key (private key only in a GitHub
+  Actions secret, public key in the repo), with static deltas, pruned to
+  the last few versions, and deployed to GitHub Pages next to a
+  `.flatpakrepo` and a `.flatpakref`. Branch `stable`, as today (D44).
+  To settle first: how the repository carries over between releases (a
+  Pages deploy replaces the whole site), e.g. pulled back from the live
+  site before adding the new build.
+- **Installer:** `install-steamos.sh` adds the remote and installs from
+  it; Steam shortcut and artwork as today. The release `.flatpak` keeps
+  working offline and is built with `--repo-url`, so bundle installs also
+  update from the repository. Existing installs move over on their next
+  run of the installer.
+- **Docs:** README and INSTALL say how to add the remote by hand and that
+  updates come through Discover or `flatpak update`.
+- **Tests:** a deploy to a test path first, installed into an isolated
+  `FLATPAK_USER_DIR`: fresh install, update from the previous version,
+  signature refused when tampered with, bundle install switching to the
+  remote.
 
 ## Next, in this order
 
@@ -211,14 +231,11 @@ the fallback). Meant to be the first version offered through FlatPark (see
 
 ## Floating (any time)
 
-- **Publish on Flathub**: install from Discover in Desktop Mode, automatic
-  updates, much wider reach. Flathub's rules on AI-generated material decide
-  how: the AI use must be disclosed, reviewers may reject on its extent, and
-  the Flathub manifest, PR text and replies must be written by a person, so
-  this repository's manifest can't be reused. Check the current text of the
-  requirements before starting. FlatPark (AI-built apps accepted, downloads a
-  release file instead of building) is the plan B. The Steam
-  shortcut and artwork still need `install-steamos.sh` or manual steps.
+- **Flathub or FlatPark**: not planned (D81). Flathub's rules on
+  AI-generated apps, and a manifest, PR text and replies written by a
+  person for every change, are too much to maintain; FlatPark only wraps a
+  release download, not an app built from source like this one. Either
+  could be a second channel later, next to the app's own repository.
   Publishing on Steam itself is possible later but needs a second build
   for the Steam Linux Runtime.
 
