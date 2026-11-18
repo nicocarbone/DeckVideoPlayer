@@ -117,7 +117,9 @@ def user_config_dirs():
 
 
 def steam_running():
-    return subprocess.run(["pgrep", "-x", "steam"], stdout=subprocess.DEVNULL).returncode == 0
+    # This user's Steam only (on a shared PC another user's Steam doesn't matter).
+    return subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "steam"],
+                          stdout=subprocess.DEVNULL).returncode == 0
 
 
 def load_shortcuts(config_dir):

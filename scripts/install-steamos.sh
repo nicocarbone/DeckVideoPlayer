@@ -20,7 +20,8 @@ config_dir="$HOME/.config/deckvideoplayer"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 
-steam_running() { pgrep -x steam >/dev/null 2>&1; }
+# This user's Steam only (on a shared PC another user's Steam doesn't matter).
+steam_running() { pgrep -u "$(id -u)" -x steam >/dev/null 2>&1; }
 
 # Uninstalls installed branches of the app (keeps settings and data):
 # all of them, or all but KEEP (remove_installed_branches [KEEP]).

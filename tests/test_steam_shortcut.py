@@ -127,11 +127,13 @@ class ShortcutFileTests(unittest.TestCase):
         self.assertEqual(self.ours()["LaunchOptions"], "run " + ss.FLATPAK_ID)
 
     def test_failed_save_leaves_file_intact(self):
-        before = open(self.vdf, "rb").read()
+        with open(self.vdf, "rb") as f:
+            before = f.read()
         with mock.patch.object(ss, "vdf_dump", side_effect=TypeError("boom")):
             with self.assertRaises(TypeError):
                 ss.cmd_add(None)
-        self.assertEqual(open(self.vdf, "rb").read(), before)
+        with open(self.vdf, "rb") as f:
+            self.assertEqual(f.read(), before)
 
 
 if __name__ == "__main__":

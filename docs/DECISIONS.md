@@ -2472,3 +2472,17 @@ against the code; the Status lines in ISSUES.md give the outcome.
   second channel.
 - **Kept:** the GitHub release with the `.flatpak` bundle and the
   installer archive, for offline installs.
+
+## D82. Steam detection per user; test file handles (from DeckReader's audit)
+
+DeckReader reuses `scripts/install-steamos.sh`'s Steam check and
+`scripts/steam_shortcut.py`; its first audit (DeckReader's D22, items PKG-3
+and PKG-4) applies here too, so the fixes are kept identical in both
+projects:
+
+- "Is Steam running?" (`pgrep -x steam`) matched any user's Steam: on a
+  shared PC another user's session made the installer use
+  `steamos-add-to-steam` or refuse to edit `shortcuts.vdf` for nothing. Both
+  scripts now ask `pgrep -u <own uid>`.
+- `tests/test_steam_shortcut.py` read the VDF with unclosed `open()` calls
+  (ResourceWarning in `tests/run.sh`); now `with` blocks.
