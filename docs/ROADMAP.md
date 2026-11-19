@@ -302,3 +302,40 @@ from v0.9.0 by the owner):
   timing), default against `display_resample = yes`.
 - **Thumbnails / posters** in the browser.
 - **Touchscreen** input.
+- **arm64 build** (low priority; only once there is an arm64 device to
+  test on). For arm64 SteamOS devices (Valve's Steam Frame) and for
+  DroidDeck below.
+  - *Build:* nothing in the Flatpak is tied to x86 (LuaJIT, FFmpeg,
+    libplacebo, mpv, QuickJS-NG and the helpers are built from source,
+    yt-dlp is a Python zipapp, the Freedesktop runtime has aarch64). CI
+    would build a second bundle on GitHub's arm64 Linux runners, the
+    release would carry both, and the installer would pick one by
+    `uname -m`. A day or two.
+  - *Playing well:* the open part. Hardware decoding is VA-API today
+    (`hwdec=auto-safe`); Qualcomm's decoder is behind V4L2 on Linux, which
+    mpv only uses by copying frames back (`v4l2m2m-copy`), and without it
+    4K HEVC and AV1 are software decoding (battery, maybe dropped frames).
+    Device detection reads the Deck's DMI names (`display.lua`), so an ARM
+    device is a generic screen; HDR and refresh switching depend on its
+    gamescope and screen.
+  - *DroidDeck* ([github.com/Droid-Deck/DroidDeck](https://github.com/Droid-Deck/DroidDeck),
+    GPL-3.0, started in September 2026, 0.7.1 in November): an Android app
+    that runs a Linux runtime under proot with Steam's arm64 client in
+    gamescope, on Adreno GPUs through Mesa's Turnip (Adreno 730 or newer,
+    or 8xx; others experimental), with PulseAudio/PipeWire sound. Its
+    store installs arm64 Flatpaks from Flathub through its own bubblewrap
+    shim, and it can add AppImages, also the latest arm64 AppImage of a
+    GitHub repository. For this app, to check on a device:
+    - how to install it: the app isn't on Flathub (D81). A `.flatpak`
+      bundle, the v0.10.0 repository as a remote, or an arm64 AppImage
+      (a second package format, only if nothing else works);
+    - decoding: Android keeps the hardware decoder behind MediaCodec, so
+      inside the runtime mpv most likely decodes in software (fine for
+      1080p H.264 on a Snapdragon 8-class CPU; 4K HEVC, AV1 and battery
+      to measure);
+    - whether the screen stays on during a film (D43 asks the desktop's
+      ScreenSaver service, which may not reach Android), where the
+      library folders and SD cards appear inside the runtime, and how
+      much proot slows the subprocesses (curl, ffprobe, yt-dlp, listings);
+    - controller input through Steam as on a Deck, Vulkan output
+      (`gpu-next`) on Turnip, no HDR.
