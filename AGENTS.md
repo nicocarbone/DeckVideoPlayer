@@ -216,9 +216,10 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
-  v0.9.0: mpv 0.42 once 0.42.1 exists, and the app's own signed Flatpak
-  repository on GitHub Pages, updated by CI on each tag (D81). Flathub and
-  FlatPark not planned.
+  v0.9.0: mpv 0.42 once 0.42.1 exists, the app's own signed Flatpak
+  repository on GitHub Pages, updated by CI on each tag (D81), and online
+  videos (`.m3u` lists of links, yt-dlp + QuickJS-NG, downloads). Flathub
+  and FlatPark not planned.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits
