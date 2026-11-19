@@ -1797,6 +1797,15 @@ end
         and ON.is_direct("http://example.org/live/stream.m3u8")
         and not ON.is_direct("https://archive.org/details/BigBuckBunny_124")
         and not ON.is_direct("https://www.youtube.com/watch.mp4?v=" .. BBB))
+    local WP = "https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny_4K.webm"
+    check("online wiki file page is a page", ON.is_wiki_page(WP) and not ON.is_direct(WP)
+        and ON.play_path(WP) == "ytdl://" .. WP
+        and not ON.is_direct("https://de.wikipedia.org/wiki/Datei%3AFilm.ogv")
+        and not ON.is_direct("https://en.m.wikipedia.org/wiki/File:Clip.webm"))
+    check("online wiki: real files stay files", ON.is_direct("https://upload.wikimedia.org/wikipedia/commons/a/ab/Film.webm")
+        and ON.is_direct("https://example.org/wiki/films/Film.mp4")
+        and ON.is_direct("https://example.org/videos/Show:%20Pilot.mkv")
+        and not ON.is_wiki_page("https://example.org/wiki/films/Film.mp4"))
     check("online manifests", ON.is_manifest("https://example.org/live/a.m3u8") and ON.is_manifest("https://example.org/d.mpd")
         and not ON.is_manifest("https://example.org/a.mp4"))
     eq("online file name", ON.file_name("https://example.org/films/A%20Film.mp4?x"), "A Film.mp4")

@@ -2531,7 +2531,9 @@ projects:
   so several lists sit side by side; other tools write them; titles fit
   (`#EXTINF`).
 - **Playback:** links to a video file or a streaming manifest (`.mp4`,
-  `.mkv`, `.m3u8`, `.mpd`…, by extension) play as they are. Everything
+  `.mkv`, `.m3u8`, `.mpd`…, by extension) play as they are; not a wiki's
+  page about a file (`/wiki/File:Film.webm` on Wikipedia and Wikimedia
+  Commons, `Datei:`… in other languages), which only ends like one. Everything
   else goes through mpv's own yt-dlp hook (`ytdl_hook.lua`), which handles
   separate video and audio, subtitles and chapters. The hook is loaded
   (`ytdl=yes`) but confined to addresses the app marks `ytdl://`: its

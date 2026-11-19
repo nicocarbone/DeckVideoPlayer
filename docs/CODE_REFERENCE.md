@@ -674,8 +674,9 @@ characters), `normalize(url)` (scheme and host in lowercase), `is_youtube`,
 `youtube_id(url)` (watch, youtu.be, shorts, live, embed),
 `youtube_folder(url)` (a playlist or channel link in the form yt-dlp lists
 as one playlist), `canonical(url)` (YouTube's own form, else
-normalized; the key of a link), `file_name`, `is_direct` (a video file or manifest by extension:
-played as is), `is_manifest` (`.m3u8` / `.mpd`: downloaded by yt-dlp),
+normalized; the key of a link), `file_name`, `is_wiki_page(url)` (`/wiki/<Namespace>:…`: a page,
+whatever it ends with), `is_direct` (a video file or manifest by
+extension, not a wiki page: played as is), `is_manifest` (`.m3u8` / `.mpd`: downloaded by yt-dlp),
 `play_path(url)` (the link, or `ytdl://<canonical>`), `extinf_title`,
 `parse_m3u(text)` → links `{url, key, title, folder}` and skipped
 `{count, by}`, `main_reason(by)`, `fallback_label(url, clean)`, `site`,

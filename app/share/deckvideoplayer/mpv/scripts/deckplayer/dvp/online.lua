@@ -179,9 +179,17 @@ function M.file_name(url)
     return name
 end
 
+-- Pure: whether a link is a wiki's page about a file: "/wiki/File:Film.webm"
+-- on Wikipedia and Wikimedia Commons ("Datei:", "Archivo:"… in other
+-- languages). It ends like a video file, but it is a page (yt-dlp plays it).
+function M.is_wiki_page(url)
+    local _, _, path = M.split_url(url)
+    return path ~= nil and unescape(path):match("^/wiki/[^/]+:") ~= nil
+end
+
 -- Pure: whether a link is a video file (played without yt-dlp).
 function M.is_direct(url)
-    if M.is_youtube(url) then return false end
+    if M.is_youtube(url) or M.is_wiki_page(url) then return false end
     local name = M.file_name(url)
     return name ~= nil and DIRECT[util.extension(name)] == true
 end
