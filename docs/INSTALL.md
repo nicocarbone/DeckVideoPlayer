@@ -402,15 +402,33 @@ connection"); age-restricted videos always need it. The app can use the
 cookies of a browser where you are signed in to YouTube:
 
 1. In a browser (on the Deck in Desktop Mode, or on a PC), install an
-   extension that exports cookies in the *cookies.txt* (Netscape) format.
-2. Open a **private window**, sign in to YouTube there, open a new tab and
-   close the YouTube tab, export the cookies for youtube.com as
-   `cookies.txt`, then **close the private window** without signing out.
-   (YouTube changes the cookies of an open YouTube tab often; cookies from
-   a session that is never used again keep working.)
-3. Put the file in `~/.config/deckvideoplayer/cookies.txt` (next to
-   `config.ini`). The app uses it from the next video on; it never
-   changes the file.
+   extension that exports cookies in the *cookies.txt* (Netscape) format:
+   **cookies.txt** (by Lennon Hill) in Firefox, **Get cookies.txt
+   LOCALLY** in Chrome, Chromium or Brave. (Not "Get cookies.txt" without
+   "LOCALLY": it was removed from Chrome's store for sending data away.)
+   Allow it in private windows: in Firefox, `about:addons` → the extension
+   → *Run in Private Windows: Allow*; in Chrome, the extension's details →
+   *Allow in Incognito*.
+2. Open a **private window** (Ctrl+Shift+P in Firefox, Ctrl+Shift+N in
+   Chrome) and sign in to YouTube there, preferably with a spare account
+   (see below).
+3. In the same tab, go to `https://www.youtube.com/robots.txt`, and keep
+   it the only tab of the private window. Still on youtube.com, but no
+   YouTube page is running to change the cookies.
+4. Export the cookies of the **current site** with the extension, as
+   `cookies.txt`.
+5. **Close the private window without signing out.** Signing out would
+   end the session; one that is never opened again keeps working.
+6. Put the file in `~/.config/deckvideoplayer/cookies.txt`, next to
+   `config.ini` (on a Deck: `/home/deck/.config/deckvideoplayer/`; in
+   Dolphin, Ctrl+H shows the hidden `.config` folder). Made on a PC, copy
+   it over (a USB stick, KDE Connect…). The app reads it again for every
+   video and never changes it: nothing needs restarting.
+
+The file starts with `# Netscape HTTP Cookie File`, then one line per
+cookie (`.youtube.com`, `.google.com`). If videos still say "YouTube asks
+to sign in", the file isn't in that place under that name, or the session
+ended: export it again.
 
 Keep in mind:
 - Anyone with this file can use your Google account. Don't share it.
