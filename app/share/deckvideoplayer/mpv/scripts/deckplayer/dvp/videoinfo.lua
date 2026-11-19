@@ -120,7 +120,8 @@ local function sub_row(i, t)
 end
 
 -- Sections from a normalized description:
--- {file = {source, name, folder, size, duration, container, bitrate},
+-- {file = {source, name, channel, uploaded, folder, link, size, duration,
+--          container, bitrate},
 --  video = {codec, profile, width, height, fps, bit_depth, primaries,
 --           transfer, dv_profile, hdr10plus, bitrate, mastering, maxcll, maxfall} or nil,
 --  audio = {{lang, title, codec, profile, layout, channels, default, display}},
@@ -131,7 +132,10 @@ function M.sections(d)
     local rows = {}
     add(rows, "Source", f.source)
     add(rows, "Name", f.name)
+    add(rows, "Channel", f.channel)
+    add(rows, "Uploaded", f.uploaded)
     add(rows, "Folder", f.folder)
+    add(rows, "Link", f.link)
     add(rows, "Size", M.format_size(f.size))
     add(rows, "Duration", f.duration and f.duration > 0 and util.format_time(f.duration))
     add(rows, "Container", f.container)
@@ -346,6 +350,80 @@ function M.from_jellyfin(it, source)
                                    forced = s.IsForced == true, sdh = s.IsHearingImpaired == true,
                                    default = s.IsDefault == true, external = s.IsExternal == true}
         end
+    end
+    return d
+end
+
+-- yt-dlp's codec names ("avc1.640028", "vp09.02.51.10", "mp4a.40.2",
+-- "ec-3") as FFmpeg's, with the bit depth they say when they say one.
+local YTDLP_CODECS = {
+    {"^avc", "h264"}, {"^h264", "h264"}, {"^hev", "hevc"}, {"^hvc", "hevc"}, {"^h265", "hevc"},
+    {"^vp0?9", "vp9"}, {"^vp0?8", "vp8"}, {"^av0?1", "av1"}, {"^mp4a", "aac"}, {"^aac", "aac"},
+    {"^opus", "opus"}, {"^vorbis", "vorbis"}, {"^ec%-?3", "eac3"}, {"^ac%-?3", "ac3"}, {"^mp3", "mp3"},
+    {"^flac", "flac"},
+    -- Dolby Vision: its HEVC, AV1 or AVC base.
+    {"^dvh", "hevc"}, {"^dav1", "av1"}, {"^dva", "h264"},
+}
+
+local function ytdlp_codec(c)
+    c = tostring(c or ""):lower()
+    if c == "" or c == "none" then return nil end
+    for _, m in ipairs(YTDLP_CODECS) do
+        if c:find(m[1]) then return m[2] end
+    end
+    return c:match("^[%w]+")
+end
+
+local function ytdlp_depth(c)
+    c = tostring(c or ""):lower()
+    local vp9 = c:match("^vp09%.(%d%d)")
+    if vp9 then return tonumber(vp9) >= 2 and 10 or 8 end
+    local av1 = c:match("^av01%.%d+%.%w+%.(%d%d)")
+    return tonumber(av1)
+end
+
+-- Normalized description of an online video from yt-dlp's -J answer (the
+-- formats it chose: `requested_formats`, or the format itself).
+-- `source`: the Source row.
+function M.from_ytdlp(j, source)
+    local parts = type(j.requested_formats) == "table" and j.requested_formats or {j}
+    local size, have_size = 0, true
+    local d = {file = {
+        source = source, name = j.title,
+        channel = j.channel or j.uploader,
+        uploaded = type(j.upload_date) == "string" and j.upload_date:match("^(%d%d%d%d)(%d%d)(%d%d)$")
+            and (j.upload_date:sub(1, 4) .. "-" .. j.upload_date:sub(5, 6) .. "-" .. j.upload_date:sub(7, 8)) or nil,
+        link = j.webpage_url,
+        duration = tonumber(j.duration),
+        bitrate = tonumber(j.tbr) and j.tbr * 1000,
+    }, audio = {}, subs = {}}
+    for _, f in ipairs(parts) do
+        local s = tonumber(f.filesize) or tonumber(f.filesize_approx)
+        if s then size = size + s else have_size = false end
+        local vcodec = ytdlp_codec(f.vcodec)
+        if vcodec and not d.video then
+            local range = tostring(f.dynamic_range or "")
+            local hdr = range:find("HDR") ~= nil or range == "HLG" or range == "DV"
+            d.video = {codec = vcodec, width = tonumber(f.width), height = tonumber(f.height),
+                       fps = tonumber(f.fps), bit_depth = ytdlp_depth(f.vcodec) or (hdr and 10 or nil),
+                       primaries = hdr and "bt2020" or nil,
+                       transfer = (range == "HLG" and "arib-std-b67") or (range:find("HDR10") and "smpte2084")
+                           or (range == "DV" and "smpte2084") or nil,
+                       bitrate = tonumber(f.vbr) and f.vbr * 1000}
+        end
+        local acodec = ytdlp_codec(f.acodec)
+        if acodec then
+            d.audio[#d.audio + 1] = {lang = f.language, codec = acodec, channels = tonumber(f.audio_channels)}
+        end
+    end
+    if have_size and size > 0 then d.file.size = size end
+    local subs = type(j.requested_subtitles) == "table" and j.requested_subtitles or {}
+    local langs = {}
+    for lang in pairs(subs) do langs[#langs + 1] = lang end
+    table.sort(langs)
+    for _, lang in ipairs(langs) do
+        local s = subs[lang]
+        d.subs[#d.subs + 1] = {lang = lang, codec = type(s) == "table" and s.ext or nil, external = true}
     end
     return d
 end

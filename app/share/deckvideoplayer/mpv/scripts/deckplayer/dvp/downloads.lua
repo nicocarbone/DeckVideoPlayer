@@ -9,7 +9,11 @@
 --
 -- One download at a time, with curl (dvp/http.lua), into "<file>.part",
 -- renamed once complete and the size checked. A stopped or interrupted
--- download continues where it ended (HTTP ranges). Network errors are
+-- download continues where it ended (HTTP ranges). Online videos (D84,
+-- dvp/online.lua) that aren't a plain video file are fetched by yt-dlp
+-- instead, into a hidden ".<file>.parts" folder next to the file (video
+-- and audio, joined by ffmpeg), then moved into place with their
+-- subtitles; yt-dlp continues its own partial files. Network errors are
 -- retried a few times; after that, and after the app was closed, the
 -- download waits for the user (Downloads → Resume): network work only
 -- happens on request.
@@ -75,6 +79,11 @@ end
 -- `server` table: kind, name, title, year, show, season, episode).
 function M.relative_path(item, ext)
     local name = M.clean_name(item.name)
+    if item.kind == "online" then
+        -- An online video: in a folder named after its list.
+        local list = M.clean_name(item.show) or "Online videos"
+        return list .. "/" .. (name or M.clean_name(item.title) or "Video") .. "." .. ext
+    end
     if item.kind == "episode" then
         local show = M.clean_name(item.show) or "Unknown show"
         local s, e = tonumber(item.season), tonumber(item.episode)
@@ -96,22 +105,44 @@ local SUB_EXTS = {srt = true, ass = true, vtt = true}
 
 -- Subtitle files next to the video at `video`: "<video>.<lang>.<ext>"
 -- (mpv loads them with the video and reads the language), numbered when a
--- language has several. subs: {{url or file, lang, ext}} (a URL to fetch,
--- or a file to copy). Returns {{url, file, path}}.
+-- language has several. subs: {{url or file, lang, ext, move}} (a URL to
+-- fetch, or a file to copy, or to move with `move`). Languages are tags
+-- such as "en", "pt-br", "es-419" ("pt_BR" becomes "pt-br"). Returns
+-- {{url, file, path, move}}.
 function M.subtitle_paths(video, subs)
     local base = util.strip_extension(video)
     local seen, out = {}, {}
     for _, s in ipairs(subs or {}) do
-        local lang = type(s.lang) == "string" and #s.lang <= 12 and s.lang:match("^%a[%a%-]*$") and s.lang:lower()
-            or "und"
+        local lang = type(s.lang) == "string" and (s.lang:gsub("_", "-")) or ""
+        lang = #lang <= 12 and lang:match("^%a[%w%-]*$") and lang:lower() or "und"
         if SUB_EXTS[s.ext] then
             local key = lang .. "." .. s.ext
             seen[key] = (seen[key] or 0) + 1
             local n = seen[key] > 1 and ("." .. seen[key]) or ""
-            out[#out + 1] = {url = s.url, file = s.file, path = base .. n .. "." .. lang .. "." .. s.ext}
+            out[#out + 1] = {url = s.url, file = s.file, path = base .. n .. "." .. lang .. "." .. s.ext, move = s.move}
         end
     end
     return out
+end
+
+-- The hidden folder a yt-dlp download is made in, next to `path`.
+function M.parts_dir(path)
+    return util.join(util.dirname(path), "." .. util.basename(path) .. ".parts")
+end
+
+-- Pure: yt-dlp's subtitle files in its folder ("video.en.vtt") as subs for
+-- subtitle_paths ({file, lang, ext, move}), sorted by name.
+function M.ytdlp_subs(dir, names)
+    local subs = {}
+    table.sort(names)
+    for _, n in ipairs(names) do
+        local lang, ext = n:match("^video%.([%w%-_]+)%.(%a+)$")
+        ext = ext and ext:lower()
+        if lang and SUB_EXTS[ext] then
+            subs[#subs + 1] = {file = util.join(dir, n), lang = lang, ext = ext, move = true}
+        end
+    end
+    return subs
 end
 
 -- The id of a server item's download: backend, server, item.
@@ -127,9 +158,13 @@ function M.format_size(bytes)
 end
 
 -- Whether a download of `size` bytes, `have` of them already on disk,
--- fits in `avail` free bytes with the margin left over.
-function M.enough_space(avail, size, have)
-    return avail >= (size or 0) - (have or 0) + M.SPACE_MARGIN
+-- fits in `avail` free bytes with the margin left over. `joined`: its
+-- parts are then joined into a new file (yt-dlp: video and audio, before
+-- the parts are deleted), which needs `size` more for a while.
+function M.enough_space(avail, size, have, joined)
+    local need = (size or 0) - (have or 0)
+    if joined then need = need + (size or 0) end
+    return avail >= need + M.SPACE_MARGIN
 end
 
 -- What to do once curl ends: "done" (complete, if the size matches),
@@ -161,7 +196,9 @@ function M.status_text(job, have, speed)
     -- reason, not a guess.
     if job.retry_at then return (job.retry_why or "Network error") .. " · trying again…" end
     if not have or have == 0 then return "Starting…" end
-    local done = job.size and job.size > 0 and string.format("%d%%", math.floor(100 * have / job.size))
+    -- (yt-dlp's sizes can be estimates, and joining video and audio
+    -- writes the file again: never "100%" before it is done.)
+    local done = job.size and job.size > 0 and string.format("%d%%", math.min(99, math.floor(100 * have / job.size)))
         or M.format_size(have)
     if speed and speed > 0 then return done .. " · " .. M.format_size(speed) .. "/s" end
     return done
@@ -221,6 +258,14 @@ function M:find(item)
     return nil
 end
 
+-- The finished download saved at `path`, if any.
+function M:find_path(path)
+    for _, job in ipairs(self.jobs) do
+        if job.status == "done" and job.path == path then return job end
+    end
+    return nil
+end
+
 -- Whether a server item can be downloaded: its backend supports it and
 -- there is a download folder (an empty download_folder turns them off).
 function M:can_download(item)
@@ -239,7 +284,7 @@ function M:tag(item)
 end
 
 local FIELDS = {"backend", "machine", "key", "rating_key", "kind", "title", "name", "year", "show",
-                "season", "episode"}
+                "season", "episode", "url", "parent"}
 
 -- Adds server items (entries' `server` tables) to the queue. Returns how
 -- many were new.
@@ -252,6 +297,8 @@ function M:add(items)
                 if type(item[k]) == "string" or type(item[k]) == "number" then job[k] = item[k] end
             end
             if not job.title then job.title = job.name or "Video" end
+            -- (An online video whose title isn't known yet: named when it starts.)
+            if item.untitled then job.untitled = true end
             self.jobs[#self.jobs + 1] = job
             added = added + 1
         end
@@ -301,6 +348,26 @@ local function file_size(path)
     return info and info.size or 0
 end
 
+-- Bytes of a folder's files (a yt-dlp download's folder).
+local function dir_size(dir)
+    local n = 0
+    for _, name in ipairs(util.readdir(dir, "files") or {}) do n = n + file_size(util.join(dir, name)) end
+    return n
+end
+
+-- Removes a yt-dlp download's folder and the files in it.
+local function remove_parts(dir)
+    for _, name in ipairs(util.readdir(dir, "files") or {}) do os.remove(util.join(dir, name)) end
+    os.remove(dir)
+end
+
+-- Bytes of a download on disk so far.
+function M:have(job)
+    if not job.path then return 0 end
+    if job.ytdlp then return dir_size(M.parts_dir(job.path)) end
+    return file_size(job.path .. ".part")
+end
+
 -- Free space where the download goes. cb(ok, avail).
 function M:check_space(dir, job, cb)
     if not job.size then return cb(true) end
@@ -309,7 +376,7 @@ function M:check_space(dir, job, cb)
         function(_, res)
             local avail = res and res.status == 0 and tonumber(tostring(res.stdout or ""):match("(%d+)%s*$"))
             if not avail then return cb(true) end
-            cb(M.enough_space(avail, job.size, file_size(job.path .. ".part")), avail)
+            cb(M.enough_space(avail, job.size, self:have(job), job.ytdlp), avail)
         end)
 end
 
@@ -330,6 +397,11 @@ function M:start(job)
             return self:retry(job, err or "Can't reach the server")
         end
         job.size = info.size or job.size
+        if info.ytdlp then
+            -- (New formats: the parts of the old ones are of no use.)
+            if info.ytdlp.fresh and job.path then remove_parts(M.parts_dir(job.path)) end
+            job.ytdlp, job.formats = true, info.ytdlp.formats
+        end
         -- Also the subtitles downloaded (OpenSubtitles) while streaming it.
         local subs = {}
         for _, s in ipairs(info.subs or {}) do subs[#subs + 1] = s end
@@ -356,9 +428,11 @@ function M:start(job)
                 library.prune_folders(dir, library.download_folder(self.ctx.cfg))
                 return self:finish(job, "fail", "Not enough free space (" .. M.format_size(avail) .. " free)")
             end
-            job.before = file_size(job.path .. ".part")
+            job.before = self:have(job)
+            if info.ytdlp then return self:start_ytdlp(job, run, backend, info.ytdlp, subs) end
             job.handle = http.download({url = info.url, headers = info.headers, output = job.path .. ".part",
-                                        timeout = 0, resume = true, fail = true, tag = "download"},
+                                        timeout = 0, resume = true, fail = true, tag = "download",
+                                        follow = info.follow},
                 function(code, status, killed)
                     if job.run ~= run or killed then return end
                     job.handle = nil
@@ -366,6 +440,44 @@ function M:start(job)
                 end)
         end)
     end)
+end
+
+-- An online video through yt-dlp (D84): into its folder, then moved into
+-- place with its subtitles (yt-dlp's, and `subs`: those downloaded from
+-- OpenSubtitles while streaming it).
+function M:start_ytdlp(job, run, backend, spec, subs)
+    local dir = M.parts_dir(job.path)
+    if not util.mkdir_p(dir) then return self:finish(job, "fail", "Can't create " .. dir) end
+    job.handle = backend:download(spec, dir, function(res)
+        if job.run ~= run or res.killed_by_us then return end
+        job.handle = nil
+        self:ytdlp_done(job, run, backend, res, subs)
+    end)
+end
+
+function M:ytdlp_done(job, run, backend, res, subs)
+    local dir = M.parts_dir(job.path)
+    local video = util.join(dir, "video.mkv")
+    if res.status ~= 0 or not util.file_exists(video) then
+        if self:have(job) > (job.before or 0) then job.tries = 0 end
+        local why, retry = backend.error_text(res.stderr)
+        if res.error_string == "init" then why, retry = "yt-dlp is missing", false end
+        msg.verbose("downloads: yt-dlp " .. tostring(res.status) .. ": " .. util.trim(tostring(res.stderr or "")))
+        if retry then return self:retry(job, why) end
+        return self:finish(job, "fail", why)
+    end
+    local ok, err = os.rename(video, job.path)
+    if not ok then return self:finish(job, "fail", "Can't save the file: " .. tostring(err)) end
+    job.saved = true
+    job.size = file_size(job.path)
+    local all, copies = M.ytdlp_subs(dir, util.readdir(dir, "files") or {}), {}
+    for _, s in ipairs(subs or {}) do all[#all + 1] = s end
+    for _, s in ipairs(M.subtitle_paths(job.path, all)) do
+        if s.move then os.rename(s.file, s.path) else copies[#copies + 1] = s end
+    end
+    remove_parts(dir)
+    self:save()
+    self:fetch_subtitles(job, run, copies)
 end
 
 -- A network problem: try again in a while, a few times in a row (any
@@ -403,6 +515,7 @@ function M:transferred(job, run, code, status, subs, headers)
     local ok, err = os.rename(part, job.path)
     if not ok then return self:finish(job, "fail", "Can't save the file: " .. tostring(err)) end
     job.saved = true   -- the file is ours (cancel removes it)
+    job.size = file_size(job.path)   -- (unknown until now for some links)
     self:save()
     self:fetch_subtitles(job, run, subs, headers)
 end
@@ -506,6 +619,7 @@ function M:cancel(job)
     halt(self, job)
     if job.path then
         os.remove(job.path .. ".part")
+        if job.ytdlp then remove_parts(M.parts_dir(job.path)) end
         -- Saved, but stopped while fetching its subtitles.
         if job.saved then
             os.remove(job.path)
@@ -569,7 +683,7 @@ function M:sample()
         self.speed = nil
         return
     end
-    local have, now = file_size(job.path .. ".part"), mp.get_time()
+    local have, now = self:have(job), mp.get_time()
     local last = self.last_sample
     if last and last.job == job and now > last.t and have >= last.have then
         local rate = (have - last.have) / (now - last.t)
@@ -582,7 +696,7 @@ end
 
 function M:status_of(job)
     local running = job == self.running
-    return M.status_text(job, running and job.path and file_size(job.path .. ".part") or nil,
+    return M.status_text(job, running and job.path and self:have(job) or nil,
                          running and self.speed or nil)
 end
 

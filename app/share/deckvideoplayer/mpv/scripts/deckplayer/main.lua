@@ -33,6 +33,7 @@ local Plex = require "dvp.plex"
 local Servers = require "dvp.servers"
 local Jellyfin = require "dvp.jellyfin"
 local Dlna = require "dvp.dlna"
+local Online = require "dvp.online"
 local Downloads = require "dvp.downloads"
 local Looks = require "dvp.looks"
 local SubMemory = require "dvp.submemory"
@@ -189,8 +190,12 @@ local jellyfin = Jellyfin.new(opts.data_dir, {urls = cfg.jellyfin.server})
 jellyfin.readonly = opts.jellyfin_readonly
 -- DLNA servers keep their progress here, like local files (D66).
 local dlna = Dlna.new(opts.data_dir, {resume = resume, clean_names = cfg.interface.clean_names})
+-- Lists of online videos (D84): links played through yt-dlp, progress
+-- kept here like DLNA's.
+local online = Online.new(opts.data_dir, {resume = resume, cfg = cfg, device = display.device,
+                                          config_dir = cfg.path and util.dirname(cfg.path)})
 -- Media servers behind one interface (D55).
-local servers = Servers.new({plex, jellyfin, dlna})
+local servers = Servers.new({plex, jellyfin, dlna, online})
 
 -- Decoding chosen in the Video menu (D62), with the video's resume entry.
 local function save_decoder(key)
@@ -316,11 +321,14 @@ local ctx = {
     keepawake = keepawake,
     hdr = hdr,
     app_dir = app_dir, data_dir = opts.data_dir, plex = plex, jellyfin = jellyfin, dlna = dlna, servers = servers,
+    online = online,
     finished = function() state.finished_path = state.current_path end,
 }
 ctx.about = function() About.open(ctx) end
 ctx.subtitles = SubDownload.new(ctx, opts.data_dir, opts.opensubtitles_url)
 ctx.downloads = Downloads.new(ctx, opts.data_dir)
+-- A downloaded online video plays from its file, from its list too.
+online.downloads = ctx.downloads
 -- Without a data folder these remember only until the app closes.
 local memory_dir = cfg.playback.remember_settings and opts.data_dir or nil
 ctx.looks = Looks.new(memory_dir)
@@ -348,6 +356,10 @@ ctx.changed = function(job)
     browser:downloads_changed()
 end
 ctx.play_path = function(path) browser:play_path(path) end
+-- Titles of an online list arrive after it is shown.
+online.on_titles = function()
+    if state.screen == "browser" then browser:render() end
+end
 ctx.browse = function(folder, select) browser:open_folder(folder, select) end
 ctx.delete = function(path, label) browser:delete_dialog(path, label) end
 
@@ -380,6 +392,19 @@ end)
 ---------------------------------------------------------------------------
 -- Playback lifecycle
 ---------------------------------------------------------------------------
+
+-- An online video (D84): mpv's yt-dlp hook (priority 10) reads its options
+-- when it runs, so they are set just before: the format for this screen,
+-- and a fresh copy of the cookies file. The previous run's answer is
+-- dropped, so an error message can't come from another video.
+mp.add_hook("on_load", 5, function()
+    local path = mp.get_property("path") or ""
+    if path:sub(1, 7) ~= "ytdl://" then return end
+    if mp.del_property then pcall(mp.del_property, "user-data/mpv/ytdl/json-subprocess-result") end
+    local format, raw = online:stream_options(mp.get_property_number("osd-height"))
+    mp.set_property("ytdl-format", format)
+    mp.set_property_native("ytdl-raw-options", raw)
+end)
 
 -- Decide the start position (resume) and restore track choices before the
 -- file is opened.
@@ -423,7 +448,8 @@ mp.add_hook("on_load", 50, function()
             mp.commandv("playlist-clear")
             mp.set_property("stream-open-filename", "dvp-server-unreachable://")
         end
-        mp.set_property("file-local-options/force-media-title", item.title or "")
+        -- (An online video without a title yet keeps the one yt-dlp gives.)
+        if not item.untitled then mp.set_property("file-local-options/force-media-title", item.title or "") end
         restore_decoder(backend.recent_key(item))
         state.server_subs = prep.subs
         player:set_markers(prep.markers)
@@ -495,6 +521,12 @@ mp.register_event("file-loaded", function()
     state.current_path = mp.get_property("path")
     if not save_timer:is_enabled() then save_timer:resume() end
     state.last_played = state.current_path
+    online:stream_done()
+    local item, backend = servers:item_for(state.current_path)
+    if backend == online and item.untitled then
+        online:loaded(item)
+        player:retitle(item.title)
+    end
     ctx.looks:start(Looks.memory_key(state.current_path, servers:item_for(state.current_path)))
     display:match(Display.video_fps(), function() player:render() end)
     keepawake:set_playing(not mp.get_property_native("pause"))
@@ -507,6 +539,7 @@ mp.register_event("file-loaded", function()
 end)
 
 mp.register_event("end-file", function(ev)
+    online:stream_done()
     if ev.reason == "error" then
         local item, backend = servers:item_for(state.loading_path)
         if item and state.server_prepared then
@@ -517,8 +550,9 @@ mp.register_event("end-file", function(ev)
             -- Unreachable: reconnect (maybe another address) next time.
             backend:forget_session(item.machine)
         end
-        toast(item and state.server_unreachable and ("Can't reach the " .. backend.NAME .. " server")
-              or "Could not play this file")
+        local why = backend == online and online:play_error(state.loading_path) or nil
+        toast(why or (item and state.server_unreachable and ("Can't reach the " .. backend.NAME .. " server"))
+              or "Could not play this file", why and 4 or nil)
         msg.error("playback failed: " .. tostring(ev.file_error))
     end
     state.current_path = nil
@@ -561,7 +595,9 @@ mp.observe_property("pause", "bool", function(_, paused)
     player:on_pause_change(paused)
 end)
 
-mp.observe_property("osd-dimensions", "native", function()
+mp.observe_property("osd-dimensions", "native", function(_, d)
+    -- (Video info of an online video asks yt-dlp for this screen's format.)
+    if type(d) == "table" and (d.h or 0) > 0 then online.screen_h = d.h end
     if state.screen == "browser" then browser:render() else player:render() end
     player:render_marker()
     player:render_info()
@@ -571,6 +607,7 @@ end)
 mp.register_event("shutdown", function()
     save_timer:kill()
     ctx.downloads:shutdown()
+    online:shutdown()   -- cookies copies of yt-dlp runs still going (D84)
     keepawake:set_playing(false)
     save_progress()
     resume:flush()

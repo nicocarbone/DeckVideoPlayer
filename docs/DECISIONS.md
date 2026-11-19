@@ -2447,7 +2447,7 @@ against the code; the Status lines in ISSUES.md give the outcome.
   version (XII 2.2) declined for now.
 - **Comment (XII 1.3):** the shader's bound updated to 0.5 % (1 % since the strengths were spread apart, D79).
 
-## D81. Publishing: the app's own Flatpak repository on GitHub Pages (v0.9.0)
+## D81. Publishing: the app's own Flatpak repository on GitHub Pages (v0.10.0)
 
 - **Goal:** installs that update themselves (Discover in Desktop Mode,
   `flatpak update`), without work by hand for each release.
@@ -2457,7 +2457,7 @@ against the code; the Status lines in ISSUES.md give the outcome.
   third-party review, nothing to do per release beyond the tag. Limits:
   a Pages site up to 1 GB and about 100 GB of traffic a month (soft), so
   the repository is pruned to a few versions and serves static deltas.
-  Plan in ROADMAP (v0.9.0).
+  Plan in ROADMAP (v0.10.0; first planned for v0.9.0, moved by the owner).
 - **Not chosen, Flathub:** since May 2026 its rules turn away apps made
   mostly with AI, and its manifest, pull requests and replies must be
   written by a person, so this repository's manifest can't be reused and
@@ -2513,3 +2513,204 @@ projects:
   - With the copy, the same update succeeds in the image.
   - A full action-style build of DeckReader in the image works.
 - The same step is in DeckReader's workflow (its D30).
+
+## D84. Online videos: lists of links, played and downloaded with yt-dlp (v0.9.0)
+
+- **What:** a `.m3u` file in any library folder shows as a folder named
+  after the file (`YouTube.m3u` → *YouTube*); each line is a link. Plain
+  links pasted one per line already make a valid `.m3u`; an
+  `#EXTINF:-1,Title` line above a link names it, other `#` lines are
+  comments. Only `http(s)` links count; other lines are skipped and
+  counted ("5 videos · 2 skipped" in the header; "No playable videos here
+  / 2 lines skipped: not a web address." when nothing is left, as DLNA's
+  unplayable videos, D76). The user's file is only read (a subprocess,
+  `head -c` 1 MB: it may be on a network share, D64), at most 5000 links.
+  Nothing appears until someone makes a list: opt-in by nature.
+- **Why `.m3u` and not a fixed file name (the owner's first idea):** a
+  plain list of links is already one; the file's name becomes the folder's,
+  so several lists sit side by side; other tools write them; titles fit
+  (`#EXTINF`).
+- **Playback:** links to a video file or a streaming manifest (`.mp4`,
+  `.mkv`, `.m3u8`, `.mpd`…, by extension) play as they are. Everything
+  else goes through mpv's own yt-dlp hook (`ytdl_hook.lua`), which handles
+  separate video and audio, subtitles and chapters. The hook is loaded
+  (`ytdl=yes`) but confined to addresses the app marks `ytdl://`: its
+  `include` is empty and its `exclude` matches every address, so a Plex,
+  Jellyfin or DLNA stream (and its token) never reaches yt-dlp, not even
+  through the hook's retry after a failed load (checked in its source:
+  `on_load_hook` returns early for unmarked, excluded addresses in both
+  hooks). The app sets `ytdl-format` and `ytdl-raw-options` in an
+  `on_load` hook at priority 5, just before the yt-dlp hook (10) reads
+  them, and reads the hook's `user-data/mpv/ytdl/json-subprocess-result`
+  afterwards: the title for an untitled link, and the reason when it
+  failed ("YouTube asks to sign in on this connection: add a cookies file
+  (see the guide)", "This video is private"…, from yt-dlp's message;
+  toast of 4 s).
+- **Format** (`format_spec`): `bv*+ba/b` sorted by `-S
+  lang,res:<height>,hdr:12,channels`: the original audio track first (the
+  owner's choice: YouTube now adds AI-dubbed tracks, and only one track is
+  fetched), then the resolution up to the height, HDR when the video has
+  it, surround sound when it has it (owner: keep both whatever the
+  device), then yt-dlp's own order. Height for streaming: the smallest of
+  360/480/720/1080/1440/2160 at least as tall as the screen (1080p on the
+  Deck's 800 lines: sharper downscaled than 720p upscaled). On a Deck
+  above 1080p (docked to a 4K TV), no AV1 when anything else exists (4K
+  AV1 stutters on its decoder, D62). Subtitles in `subtitle_languages`
+  (two-letter codes with any region or variant, `es($|-.*)`: `es-419`
+  but not Estonian `est`, D85), YouTube's automatic captions when there
+  are no others.
+- **JavaScript runtime:** yt-dlp needs one for YouTube since late 2025.
+  QuickJS-NG 0.18 (`qjs`, built from source, a few MB; yt-dlp supports it,
+  fast enough from 0.12) rather than Deno (yt-dlp's recommendation, bigger
+  than the whole app; it would restrict YouTube's code further, but that
+  code already runs inside the Flatpak sandbox). yt-dlp: the official
+  zipapp (Python sources with yt-dlp-ejs), on the runtime's Python 3.14.
+  FFmpeg now also builds its `ffmpeg` program (libraries already there):
+  yt-dlp joins downloaded video and audio with it (streams copied).
+- **YouTube's bot check, found while building this:** from the owner's
+  home connection YouTube answers every yt-dlp request with "Sign in to
+  confirm you're not a bot", with every client yt-dlp can pose as (its
+  title service, oEmbed, and its playlist pages still answer). Guides
+  describe it as YouTube distrusting the address. So, the owner's choice:
+  an optional **cookies file** (`[online] cookies_file`, default
+  `cookies.txt` next to config.ini, used only if it exists), exported from
+  a browser signed in to YouTube. yt-dlp gets a private copy (mode 600)
+  made before each run, under a name of its own, and deleted after it:
+  the user's file is never rewritten (yt-dlp saves cookies back), two runs
+  never share a copy, no copy outlives its run (those of runs still going
+  are deleted when the app closes, a crash's at the next start; D85). It gives access to the account, and
+  YouTube may block accounts used this way: the docs say so and suggest a
+  spare account.
+- **Titles:** from `#EXTINF`, else YouTube's oEmbed (four requests at a
+  time, fast, no JavaScript), else yt-dlp (15 links per run, two runs at
+  a time), when the list is opened and only while it is shown (network
+  only because the user opened it; D85); they appear as they arrive and
+  are cached in `online.json` (3000 most recent). Links to files keep
+  their file name.
+- **Playlists and channels (owner's request):** a YouTube playlist or
+  channel link (`/playlist?list=`, `/@name`, `/channel/`, `/c/`, `/user/`;
+  a channel's videos tab unless the link names its shorts, streams or
+  playlists) is a folder in the list; opening it asks yt-dlp for a flat
+  listing (titles and links, no page per video: about a second, even
+  where YouTube wants a sign-in to play), the first 200 (a channel's 200
+  most recent). Another site's link becomes a folder once the title run
+  says it is a playlist (yt-dlp `--print playlist:`), remembered in
+  `online.json`. Playlists inside one (a channel's playlists tab) are
+  folders too. A YouTube link that is neither (the home page, a feed) is
+  skipped.
+- **Progress:** in resume.json under `online:<link>`, the link in
+  YouTube's own form for YouTube videos (youtu.be, shorts, start times
+  and playlist parameters are the same video), so a video has one record
+  whatever list it is in, and its downloaded copy shares it wherever the
+  file is opened (D85). Watched marks, *Recently played* (tag "Online";
+  it plays with the rest of its list or playlist when that is still there
+  and answers within 15 s) as for DLNA. Looks and subtitle memory follow the list
+  (the item's `parent`).
+- **Downloads** (D60's queue and menu): links to files with curl (redirects
+  followed: no headers to leak); everything else with yt-dlp, a second
+  kind of transfer in `dvp/downloads.lua`: `yt-dlp -J` first (formats,
+  size, title, live or not; the format ids are kept in the job so a
+  download that continues later fetches the same ones), then the download
+  into a hidden `.<file>.parts` folder next to the file (hidden so the
+  download folder, a library source, doesn't show it), joined into
+  `video.mkv` (Matroska takes any codec mix and keeps HDR metadata), moved
+  to `<download_folder>/<list or playlist>/<Title>.mkv` with subtitles
+  next to it (`<Title>.<lang>.vtt`). Stop ends yt-dlp; resume lets it
+  continue its own partial files. Progress: the folder's size against
+  yt-dlp's (sometimes estimated) size, never "100 %" before it is done.
+  yt-dlp's network errors are retried like curl's. Live streams aren't
+  downloaded. Quality: `[online] download_quality`, `auto` = 1080p on a
+  Steam Deck (also docked), 2160p elsewhere (owner's choice), or a fixed
+  height. A downloaded video plays from its file when opened from its
+  list (owner's choice: offline, one progress record); it is also in the
+  download folder like Plex downloads.
+- **Keeping yt-dlp current:** `scripts/update-yt-dlp.py` points the
+  manifest at the newest release (zipapp checked against its
+  SHA2-256SUMS, LICENSE, THIRD_PARTY_NOTICES); a weekly workflow
+  (`update-yt-dlp.yml`) opens a pull request and starts its build. Nothing
+  is released without the owner. Until v0.10.0's repository (D81), a fix
+  reaches users as a release they install.
+- **Not in v0.9.0:** signing in (other than the cookies file), search,
+  thumbnails; more than 200 videos of a playlist.
+- **Tested:** unit tests (parsing, YouTube addresses, formats, errors,
+  yt-dlp answers, names, cookies copies). In headless gamescope with
+  `tools/mock-online.py` (files with Range, pages yt-dlp's generic
+  extractor reads, a DASH stream with HDR10 VP9 and SDR H.264 video,
+  stereo and 5.1 audio): lists, skipped lines, titles (oEmbed and
+  yt-dlp), direct playback, yt-dlp playback (the HDR rendition chosen,
+  hardware decoded), Video info, downloads with curl and with yt-dlp
+  (stopped by quitting, resumed: byte-identical file, HDR10 metadata kept),
+  the downloaded copy played from the list, *Recently played*. Against
+  real YouTube: titles, the bot-check message, playlists, a channel and
+  its playlists tab; playing YouTube needs the owner's cookies test.
+
+## D85. Thirteenth audit (ISSUES.md Part XIII, online videos)
+
+Gemini's audit of the v0.9.0 test build. Every finding was checked
+against the code; all but two suggestions were applied:
+
+- **Cookies copies (XIII 1.1):** a copy shared by all runs of one kind
+  meant overlapping runs (title batches, Video info and a download's
+  first step) deleted each other's copy. Now a name per run
+  (`online-cookies-<purpose>-<instance>-<n>.txt`), copies of runs still
+  going deleted at shutdown, and leftovers (a crash) at the next start.
+- **Title search (XIII 1.2):** at most two yt-dlp runs at a time (a list
+  of 5000 links had started 334); titles show as they arrive (redrawn at
+  most twice a second); none for *Recently played* or *Download all
+  videos* listings; and none started once the list is left: the rest
+  are asked for when it opens again. `--socket-timeout` declined: yt-dlp
+  already gives up after 20 s (its request handlers' default).
+- **Links (XIII 1.3, 2.5):** control characters refused; scheme and host
+  in lowercase when a link is read (`HTTPS://Example.org` and
+  `https://example.org` are the same link and key).
+- **Subtitles (XIII 2.1–2.3, 2.8):** `--sub-langs` patterns `xx($|-.*)`
+  (yt-dlp reads them as regular expressions: `es.*` took Estonian);
+  region tags kept in downloaded file names (`.es-419.vtt`, `pt_BR` →
+  `.pt-br.`); the video's OpenSubtitles files copied next to a yt-dlp
+  download as next to a curl one; Video info lists the subtitles
+  playback would load; storage folders of long links capped at 120 bytes
+  (start of the key and a 16-digit hash). Region tags also got names
+  ("Spanish (Latin America)", "English (original)").
+- **Downloads (XIII 2.4):** a link yt-dlp answers as a playlist (or a
+  video in parts) isn't downloaded: it becomes a folder and the download
+  fails with "A playlist: open it to download its videos" (it had saved
+  every item into the same file). Formats kept for a stopped download
+  that the site no longer has are chosen again (once; old parts deleted)
+  instead of failing forever. Size from the file after a curl download.
+  The space check counts yt-dlp downloads twice (parts and joined file).
+- **One video, one record (XIII 2.6):** a finished or deleted download
+  updates the open list's rows; a downloaded file is mapped to its link
+  through its download record (not a session cache), and the library's
+  rows for that file read and mark the link's record, so the download
+  folder and the list agree.
+- **Bookkeeping (XIII 2.7, 2.9, 3.1, 3.2):** a video's list is recorded
+  when it plays (for *Recently played*), dropped with its resume record;
+  `folders` capped. A list file is given up after 10 s, and *Recently
+  played* plays the video alone if its list or playlist doesn't answer
+  within 15 s. "No videos to download here" for a list of playlists. The
+  updater reads the version from the yt-dlp module only and takes
+  checksums in either case. Not changed: yt-dlp's LICENSE is already
+  installed by flatpak-builder; the per-copy `chmod` (a few ms) stays for
+  runs without the launcher's `umask 077`; release dates are set when
+  tagging.
+- **Found while testing: tables saved empty lost later keys.**
+  `mp.utils.parse_json` marks a table read from `[]` as an array, and
+  `format_json` then writes `[]` whatever string keys were added. Every
+  map read from a JSON file is now copied into a plain table
+  (`util.plain_table`). This hit `online.json` (titles, lists and
+  folders after a save while empty) and `resume.json` since v0.1: once
+  the last record was deleted (*Delete from this device…* on the only
+  video with progress), positions and watched marks were no longer kept
+  across restarts. The other stores already copied (memory, looks) or
+  hold arrays (servers, downloads).
+- **Tested:** unit tests (1045 checks on Lua 5.2, 1081 on the Flatpak's
+  LuaJIT; a stand-in yt-dlp for the title queue). In mpv with a stand-in
+  yt-dlp: overlapping cookies copies, a FIFO as a list that never
+  answers, a playlist that never answers. With yt-dlp against
+  `tools/mock-online.py` (now pages with several videos and subtitle
+  tracks): the playlist refusal, stale formats, Video info subtitles. In
+  headless gamescope: an uppercase link, "No videos to download here",
+  a download with `es-419` and OpenSubtitles files while its list stays
+  open, then played from the file, a watched mark shared by the download
+  folder and the list, no cookies copy left after quitting while a
+  video opened.

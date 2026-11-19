@@ -375,6 +375,18 @@ function Ass:icon_network(x, cy, s, o)
     return self:rect(x, fy + fh + s * 0.2, s, s * 0.09, {radius = s * 0.045, color = o.color, opacity = o.opacity})
 end
 
+-- A list of online videos: a play triangle before three lines.
+function Ass:icon_list(x, cy, s, o)
+    local h = s * 0.12
+    for i = -1, 1 do
+        local y = cy + i * s * 0.26 - h / 2
+        local x0 = i == -1 and x + s * 0.38 or x
+        self:rect(x0, y, x + s - x0, h, {radius = h / 2, color = o.color, opacity = o.opacity})
+    end
+    local ty = cy - s * 0.26
+    return self:polygon({x, ty - s * 0.16, x + s * 0.26, ty, x, ty + s * 0.16}, {color = o.color, opacity = o.opacity})
+end
+
 function Ass:icon_server(x, cy, s, o)
     local w, h = s, s * 0.34
     for i = 0, 1 do

@@ -170,6 +170,8 @@ end
 -- Stops waiting for a folder listing (left the folder, or gave up).
 function M:cancel_listing()
     self.slow_listing = false
+    -- (Titles of an online list are only looked for while it is shown.)
+    if self.ctx.online then self.ctx.online:stop_titles() end
     local job = self.listing
     if not job then return end
     self.listing = nil
@@ -248,9 +250,10 @@ function M:load_server(loc)
 end
 
 -- Server listings kept in the server's order: the server page, "Continue
--- watching", "Next up", and seasons/episodes (by number, whatever the sort).
+-- watching", "Next up", seasons/episodes (by number, whatever the sort),
+-- and lists of online videos (the order of the user's file).
 local SERVER_ORDER = {root = true, ondeck = true, nextup = true, seasons = true, episodes = true,
-                      series_episodes = true}
+                      series_episodes = true, list = true, playlist = true}
 -- Listings of unrelated videos: play just the chosen one.
 local SINGLE_PLAY = {ondeck = true, nextup = true}
 
@@ -262,11 +265,19 @@ function M:sortable()
     return not (loc.server and SERVER_ORDER[loc.server.kind])
 end
 
+-- Where a local file's progress is kept in resume.json: under its path,
+-- or for a downloaded online video under its link (D84: one record per
+-- video, wherever it is opened from).
+function M:local_key(path)
+    local item, backend = self.ctx.servers:item_for(path)
+    return item and backend.LOCAL_STATE and backend.recent_key(item) or path
+end
+
 -- Progress of an entry: server entries carry their own state, local files
 -- use resume.json. Same shape either way: {pos, duration, watched}.
 function M:entry_state(e)
     if e.state then return e.state end
-    return self.ctx.resume:get(e.path)
+    return self.ctx.resume:get(self:local_key(e.path))
 end
 
 -- Position worth offering to resume from, or nil.
@@ -278,7 +289,7 @@ function M:resume_position(e)
         end
         return nil
     end
-    return self.ctx.resume:position(e.path)
+    return self.ctx.resume:position(self:local_key(e.path))
 end
 
 -- `select` (optional): path to put the cursor on, also when the listing
@@ -535,10 +546,11 @@ function M:mark(entry, watched)
         end)
         return
     end
+    local key = self:local_key(entry.path)
     if watched then
-        self.ctx.resume:mark_watched(entry.path)
+        self.ctx.resume:mark_watched(key)
     else
-        self.ctx.resume:mark_unwatched(entry.path)
+        self.ctx.resume:mark_unwatched(key)
     end
     self.ctx.resume:flush()
     self:render()
@@ -572,7 +584,12 @@ end
 -- Downloads and deleting (D60)
 ---------------------------------------------------------------------------
 
-local SEASON_KINDS = {episodes = true, series_episodes = true}
+-- Listings downloaded as a whole: seasons, and lists of online videos.
+-- [kind] = {the folder's row, the row inside it}.
+local SEASON_KINDS = {episodes = {"Download season", "Download all episodes"},
+                      series_episodes = {"Download season", "Download all episodes"},
+                      list = {"Download all videos", "Download all videos"},
+                      playlist = {"Download all videos", "Download all videos"}}
 
 -- Queues server videos (entries) for download.
 function M:download(entries)
@@ -580,6 +597,8 @@ function M:download(entries)
     for _, e in ipairs(entries) do
         if e.server and not e.is_dir then items[#items + 1] = e.server end
     end
+    -- (A list of playlists only: each one is downloaded from inside it.)
+    if #items == 0 then return self.ctx.toast("No videos to download here") end
     local added = self.ctx.downloads:add(items)
     if added == 0 then
         self.ctx.toast("Already in Downloads")
@@ -592,14 +611,15 @@ end
 -- Queues every episode of a season (a folder entry of a server listing).
 function M:download_season(entry)
     local backend = self.ctx.servers:for_ref(entry.server)
-    self.ctx.toast("Getting the episodes…")
+    local kind = entry.server.kind
+    self.ctx.toast((kind == "list" or kind == "playlist") and "Getting the videos…" or "Getting the episodes…")
     backend:list(entry.server, function(entries, err)
         if not entries then
             self.ctx.toast(err or ("Can't reach the " .. backend.NAME .. " server"))
             return
         end
         self:download(entries)
-    end)
+    end, true)   -- (quiet: online lists don't look for titles, D84)
 end
 
 -- Whether the entry is a video file of this device that may be deleted.
@@ -702,7 +722,14 @@ function M:downloads_changed()
     end
     self.downloads_stale = nil
     local loc = self:location()
-    if loc and loc.server then self:render() else self:reload() end
+    if loc and loc.server then
+        -- (A downloaded online video plays from its file now.)
+        local backend = self.ctx.servers:for_ref(loc.server)
+        if backend and backend.refresh_entries then backend:refresh_entries(self.entries) end
+        self:render()
+    else
+        self:reload()
+    end
 end
 
 -- The last menu over the library was closed.
@@ -765,7 +792,7 @@ function M:open_menu()
             table.insert(items, {label = "Download", action = function() self:download({cur}) end})
         end
     elseif cur and cur.server and cur.is_dir and SEASON_KINDS[cur.server.kind] and downloads:can_download(cur.server) then
-        table.insert(items, {label = "Download season", action = function() self:download_season(cur) end})
+        table.insert(items, {label = SEASON_KINDS[cur.server.kind][1], action = function() self:download_season(cur) end})
     end
     if loc and loc.server and SEASON_KINDS[loc.server.kind] and downloads:can_download(loc.server) then
         local n = 0
@@ -773,7 +800,7 @@ function M:open_menu()
             if e.server and not e.is_dir and not downloads:tag(e.server) then n = n + 1 end
         end
         if n > 1 then
-            table.insert(items, {label = "Download all episodes", value = tostring(n), action = function()
+            table.insert(items, {label = SEASON_KINDS[loc.server.kind][2], value = tostring(n), action = function()
                 self:download(self.entries)
             end})
         end
@@ -1141,6 +1168,8 @@ function M:draw_row(a, e, x0, x1, y, sel)
         a:icon_drive(ix, cy, 30, {color = icon_color, inner = inner})
     elseif e.source == "network" then
         a:icon_network(ix, cy, 30, {color = icon_color})
+    elseif e.list then
+        a:icon_list(ix, cy, 30, {color = icon_color})
     elseif e.is_dir then
         a:icon_folder(ix, cy, 30, {color = icon_color})
     else
@@ -1241,6 +1270,8 @@ function M:render()
         counts[1] = #self.sources .. (#self.sources == 1 and " source" or " sources")
     elseif n_files > 0 then counts[#counts + 1] = n_files .. (n_files == 1 and " video" or " videos") end
     if loc and n_dirs > 0 then counts[#counts + 1] = n_dirs .. (n_dirs == 1 and " folder" or " folders") end
+    -- Lines of a list of online videos that aren't links it can play.
+    if n_files > 0 and self.entries.skipped then counts[#counts + 1] = self.entries.skipped.count .. " skipped" end
     a:text(W - margin, 50, table.concat(counts, " · "), {size = 20, align = 6, color = t.subtext})
     if self:sortable() then
         a:text(W - margin, 78, "Sorted by " .. (self.sort == "name" and "name" or "date"),
@@ -1300,12 +1331,22 @@ function M:render()
                 {size = 20, align = 5, color = t.accent})
         elseif self.entries.skipped then
             -- A DLNA folder whose videos have no address the app can play
-            -- (dvp/dlna.lua logs each one).
+            -- (dvp/dlna.lua logs each one), or a list of online videos
+            -- whose lines aren't links it can play.
             local sk = self.entries.skipped
+            local list = loc and loc.server and loc.server.kind == "list"
             a:text(W / 2, cy, "No playable videos here", {size = 30, bold = true, align = 5})
-            local line = string.format("%d %s skipped: %s.", sk.count, sk.count == 1 and "video" or "videos",
+            local line = string.format("%d %s skipped: %s.", sk.count,
+                                       list and (sk.count == 1 and "line" or "lines")
+                                           or (sk.count == 1 and "video" or "videos"),
                                        tostring(sk.why))
             a:text(W / 2, cy + 44, ui.fit_text(line, 20, W - 160), {size = 20, align = 5, color = t.subtext})
+        elseif loc.server and loc.server.kind == "playlist" then
+            a:text(W / 2, cy, "No videos in this playlist", {size = 30, bold = true, align = 5})
+        elseif loc.server and loc.server.kind == "list" then
+            a:text(W / 2, cy, "No videos in this list", {size = 30, bold = true, align = 5})
+            a:text(W / 2, cy + 44, "Add one link per line to the file in a text editor.",
+                {size = 20, align = 5, color = t.subtext})
         else
             a:text(W / 2, cy, "No videos here", {size = 30, bold = true, align = 5})
             a:text(W / 2, cy + 44, "This folder has no video files or subfolders.",

@@ -231,6 +231,9 @@ gamescope; with VRR enabled, gamescope follows mpv's frame pacing, so a
 | `$XDG_DATA_HOME/deckvideoplayer/plex.json` | Plex sign-in: client id, account token, servers and their addresses (mode 600) | `dvp/plex.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/jellyfin.json` | Jellyfin: device id, servers (address, user) and their device tokens (mode 600) | `dvp/jellyfin.lua` |
 | `$XDG_DATA_HOME/deckvideoplayer/dlna.json` | DLNA servers added (name, description address; nothing secret) | `dvp/dlna.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/online.json` | Titles of online links, the list or playlist each played video was played from, other sites' links yt-dlp was asked about (playlist or not) (D84, D85) | `dvp/online.lua` |
+| `$XDG_DATA_HOME/deckvideoplayer/online-cookies-<purpose>-<instance>-<n>.txt` | A private copy (600) of `[online] cookies_file` while one yt-dlp run uses it; deleted when it ends, at quit, or at the next start after a crash (D85) | `dvp/online.lua` |
+| `~/.config/deckvideoplayer/cookies.txt` | Optional: cookies exported from a browser signed in to YouTube (`[online] cookies_file`); only read | user |
 | `$XDG_DATA_HOME/deckvideoplayer/subtitles/<moviehash>/<release>.<lang>.srt` | Subtitles downloaded from OpenSubtitles, one folder per video (keyed by the video's hash, so moves/renames keep them) | `dvp/subdownload.lua` |
 | `$XDG_CACHE_HOME/deckvideoplayer/fonts.conf` (Flatpak only), and fontconfig's caches in `$XDG_CACHE_HOME/fontconfig` | The runtime's fontconfig setup without the host's mapped font caches, rewritten at each start (D77) | launcher |
 | `/app/share/deckvideoplayer/` | Default config, `mpv/mpv.conf`, Lua scripts, `hrtf/` (headphone surround HRTF) | Flatpak build |
@@ -254,9 +257,10 @@ rename).
 - **Flatpak** `io.github.nicocarbone.DeckVideoPlayer` on runtime
   `org.freedesktop.Platform//26.08`. It builds LuaJIT, libXpresent,
   uchardet, libass, zimg, a decode-only FFmpeg (with libmysofa for the
-  headphone-surround filter), libplacebo, mpv 0.41 (with
-  `sdl2-gamepad`, `lua=luajit`) and installs the Inter font plus the app
-  files. Flathub's `io.mpv.Mpv` can't be used because it is built without
+  headphone-surround filter; with the `ffprobe` and `ffmpeg` programs),
+  libplacebo, mpv 0.41 (with `sdl2-gamepad`, `lua=luajit`), QuickJS-NG,
+  and installs yt-dlp's zipapp (on the runtime's Python), the Inter font
+  and the app files. Flathub's `io.mpv.Mpv` can't be used because it is built without
   SDL2 gamepad support.
 - Sandbox permissions: X11 + Wayland, PulseAudio + PipeWire, `--device=all`
   (GPU, VA-API, `/dev/input` for SDL), `xdg-run/gamescope-0` (HDR layer),
@@ -307,6 +311,31 @@ Servers are found with a UDP broadcast (helper `dvp-discover`) or listed
 in config.ini; sign-in is Quick Connect. Playback is direct play; mpv
 normally gets no token (Jellyfin streams the file without one). Progress
 goes back with `/Sessions/Playing` reports, like Plex's timeline.
+
+## 11c. Online videos (v0.9.0)
+
+A `.m3u` file in a library folder is a list of links (D84), opened by
+`dvp/online.lua`, another backend of the router: each line is a video, or
+a folder for a playlist or channel. Links to video files play as they
+are; the rest goes through mpv's own yt-dlp hook, loaded but confined to
+`ytdl://` addresses the app writes, so no other stream reaches yt-dlp.
+yt-dlp (with QuickJS-NG for YouTube's challenges) is a subprocess run only
+when the user opens a list, a playlist, Video info, plays or downloads;
+titles are looked for only while their list is shown (two yt-dlp runs at
+a time) and cached. Downloads that aren't plain files are made by yt-dlp
+and joined by FFmpeg's `ffmpeg` program; a downloaded copy keeps the
+link's progress record wherever it is opened. An optional cookies file
+gives yt-dlp a YouTube sign-in; each run gets its own short-lived private
+copy.
+
+```
+list.m3u ──head -c──► online:list ──► entries (ytdl://… or a file link)
+                                       │ A
+                                       ▼
+             on_load prio 5: ytdl-format, ytdl-raw-options (+ cookies copy)
+             on_load prio 10: ytdl_hook ── yt-dlp -J ─► EDL (video + audio)
+             on_load prio 50: main.lua (resume position, title)
+```
 
 ## 12. Extension points
 

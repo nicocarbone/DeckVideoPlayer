@@ -148,6 +148,31 @@ function M.write_file_atomic(path, data, private)
     return os.rename(tmp, path)
 end
 
+-- A table read with mp.utils.parse_json, as a plain Lua table (a shallow
+-- copy; {} for anything else). parse_json marks what it returns: a table
+-- read from "[]" stays a JSON array when written again, so keys added to it
+-- were silently dropped. A plain table is written as an object once it has
+-- keys.
+function M.plain_table(t)
+    local out = {}
+    if type(t) == "table" then
+        for k, v in pairs(t) do out[k] = v end
+    end
+    return out
+end
+
+-- Pure: a 16-hex-digit hash of a string (two 32-bit polynomial hashes,
+-- arithmetic only: Lua 5.1 has no bit operations). For names, not secrets.
+function M.hash_hex(s)
+    local a, b = 5381, 0
+    for i = 1, #s do
+        local c = s:byte(i)
+        a = (a * 33 + c) % 4294967296
+        b = (b * 65599 + c) % 4294967296
+    end
+    return string.format("%08x%08x", a, b)
+end
+
 function M.write_private(path, data)
     return M.write_file_atomic(path, data, true)
 end

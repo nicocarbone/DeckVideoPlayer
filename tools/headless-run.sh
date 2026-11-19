@@ -20,6 +20,9 @@
 #   NIGHT=1            start with night_mode = yes
 #   TVMIX=1            start with tv_speakers = yes
 #   AWAKE=yes|no       keep_awake setting (default yes)
+#   COOKIES=FILE       [online] cookies_file = FILE (a test cookies file for
+#                      yt-dlp; online videos, D84)
+#   SLANG=spa,eng      [playback] subtitle_languages (default: the template's)
 #   XWAYLAND2=1        two Xwayland servers, app on the second one (like
 #                      SteamOS game mode, where Steam has the first)
 #   RATES=48,60        force refresh_rates (headless gamescope reports a single
@@ -95,6 +98,13 @@ if [ "${TVMIX:-0}" = 1 ]; then
 fi
 if [ -n "${REMEMBER:-}" ]; then
     sed -i "s|^remember_settings = .*|remember_settings = $REMEMBER|" "$CFG/config/config.ini"
+fi
+if [ -n "${SLANG:-}" ]; then
+    sed -i "s|^subtitle_languages = .*|subtitle_languages = $SLANG|" "$CFG/config/config.ini"
+fi
+if [ -n "${COOKIES:-}" ]; then
+    cookies_esc=$(printf '%s' "$COOKIES" | sed 's/[\\&|]/\\&/g')
+    sed -i "s|^cookies_file = .*|cookies_file = $cookies_esc|" "$CFG/config/config.ini"
 fi
 if [ -n "${AWAKE:-}" ]; then
     sed -i "s|^keep_awake = .*|keep_awake = $AWAKE|" "$CFG/config/config.ini"

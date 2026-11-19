@@ -172,8 +172,29 @@ and the Flatpak; the owner tried the test builds.
 
 v0.9.0 (planned): mpv 0.42 and libplacebo 7.387, once mpv 0.42.1 is out,
 with streaming tests for mpv's new libcurl backend (`--curl-enabled=no` as
-the fallback). Also the first version published in the app's own Flatpak
-repository on GitHub Pages (D81), so installs update themselves:
+the fallback): waits for that release.
+
+Online videos, **implemented, in testing** (D84): a `.m3u` file in a
+library folder is a list of links (YouTube videos, playlists and channels
+as folders, other sites, video files), played through mpv's yt-dlp hook
+(confined to the app's own `ytdl://` addresses) with QuickJS-NG for
+YouTube's challenges; resume, watched marks, *Recently played*; downloads
+with curl or yt-dlp (joined by the bundled `ffmpeg`), 1080p on a Deck and
+2160p elsewhere, HDR and surround kept; an optional cookies file for
+connections where YouTube wants a sign-in (the owner's is one). yt-dlp is
+kept current by a weekly pull request (`scripts/update-yt-dlp.py`); until
+v0.10.0's repository, a fix reaches users as a release they install.
+Tested in headless gamescope and the Flatpak with `tools/mock-online.py`
+and, for titles, playlists and channels, real YouTube. Still to check, on
+the owner's Deck: playing and downloading YouTube with a cookies file,
+QuickJS-NG's start-up time, battery with VP9 and AV1 streams, and 5.1
+audio from YouTube (the mock can't say how many channels a stream has).
+Not in v0.9.0: search, thumbnails, sign-in other than cookies, more than
+200 videos of a playlist.
+
+v0.10.0 (planned): the first version published in the app's own Flatpak
+repository on GitHub Pages (D81), so installs update themselves (moved
+from v0.9.0 by the owner):
 
 - **CI:** on a tag, the build CI already makes goes into an OSTree
   repository, signed with the app's GPG key (private key only in a GitHub
@@ -194,89 +215,6 @@ repository on GitHub Pages (D81), so installs update themselves:
   `FLATPAK_USER_DIR`: fresh install, update from the previous version,
   signature refused when tampered with, bundle install switching to the
   remote.
-
-And online videos: lists of links (YouTube and other sites) as a library
-source, with downloads for offline viewing. Planned for this release
-because yt-dlp, which plays them, needs updating every few weeks, and only
-the repository above brings those updates to installs by themselves.
-
-- **Lists:** a `.m3u` file in any library folder shows as a folder named
-  after the file (`YouTube.m3u` → *YouTube*); each line is a link, pasted
-  in a text editor in Desktop Mode. A plain list of links is a valid
-  `.m3u`; an `#EXTINF:-1,Title` line above a link names it, other `#`
-  lines are comments. Only `http(s)` links; other lines are skipped and
-  counted, as DLNA's skipped videos (D76). Nothing appears until someone
-  makes a list (opt-in by nature). The user's file is never written.
-- **Titles:** from `#EXTINF`, otherwise fetched with yt-dlp when the list
-  is opened (asynchronous; network only because the user opened it) and
-  cached in the data folder by link, with duration and channel for
-  Video info.
-- **Playback:** direct media links (`.mp4`, `.mkv`, `.webm`, `.m3u8`…)
-  play as they are; everything else goes through mpv's own yt-dlp hook,
-  now loaded but confined to links the app marks `ytdl://` (the hook's
-  `include` empty, its `exclude` matching every address), so Plex,
-  Jellyfin and DLNA addresses and their tokens never reach yt-dlp, not
-  even when they fail to load. Format: the best up to the screen's height,
-  in codecs the Deck decodes in hardware, no AV1 above 1080p (D62),
-  keeping HDR and surround sound when the video has them (yt-dlp's format
-  sort with `hdr` and `channels` ahead of bitrate); HDR then follows the
-  app's HDR choices (D52), surround the audio menu (headphone surround,
-  TV speakers). Audio in the video's original language, or in
-  `audio_languages` when it has dubbed tracks; subtitles in
-  `subtitle_languages`. Resume, watched marks and *Recently
-  played* keyed by the link. Live streams play, without resume or
-  download. yt-dlp's errors shortened into a toast ("This video needs a
-  YouTube sign-in", "YouTube refused the video: check for an app update").
-- **Downloads** (D60's queue, Downloads menu, stop / resume / cancel,
-  space check, retries; *Download* on a video, *Download all* on a list):
-  - direct links with curl, like DLNA (D67), resuming with HTTP ranges;
-  - other links with yt-dlp, a second kind of transfer in
-    `dvp/downloads.lua`: video and audio fetched into a `.part` folder and
-    joined by the `ffmpeg` program (now built, see Flatpak); progress from
-    the files' size against what yt-dlp reported (mpv returns a process's
-    output only at its end); stop ends the process, resume lets yt-dlp
-    continue its own partial files with the formats chosen at the start
-    (kept in the job). Saved as `<download_folder>/<list>/<Title>.mkv`
-    (Matroska takes any mix of codecs and keeps the HDR metadata),
-    subtitles next to it as `<Title>.<lang>.srt`;
-  - quality by device (owner's choice): a `config.ini` key for the
-    download's maximum height, `auto` by default: 1080p on a Steam Deck
-    (LCD or OLED, `display.lua`'s detection; also when docked, since 4K
-    AV1 stutters on its decoder, D62), 2160p on anything else (a Steam
-    Machine on a 4K TV). Same choice as streaming otherwise: HDR and
-    surround sound kept when the video has them, whatever the device
-    (a download made on an LCD Deck may later play on an HDR TV). The
-    space check uses yt-dlp's size for the chosen formats. To check: HDR
-    shows in Video info and plays as HDR from the downloaded file, and
-    5.1 audio stays 5.1;
-  - a downloaded video shows *Downloaded* in its list and plays from the
-    file, as Plex videos do.
-- **Flatpak:** yt-dlp (the official zipapp, with yt-dlp-ejs inside; the
-  runtime has Python 3.14), QuickJS-NG ≥ 0.12 built from source as the
-  JavaScript runtime yt-dlp needs for YouTube since late 2025
-  (`--js-runtimes quickjs:<path>`), and the `ffmpeg` program in the FFmpeg
-  build (libraries already there, so small). About 5 MB more in all.
-  `THIRD_PARTY_NOTICES.md` (yt-dlp: Unlicense, QuickJS-NG: MIT). No new
-  sandbox permissions. Not Deno, yt-dlp's recommended runtime: bigger than
-  the whole app, and YouTube's code stays inside the Flatpak sandbox
-  anyway; QuickJS-NG's speed to be checked on a Deck.
-- **Keeping yt-dlp current:** a weekly CI workflow opens a pull request
-  when yt-dlp has a new release (version and checksum), with the tests;
-  merging it and tagging a patch release reaches installs through the
-  repository. The owner decides each one; no release is made without them.
-- **Docs:** README and INSTALL: how to make a list, what plays and what
-  doesn't, and that YouTube's terms don't allow playback outside its own
-  apps (the user's choice, as with mpv or Kodi).
-- **Tests:** unit tests for list parsing (BOM, CRLF, `#EXTINF`, comments,
-  skipped lines, duplicates), the title cache, the format choice, download
-  names and paths, and the error messages. In headless gamescope, a local
-  HTTP server with test clips and a list: play, resume, download, stop and
-  resume a download. yt-dlp against real YouTube by hand only, with
-  Creative Commons videos (e.g. Blender's open movies); on a Deck,
-  QuickJS-NG's start-up time and battery with VP9 and AV1.
-- **Not in v0.9.0:** YouTube playlist or channel links opened as folders,
-  sign-in (age-restricted, members-only and private videos), search,
-  thumbnails.
 
 ## Next, in this order
 

@@ -236,6 +236,10 @@ eq("res 1080p scope", media.resolution_badge(1920, 800), "1080p")
 eq("external sub detail", media.track_detail({type = "sub", codec = "subrip", external = true, forced = true}),
     "External · Forced")
 eq("lang pt-br", media.language("pt-br"), "Portuguese (Brazil)")
+eq("lang region", media.language("es-419"), "Spanish (Latin America)")
+eq("lang country", media.language("en-US"), "English (US)")
+eq("lang youtube original", media.language("en-orig"), "English (original)")
+eq("lang unknown with region", media.language("xx-YY"), "XX-YY")
 
 local sbc, sbp = media.sub_brightness(1, 203)
 eq("sub brightness full", sbc .. " " .. sbp, "#FFFFFF 203")
@@ -1735,6 +1739,419 @@ do
     eq("config: remember_settings default", config.defaults().playback.remember_settings, true)
     eq("config: remember_settings off", config.from_text("[playback]\nremember_settings = no\n").playback.remember_settings, false)
 end
+
+-- Online videos (D84) -------------------------------------------------------------
+-- Made-up links (example.org) and Blender's open movies. (In a function
+-- of its own: the main chunk is near Lua's 200 locals.)
+;(function()
+    local ON = require "dvp.online"
+    -- addresses
+    local sc, sh, sp, sq = ON.split_url("HTTPS://Www.Example.org:8080/a/b.mp4?x=1#t")
+    check("online split", sc == "https" and sh == "www.example.org" and sp == "/a/b.mp4" and sq == "x=1")
+    eq("online split: no scheme", ON.split_url("example.org/a"), nil)
+    eq("online split: file", ON.split_url("file:///etc/passwd"), nil)
+    eq("online split: other scheme", ON.split_url("ftp://example.org/a.mp4"), nil)
+    eq("online split: credentials", ON.split_url("https://user:pw@example.org/a"), nil)
+    eq("online split: empty host", ON.split_url("https:///a"), nil)
+    eq("online split: control characters", ON.split_url("https://example.org/a\1b.mp4"), nil)
+    eq("online split: NUL", ON.split_url("https://example.org/x\0y.mp4"), nil)
+    eq("online normalize", ON.normalize("HTTPS://Www.Example.ORG:8080/A/B.mp4?X=1"), "https://www.example.org:8080/A/B.mp4?X=1")
+    eq("online canonical: scheme and host lowercase", ON.canonical("HTTP://Example.org/Film.mp4"), "http://example.org/Film.mp4")
+    local rk = ON.recent_key({key = ON.canonical("HTTPS://Example.org/Film.mp4")})
+    local _, rurl = ON.parse_recent_key(rk)
+    eq("online recent key from an uppercase link", rurl, "https://example.org/Film.mp4")
+    local BBB = "aqz-KE-bpKQ"
+    local W = "https://www.youtube.com/watch?v=" .. BBB
+    eq("yt id: watch", ON.youtube_id(W), BBB)
+    eq("yt id: params around", ON.youtube_id("https://youtube.com/watch?feature=x&v=" .. BBB .. "&t=42s&list=PLx"), BBB)
+    eq("yt id: short link", ON.youtube_id("https://youtu.be/" .. BBB .. "?t=10"), BBB)
+    eq("yt id: shorts", ON.youtube_id("https://www.youtube.com/shorts/" .. BBB), BBB)
+    eq("yt id: live", ON.youtube_id("https://m.youtube.com/live/" .. BBB .. "?si=x"), BBB)
+    eq("yt id: embed", ON.youtube_id("https://www.youtube-nocookie.com/embed/" .. BBB), BBB)
+    eq("yt id: music", ON.youtube_id("https://music.youtube.com/watch?v=" .. BBB), BBB)
+    eq("yt id: playlist", ON.youtube_id("https://www.youtube.com/playlist?list=PLabc"), nil)
+    eq("yt folder: playlist", ON.youtube_folder("https://youtube.com/playlist?list=PLab_c-1&si=x"),
+       "https://www.youtube.com/playlist?list=PLab_c-1")
+    eq("yt folder: channel", ON.youtube_folder("https://www.youtube.com/@BlenderOfficial"),
+       "https://www.youtube.com/@BlenderOfficial/videos")
+    eq("yt folder: channel tab", ON.youtube_folder("https://m.youtube.com/@BlenderOfficial/streams?x=1"),
+       "https://www.youtube.com/@BlenderOfficial/streams")
+    eq("yt folder: other tab", ON.youtube_folder("https://www.youtube.com/@BlenderOfficial/featured"),
+       "https://www.youtube.com/@BlenderOfficial/videos")
+    eq("yt folder: channel id", ON.youtube_folder("https://www.youtube.com/channel/UC1234abcd/videos"),
+       "https://www.youtube.com/channel/UC1234abcd/videos")
+    eq("yt folder: a video isn't", ON.youtube_folder("https://www.youtube.com/watch?v=" .. BBB .. "&list=PLx"), nil)
+    eq("yt folder: home page isn't", ON.youtube_folder("https://www.youtube.com/"), nil)
+    eq("yt folder: bad list", ON.youtube_folder("https://www.youtube.com/playlist?list=<x>"), nil)
+    eq("yt folder label", ON.fallback_label("https://www.youtube.com/playlist?list=PLabc"), "YouTube playlist PLabc")
+    eq("yt channel label", ON.fallback_label("https://www.youtube.com/@BlenderOfficial"), "YouTube channel @BlenderOfficial")
+    eq("yt id: channel", ON.youtube_id("https://www.youtube.com/@BlenderOfficial"), nil)
+    eq("yt id: embedded playlist", ON.youtube_id("https://www.youtube.com/embed/videoseries?list=PLx"), nil)
+    eq("yt id: too short", ON.youtube_id("https://youtu.be/abc"), nil)
+    eq("yt id: other site", ON.youtube_id("https://example.org/watch?v=" .. BBB), nil)
+    check("yt is_youtube", ON.is_youtube("https://youtu.be/x") and ON.is_youtube("https://www.youtube.com/@c")
+        and not ON.is_youtube("https://notyoutube.com/watch?v=" .. BBB))
+    eq("online canonical yt", ON.canonical("https://youtu.be/" .. BBB .. "?t=1"), W)
+    eq("online canonical other", ON.canonical("https://example.org/v/1"), "https://example.org/v/1")
+    check("online direct", ON.is_direct("https://example.org/films/A%20Film.MP4?sig=1")
+        and ON.is_direct("http://example.org/live/stream.m3u8")
+        and not ON.is_direct("https://archive.org/details/BigBuckBunny_124")
+        and not ON.is_direct("https://www.youtube.com/watch.mp4?v=" .. BBB))
+    check("online manifests", ON.is_manifest("https://example.org/live/a.m3u8") and ON.is_manifest("https://example.org/d.mpd")
+        and not ON.is_manifest("https://example.org/a.mp4"))
+    eq("online file name", ON.file_name("https://example.org/films/A%20Film.mp4?x"), "A Film.mp4")
+    eq("online file name: none", ON.file_name("https://example.org/"), nil)
+    eq("online file name: no escapes into paths", ON.file_name("https://example.org/a%2Fb.mp4"), nil)
+    eq("online play path direct", ON.play_path("https://example.org/a.mkv"), "https://example.org/a.mkv")
+    eq("online play path yt", ON.play_path("https://youtu.be/" .. BBB), "ytdl://" .. W)
+    eq("online play path other", ON.play_path("https://archive.org/details/x"), "ytdl://https://archive.org/details/x")
+    -- lists
+    eq("extinf title", ON.extinf_title('-1 tvg-name="A, B" group-title="x",The Title '), "The Title")
+    eq("extinf title plain", ON.extinf_title("123,Film"), "Film")
+    eq("extinf no title", ON.extinf_title("-1,"), nil)
+    eq("extinf no comma", ON.extinf_title("-1"), nil)
+    local list = table.concat({
+        "\239\187\191#EXTM3U",
+        "#EXTINF:-1,Big Buck Bunny",
+        W .. "&t=30s\r",
+        "# a comment",
+        "",
+        "https://youtu.be/" .. BBB,                      -- the same video again
+        "#EXTINF:596,Sintel",
+        "  https://example.org/sintel.mp4   (the film)  ",
+        "/home/deck/Videos/local.mkv",                    -- not a link
+        "https://www.youtube.com/playlist?list=PLabc",
+        "https://www.youtube.com/feed/subscriptions",
+        "javascript:alert(1)",
+        "HTTP://EXAMPLE.ORG/upper.webm",
+        "https://archive.org/details/BigBuckBunny_124",
+    }, "\n")
+    local links, skipped = ON.parse_m3u(list)
+    eq("m3u links", #links, 5)
+    check("m3u first", links[1].key == W and links[1].title == "Big Buck Bunny" and links[1].url == W .. "&t=30s")
+    check("m3u duplicate dropped", links[2].url == "https://example.org/sintel.mp4" and links[2].title == "Sintel")
+    check("m3u playlist is a folder", links[3].folder and links[3].key == "https://www.youtube.com/playlist?list=PLabc"
+        and not links[1].folder)
+    check("m3u title only for its link", links[4].title == nil and links[5].title == nil)
+    eq("m3u uppercase scheme and host lowercased", links[4].url, "http://example.org/upper.webm")
+    eq("m3u skipped", skipped.count, 3)
+    eq("m3u skipped: not links", skipped.by["not a web address"], 2)
+    eq("m3u skipped: other YouTube pages", skipped.by["not a YouTube video, playlist or channel"], 1)
+    eq("m3u main reason", ON.main_reason(skipped.by), "not a web address")
+    local empty_links, empty_skipped = ON.parse_m3u("")
+    check("m3u empty", #empty_links == 0 and empty_skipped.count == 0)
+    local many = {}
+    for i = 1, 5100 do many[#many + 1] = "https://example.org/" .. i .. ".mp4" end
+    eq("m3u capped", #ON.parse_m3u(table.concat(many, "\n")), 5000)
+    eq("m3u long link skipped", select(2, ON.parse_m3u("https://example.org/" .. string.rep("a", 3000))).count, 1)
+    -- names
+    eq("online label yt", ON.fallback_label(W), "YouTube video " .. BBB)
+    eq("online label file", ON.fallback_label("https://example.org/The.Film.2001.mp4", true), "The Film 2001")
+    eq("online label page", ON.fallback_label("https://www.example.org/watch/123"), "example.org · 123")
+    eq("online label host", ON.fallback_label("https://example.org/"), "example.org")
+    eq("online site", ON.site("https://www.archive.org/x"), "archive.org")
+    eq("online site yt", ON.site("https://youtu.be/" .. BBB), "YouTube")
+    eq("oembed url", ON.oembed_url("https://youtu.be/" .. BBB),
+       "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D" .. BBB)
+    -- "Recently played"
+    local item = {backend = "online", machine = "web", key = W}
+    eq("online recent key", ON.recent_key(item), "online:" .. W)
+    local rid, rkey = ON.parse_recent_key("online:" .. W)
+    check("online parse recent", rid == "web" and rkey == W)
+    eq("online parse recent: not ours", ON.parse_recent_key("dlna://x/y"), nil)
+    eq("online recent key: no link", ON.recent_key({key = "/etc/passwd"}), nil)
+    -- formats
+    eq("stream height deck", ON.stream_height(800), 1080)
+    eq("stream height 720", ON.stream_height(720), 720)
+    eq("stream height 1080", ON.stream_height(1080), 1080)
+    eq("stream height 1600", ON.stream_height(1600), 2160)
+    eq("stream height 4K", ON.stream_height(2160), 2160)
+    eq("stream height 8K screen", ON.stream_height(4320), 2160)
+    eq("stream height unknown", ON.stream_height(nil), 1080)
+    eq("download height deck", ON.download_height("auto", "deck-oled"), 1080)
+    eq("download height lcd", ON.download_height("auto", "deck-lcd"), 1080)
+    eq("download height tv", ON.download_height("auto", "tv"), 2160)
+    eq("download height set", ON.download_height("1440", "deck-oled"), 1440)
+    eq("download height best", ON.download_height("best", "tv"), 4320)
+    local f1, s1 = ON.format_spec(2160, "deck-oled")
+    check("format deck 4K: no AV1 first", f1:find("[vcodec!^=av01]", 1, true) == 1 + #"bv*")
+    eq("format sort: original audio, resolution, HDR, surround", s1, "lang,res:2160,hdr:12,channels")
+    local f2 = ON.format_spec(1080, "deck-oled")
+    eq("format deck 1080: AV1 fine", f2, "bv*+ba/b")
+    eq("format tv 4K: AV1 fine", (ON.format_spec(2160, "tv")), "bv*+ba/b")
+    eq("sub langs", ON.sub_langs("eng,spa"), "en($|-.*),es($|-.*)")
+    eq("sub langs default", ON.sub_langs(""), "en($|-.*)")
+    eq("sub langs dedupe", ON.sub_langs("por,pt-br,pob"), "pt($|-.*)")
+    -- (yt-dlp matches each one as a regular expression, followed by "$".)
+    local function sub_match(re, lang)
+        local two = re:match("^(%a%a)%(%$|%-%.%*%)$")
+        return two ~= nil and (lang == two or lang:sub(1, 3) == two .. "-")
+    end
+    check("sub langs: regions and suffixes", sub_match("es($|-.*)", "es") and sub_match("es($|-.*)", "es-419")
+        and sub_match("en($|-.*)", "en-orig"))
+    check("sub langs: not other languages", not sub_match("es($|-.*)", "est") and not sub_match("ja($|-.*)", "jav")
+        and not sub_match("fi($|-.*)", "fil"))
+    local ca = ON.common_args("/d/c.txt")
+    check("ytdlp common args", table.concat(ca, " ") ==
+        "--ignore-config --no-warnings --no-playlist --js-runtimes quickjs --cookies /d/c.txt")
+    check("ytdlp no cookies", table.concat(ON.common_args(nil), " "):find("cookies") == nil)
+    local raw = ON.raw_options("lang,res:1080", "en.*", nil)
+    check("raw options", raw["format-sort"] == "lang,res:1080" and raw["sub-langs"] == "en.*"
+        and raw["js-runtimes"] == "quickjs" and raw["ignore-config"] == "" and raw.cookies == nil)
+    eq("raw options cookies", ON.raw_options("s", "", "/c")["cookies"], "/c")
+    eq("raw options no langs", ON.raw_options("s", "", nil)["sub-langs"], nil)
+    local da = ON.download_args(W, "313+251", "/d/.F.mkv.parts", "en.*")
+    check("download args: link last after --", da[#da] == W and da[#da - 1] == "--")
+    check("download args: into the folder as mkv", table.concat(da, " "):find("-o /d/.F.mkv.parts/video.%(ext)s", 1, true)
+        and table.concat(da, " "):find("--merge-output-format mkv", 1, true))
+    check("download args: formats kept", da[1] == "-f" and da[2] == "313+251")
+    check("download args: no subs", table.concat(ON.download_args(W, "x", "/d", ""), " "):find("sub") == nil)
+    -- errors
+    local why, retry = ON.error_text("WARNING: x\nERROR: [youtube] " .. BBB .. ": Sign in to confirm you’re not a bot. ...")
+    check("ytdlp error: bot check", why:find("sign in", 1, true) ~= nil and why:find("cookies", 1, true) ~= nil and not retry)
+    check("ytdlp error: age", (ON.error_text("ERROR: [youtube] x: Sign in to confirm your age")):find("Age", 1, true) == 1)
+    eq("ytdlp error: private", (ON.error_text("ERROR: [youtube] x: Private video. Sign in if…")), "This video is private")
+    eq("ytdlp error: gone", (ON.error_text("ERROR: [youtube] x: Video unavailable")), "This video is no longer available")
+    local nwhy, nretry = ON.error_text("ERROR: [youtube] x: Unable to download API page: <urlopen error [Errno -3] "
+        .. "Temporary failure in name resolution>")
+    check("ytdlp error: offline", nwhy == "No internet connection" and nretry)
+    eq("ytdlp error: other", (ON.error_text("ERROR: [archive.org] BigBuck: Something odd happened")), "Something odd happened")
+    eq("ytdlp error: nothing", (ON.error_text("")), "yt-dlp didn't answer")
+    -- yt-dlp answers
+    local info = ON.parse_info({title = " Sintel ", channel = "Blender", duration = 888.5,
+        requested_formats = {{format_id = "313", filesize = 1000}, {format_id = "251", filesize_approx = 200}}})
+    check("ytdlp info", info.title == "Sintel" and info.channel == "Blender" and info.formats == "313+251"
+        and info.size == 1200 and info.live == false)
+    eq("ytdlp info: size unknown", ON.parse_info({requested_formats = {{format_id = "1", filesize = 5}, {format_id = "2"}}}).size, nil)
+    check("ytdlp info: live", ON.parse_info({format_id = "96", is_live = true}).live and ON.parse_info({live_status = "is_upcoming"}).live)
+    eq("ytdlp info: one format", ON.parse_info({format_id = "18", filesize = 10}).formats, "18")
+    eq("ytdlp info: not json", ON.parse_info(nil), nil)
+    check("ytdlp info: playlist", ON.parse_info({_type = "playlist", title = "Shorts"}).playlist
+        and ON.parse_info({_type = "multi_video"}).playlist and not ON.parse_info({format_id = "18"}).playlist)
+    -- an uppercase link is the same link
+    local ul = ON.parse_m3u("HTTPS://Example.ORG/Film.mp4\nhttps://example.org/Film.mp4\n")
+    check("m3u uppercase link", #ul == 1 and ul[1].url == "https://example.org/Film.mp4"
+        and ul[1].key == "https://example.org/Film.mp4")
+    local cl, cs = ON.parse_m3u("https://example.org/a\1b.mp4\nhttps://example.org/c.mp4\n")
+    check("m3u control characters skipped", #cl == 1 and cs.count == 1 and cs.by["not a web address"] == 1)
+
+    -- library: a list file is a folder named after it, opened by this backend
+    local cfgl = config.defaults()
+    local le = library.parse_listing("f\t1\t10\tMy.Videos.m3u\0f\t1\t10\tnotes.txt\0d\t1\t0\tFolder\0", "/v", cfgl, "name")
+    eq("list in listing", #le, 2)
+    local lst
+    for _, e in ipairs(le) do if e.list then lst = e end end
+    check("list entry", lst and lst.is_dir and lst.label == "My Videos" and lst.server.backend == "online"
+        and lst.server.kind == "list" and lst.server.key == "/v/My.Videos.m3u")
+
+    -- downloads: names, yt-dlp's folder and subtitles
+    eq("dl online path", DL.relative_path({kind = "online", show = "Talks", name = "A: B"}, "mkv"), "Talks/A B.mkv")
+    eq("dl online path no list", DL.relative_path({kind = "online", title = "T"}, "mkv"), "Online videos/T.mkv")
+    eq("dl parts dir", DL.parts_dir("/d/Talks/A B.mkv"), "/d/Talks/.A B.mkv.parts")
+    local ys = DL.ytdlp_subs("/p", {"video.mkv", "video.es.vtt", "video.en-US.vtt", "video.f313.webm.part", "video.x.json"})
+    check("dl ytdlp subs", #ys == 2 and ys[1].lang == "en-US" and ys[1].file == "/p/video.en-US.vtt" and ys[2].lang == "es"
+        and ys[1].move)
+    eq("dl ytdlp subs: extension case", (DL.ytdlp_subs("/p", {"video.fr.VTT"})[1] or {}).ext, "vtt")
+    local rs = DL.subtitle_paths("/d/T.mkv", {{file = "/p/a", lang = "es-419", ext = "vtt", move = true},
+        {file = "/p/b", lang = "pt_BR", ext = "vtt"}, {file = "/p/c", lang = "zh-Hant", ext = "srt"},
+        {file = "/p/d", lang = "../x", ext = "srt"}})
+    check("dl subtitle regions", rs[1].path == "/d/T.es-419.vtt" and rs[1].move and rs[2].path == "/d/T.pt-br.vtt"
+        and not rs[2].move and rs[3].path == "/d/T.zh-hant.srt" and rs[4].path == "/d/T.und.srt")
+    check("dl space: joined parts need the size again", DL.enough_space(DL.SPACE_MARGIN + 250, 150, 50, true)
+        and not DL.enough_space(DL.SPACE_MARGIN + 249, 150, 50, true))
+    -- subtitle storage of a long link: under Linux's 255 bytes, distinct
+    local long = "https://example.org/v?" .. string.rep("a", 300)
+    local k1 = SubDL.server_key({backend = "online", machine = "web", rating_key = long})
+    local k2 = SubDL.server_key({backend = "online", machine = "web", rating_key = long .. "b"})
+    check("sub key: long link", #k1 <= 120 and k1:match("^online%-web%-https___example_org_v_aaa") and k1 ~= k2)
+    eq("sub key: short link unchanged", SubDL.server_key({backend = "online", machine = "web", rating_key = "https://e.org/a"}),
+       "online-web-https___e_org_a")
+    eq("hash hex", util.hash_hex(""), "0000150500000000")
+    check("hash hex differs", util.hash_hex("abc") ~= util.hash_hex("acb") and #util.hash_hex(long) == 16)
+    eq("dl status never 100% early", DL.status_text({status = "downloading", size = 100}, 130), "99%")
+
+    -- video info from yt-dlp
+    local vd = VI.from_ytdlp({title = "Big Buck Bunny", channel = "Blender", upload_date = "20140110", duration = 635,
+        webpage_url = W, requested_formats = {
+            {vcodec = "vp09.02.51.10", acodec = "none", width = 3840, height = 2160, fps = 60, dynamic_range = "HDR10",
+             filesize = 2e9},
+            {vcodec = "none", acodec = "opus", audio_channels = 2, language = "en", filesize = 1e7}},
+        requested_subtitles = {es = {ext = "vtt"}, en = {ext = "vtt"}}}, "Online · YouTube")
+    check("vi ytdlp video", vd.video.codec == "vp9" and vd.video.bit_depth == 10 and vd.video.transfer == "smpte2084"
+        and vd.video.primaries == "bt2020" and vd.video.height == 2160)
+    check("vi ytdlp audio", #vd.audio == 1 and vd.audio[1].codec == "opus" and vd.audio[1].channels == 2)
+    check("vi ytdlp file", vd.file.size == 2.01e9 and vd.file.uploaded == "2014-01-10" and vd.file.channel == "Blender")
+    check("vi ytdlp subs sorted", #vd.subs == 2 and vd.subs[1].lang == "en")
+    local vrows = {}
+    for _, s in ipairs(VI.sections(vd)) do for _, r in ipairs(s.rows) do vrows[r.label] = r.value end end
+    check("vi ytdlp rows", vrows.Channel == "Blender" and vrows.Uploaded == "2014-01-10" and vrows.HDR == "HDR10"
+        and vrows.Link == W)
+    local sd = VI.from_ytdlp({vcodec = "avc1.640028", acodec = "mp4a.40.2", height = 720, audio_channels = 6,
+        dynamic_range = "SDR"}, "x")
+    check("vi ytdlp one format", sd.video.codec == "h264" and sd.video.transfer == nil and sd.audio[1].codec == "aac"
+        and sd.audio[1].channels == 6)
+    eq("vi ytdlp av1 depth", VI.from_ytdlp({vcodec = "av01.0.12M.10", dynamic_range = "HLG"}, "x").video.transfer,
+       "arib-std-b67")
+    local dv = VI.from_ytdlp({vcodec = "dvh1.08.06", dynamic_range = "DV"}, "x").video
+    check("vi ytdlp dolby vision", dv.codec == "hevc" and dv.transfer == "smpte2084" and dv.primaries == "bt2020"
+        and dv.bit_depth == 10)
+
+    -- settings
+    local dc = config.defaults()
+    check("config online defaults", dc.online.download_quality == "auto" and dc.online.cookies_file == "cookies.txt")
+    eq("config online quality", config.from_text("[online]\ndownload_quality = 1440\n").online.download_quality, "1440")
+
+    -- the backend: entries, progress, router
+    local res = Resume.new(nil)
+    local fake_dl = {}
+    local cfgo = config.defaults()
+    local on = ON.new(nil, {resume = res, cfg = cfgo, device = "deck-oled"})
+    local e1 = on:entry_for({url = W .. "&t=3", key = W, title = "Big Buck Bunny"}, "/v/Talks.m3u", "Talks", 1)
+    check("online entry", e1.path == "ytdl://" .. W and e1.label == "Big Buck Bunny" and e1.server.parent == "/v/Talks.m3u"
+        and e1.server.show == "Talks" and e1.server.kind == "online" and not e1.server.untitled)
+    eq("online item_for", on:item_for(e1.path), e1.server)
+    local e2 = on:entry_for({url = "https://example.org/a.mp4", key = "https://example.org/a.mp4"}, "/v/T.m3u", "T", 2)
+    check("online entry untitled", e2.server.untitled and e2.label == "a" and e2.path == "https://example.org/a.mp4")
+    res:update("online:" .. W, 300, 600)
+    local st = on:state_of(e1.server)
+    check("online state from resume", st and st.pos == 300 and st.duration == 600)
+    eq("online prepare resume", on:prepare(e1.server).pos, 300)
+    on:set_watched(e1.server, true)
+    check("online watched", res:is_watched("online:" .. W) and on:prepare(e1.server).pos == nil)
+    eq("online describe", on:describe(e1.path), "Online · YouTube")
+    local rt = Servers.new({on})
+    local rb2, rid2, rkey2 = rt:parse_recent_key("online:" .. W)
+    check("router online recent", rb2 == on and rid2 == "web" and rkey2 == W and rt:recent_available("online:" .. W))
+    -- a downloaded copy plays from the list, and from the download folder
+    -- as the same video (one progress record)
+    local dfile = os.tmpname()
+    local e5 = on:entry_for({url = W, key = W}, "/v/Talks.m3u", "Talks", 1)
+    function fake_dl.find(_, it) return it.key == W and {status = "done", path = dfile} or nil end
+    function fake_dl.find_path(_, p)
+        return p == dfile and {status = "done", path = dfile, backend = "online", key = W, title = "Big Buck Bunny",
+                               parent = "/v/Talks.m3u", show = "Talks"} or nil
+    end
+    on.downloads = fake_dl
+    on:refresh_entries({e5})
+    eq("online refresh: download finished", e5.path, dfile)
+    local e3 = on:entry_for({url = W, key = W}, "/v/Talks.m3u", "Talks", 1)
+    local di = on:item_for(dfile)
+    check("online downloaded plays the file", e3.path == dfile and di and di.key == W and di.parent == "/v/Talks.m3u"
+        and di.kind == "online" and on:item_for("ytdl://" .. W) == e3.server)
+    eq("online downloaded: same record", ON.recent_key(di), "online:" .. W)
+    eq("online describe downloaded", on:describe(dfile), "Online · downloaded copy")
+    eq("online other local file", on:item_for("/v/Other.mkv"), nil)
+    os.remove(dfile)
+    eq("online downloaded gone", on:entry_for({url = W, key = W}, "/v/Talks.m3u", "Talks", 1).path, "ytdl://" .. W)
+    on:refresh_entries({e5})
+    eq("online refresh: copy deleted", e5.path, "ytdl://" .. W)
+    -- a playlist link is a folder; another site's link becomes one when yt-dlp says so
+    local pf = on:entry_for({url = "https://www.youtube.com/@BlenderOfficial", key = "https://www.youtube.com/@BlenderOfficial/videos",
+                             folder = true}, "/v/T.m3u", "T", 1)
+    check("online playlist folder", pf.is_dir and pf.list and pf.server.kind == "playlist"
+        and pf.path == "https://www.youtube.com/@BlenderOfficial/videos" and pf.label == "YouTube channel @BlenderOfficial")
+    local pv = on:entry_for({url = "https://example.org/show", key = "https://example.org/show"}, "/v/T.m3u", "T", 2)
+    check("online page starts as a video", not pv.is_dir)
+    on:became_folder("https://example.org/show", {pv})
+    check("online page became a folder", pv.is_dir and pv.list and pv.server.kind == "playlist" and pv.path == "https://example.org/show")
+    check("online folder remembered", on:entry_for({url = "https://example.org/show", key = "https://example.org/show"},
+                                                     "/v/T.m3u", "T", 2).is_dir)
+    -- learned titles reach the entries showing the link
+    local e4 = on:entry_for({url = "https://youtu.be/" .. BBB, key = W}, "/v/T.m3u", "T", 1)
+    on:learned(W, " Big Buck Bunny 60fps 4K ", "Blender", {e4})
+    check("online learned", e4.label == "Big Buck Bunny 60fps 4K" and not e4.server.untitled
+        and on:title_of(W) == "Big Buck Bunny 60fps 4K")
+    -- the cookies file: a private copy per kind of run, never the original
+    local dir = os.tmpname()
+    os.remove(dir)
+    util.mkdir_p(dir)
+    local cfgc = config.defaults()
+    local f = io.open(dir .. "/cookies.txt", "w")
+    f:write("# Netscape HTTP Cookie File\n")
+    f:close()
+    local oc = ON.new(dir, {cfg = cfgc, config_dir = dir})
+    local copy = oc:cookies("play")
+    local copy2 = oc:cookies("titles")
+    local copy3 = oc:cookies("titles")
+    check("cookies copy", copy and copy:sub(1, #dir + 1) == dir .. "/"
+        and copy:match("/online%-cookies%-play%-%x+%-1%.txt$") ~= nil
+        and util.read_file(copy) == "# Netscape HTTP Cookie File\n")
+    check("cookies: a copy per run", copy2 ~= copy3 and util.read_file(copy3) == "# Netscape HTTP Cookie File\n")
+    check("cookies copy private", (mp.command_native({name = "subprocess", args = {"stat", "-c", "%a", copy},
+        capture_stdout = true, playback_only = false}).stdout or ""):match("^600") ~= nil)
+    -- copies left behind (a crash) go at the next start, the user's file stays
+    ON.new(dir, {cfg = cfgc, config_dir = dir})
+    check("cookies leftovers removed", not util.file_exists(copy) and not util.file_exists(copy3)
+        and util.file_exists(dir .. "/cookies.txt"))
+    cfgc.online.cookies_file = ""
+    eq("cookies off", ON.new(dir, {cfg = cfgc, config_dir = dir}):cookies("play"), nil)
+    cfgc.online.cookies_file = "missing.txt"
+    eq("cookies missing", ON.new(dir, {cfg = cfgc, config_dir = dir}):cookies("play"), nil)
+    -- the list a video was played from is kept while resume.json has the video
+    local r2 = Resume.new(nil)
+    local o2 = ON.new(dir, {resume = r2, cfg = cfgo})
+    o2:prepare(o2:entry_for({url = W, key = W, title = "x"}, "/v/Talks.m3u", "Talks", 1).server)
+    eq("lists: recorded when played", o2.data.lists[W], "/v/Talks.m3u")
+    r2:update("online:" .. W, 10, 100)
+    o2.data.lists["https://example.org/gone"] = "/v/Old.m3u"
+    o2:save()
+    local o3 = ON.new(dir, {resume = r2, cfg = cfgo})
+    check("lists: only of videos still in resume.json", o3.data.lists[W] == "/v/Talks.m3u"
+        and o3.data.lists["https://example.org/gone"] == nil)
+    -- stores saved empty ("[]") keep what is added later (mpv reads "[]"
+    -- back as an array, which it would write again as "[]")
+    local fe = io.open(dir .. "/online.json", "w")
+    fe:write('{"titles":[],"lists":[],"folders":[]}')
+    fe:close()
+    local fe2 = io.open(dir .. "/resume.json", "w")
+    fe2:write('{"version":1,"entries":[]}')
+    fe2:close()
+    local re = Resume.new(dir)
+    re:update("online:" .. W, 30, 100)
+    re:flush()
+    local oe = ON.new(dir, {resume = re, cfg = cfgo})
+    oe:learned(W, "Big Buck Bunny")
+    oe.data.folders["https://example.org/x"] = true
+    oe:prepare(oe:entry_for({url = W, key = W, title = "x"}, "/v/Talks.m3u", "Talks", 1).server)
+    local re2 = Resume.new(dir)
+    local oe2 = ON.new(dir, {resume = re2, cfg = cfgo})
+    check("stores saved empty keep new data", (re2:get("online:" .. W) or {}).pos == 30
+        and oe2:title_of(W) == "Big Buck Bunny" and oe2.data.lists[W] == "/v/Talks.m3u"
+        and oe2.data.folders["https://example.org/x"] == true)
+    eq("plain table", type(util.plain_table(nil)), "table")
+    -- links asked about: videos forgotten first when there are too many
+    for i = 1, 3001 do o3.data.folders["https://example.org/f" .. i] = (i == 1) end
+    o3:save()
+    local nf = 0
+    for _ in pairs(o3.data.folders) do nf = nf + 1 end
+    check("folders pruned", nf == 1 and o3.data.folders["https://example.org/f1"] == true)
+    -- titles: at most two yt-dlp runs at a time, none started once the list is left
+    local ot = ON.new(nil, {resume = Resume.new(nil), cfg = cfgo})
+    local runs, redraws = {}, 0
+    function ot.ytdlp(_, args, _, cb) runs[#runs + 1] = {args = args, cb = cb} end
+    ot.on_titles = function() redraws = redraws + 1 end
+    local te = {}
+    for i = 1, 100 do
+        te[i] = ot:entry_for({url = "https://example.org/v" .. i, key = "https://example.org/v" .. i}, "/v/L.m3u", "L", i)
+    end
+    ot:fetch_titles(te)
+    eq("titles: two runs at a time", #runs, 2)
+    runs[1].cb({status = 0, stdout = "V\thttps://example.org/v1\tFirst\tChan\nP\thttps://example.org/v2\tA list\tNA\n"})
+    check("titles: shown, and the next run", #runs == 3 and te[1].label == "First" and te[2].is_dir
+        and te[2].label == "A list" and ot.data.folders["https://example.org/v1"] == false)
+    ot:stop_titles()
+    runs[2].cb({status = 0, stdout = ""})
+    runs[3].cb({status = 0, stdout = ""})
+    check("titles: stopped", #runs == 3 and redraws == 1)
+    runs = {}
+    ot:fetch_titles(te)
+    local function first_link(args)
+        for i, a in ipairs(args) do if a == "--" then return args[i + 1] end end
+    end
+    check("titles: the rest when the list opens again", #runs == 2 and first_link(runs[1].args) == "https://example.org/v46")
+    for _, n in ipairs(util.readdir(dir, "files") or {}) do os.remove(dir .. "/" .. n) end
+    os.remove(dir)
+end)()
 
 print(string.format("%d checks, %d failures", count, failures))
 mp.commandv("quit", failures == 0 and "0" or "1")

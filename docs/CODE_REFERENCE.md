@@ -161,7 +161,10 @@ libass, same technique as mpv's osc), `utf8_len`, `utf8_truncate(s, n)`
 returns `false, err` and keeps the old file if the write fails; `private`
 makes the tmp file mode 600 before writing), `write_private(path, data)`,
 `is_dir`, `file_exists`, `readdir(path, filter)` (mpv's, without `.` and
-`..`, D61), `mkdir_p` (mpv subprocess), `shallow_copy`.
+`..`, D61), `mkdir_p` (mpv subprocess), `shallow_copy`, `plain_table(t)`
+(a map read with `parse_json` as a plain table: one read from `[]` would
+be written as `[]` again whatever was added, D85), `hash_hex(s)` (16 hex
+digits, arithmetic only; for names, not secrets).
 
 ## `dvp/version.lua`
 
@@ -239,6 +242,10 @@ key.
 - `is_slow_path(mounts, path)`: on a network filesystem or an `autofs`
   automount point (pure); `read_mounts()` parses this process's
   `/proc/self/mountinfo`.
+- `LIST_EXT = "m3u"`, `list_entry(name, full, mtime)`: a list of online
+  videos in a folder listing is a folder entry (`list = true`, `server =
+  {backend = "online", kind = "list", key = <file>}`, label without
+  `.m3u`), opened by `dvp/online.lua` (D84).
 - `sort_entries(entries, mode)`: folders first, natural name order or
   newest first (`mode = "date"`); uses `sort_name`, else `name`, else
   `label`, and `mtime`. Shared by folder listings and Plex.
@@ -378,7 +385,9 @@ by itself sets `error` (exit 1: the status file says why), `info_lines()`
 
 ## `dvp/media.lua`: descriptions
 
-Language names (ISO 639-1/2), codec display names (DTS profile aware),
+Language names (ISO 639-1/2; a known language with a region or variant
+as "Spanish (Latin America)", "English (original)"), codec display names
+(DTS profile aware),
 `track_label(t)` ("English · Commentary"), `track_detail(t)` ("TrueHD · 7.1 ·
 Default"; external subtitle files show "External" instead of the codec), `tracks(kind)`, `selected_track(kind)`,
 `hdr_state(video_track?)` (pass a cached video track to avoid re-reading
@@ -518,24 +527,38 @@ log lines.
 Pure: `clean_name(s)` (one FAT/exFAT-safe name, ≤ 120 bytes, nil if
 empty), `safe_ext(file)`, `relative_path(item, ext)` (`Title (Year).ext`,
 `Show/Season NN/Show - SNNEMM - Title.ext`), `subtitle_paths(video,
-subs)` → `{url, path}` (`<name>.<lang>.<ext>`, numbered per language),
-`job_id(item)`, `format_size`, `enough_space(avail, size, have)`,
+subs)` → `{url, file, path, move}` (`<name>.<lang>.<ext>`, numbered per
+language; tags such as `es-419`, `pt_BR` → `pt-br`),
+`job_id(item)`, `format_size`, `enough_space(avail, size, have, joined)`
+(`joined`: yt-dlp's parts are joined into a new file, which needs the size
+again),
 `outcome(code, status)` → "done" / "restart" / "retry" / "fail", why,
-`status_text(job, have, speed)`.
+`status_text(job, have, speed)` (never "100 %" while running),
+`parts_dir(path)` (the hidden `.<file>.parts` folder of a yt-dlp
+download), `ytdlp_subs(dir, names)` (yt-dlp's `video.<lang>.<ext>`
+subtitle files as subs to move). Online videos (`kind = "online"`) go to
+`<list>/<Title>.<ext>`.
 
 `new(ctx, data_dir)` loads `downloads.json` (finished ones whose file is
 gone are dropped; unfinished ones become "paused": nothing starts by
 itself). Jobs: `id`, the item fields (backend, machine, key, kind, title,
-name, year, show, season, episode), `status` (queued / downloading /
+name, year, show, season, episode, url, parent), `status` (queued / downloading /
 paused / failed / done), `error`, `size`, `path`. `add(items)` → how many
 were new; `pump()` starts the next queued one; `start(job)` asks the
 backend's `download_info`, picks the path (`free_path`), checks space,
 runs `http.download` into `<path>.part`; `transferred()` decides by
 `outcome()` and the size, `retry()` (3 times, 15 s), `fetch_subtitles()`,
-`finish(job, "done" | "pause" | "fail", why)`. `pause`, `resume`,
+`finish(job, "done" | "pause" | "fail", why)`. When `download_info`
+answers `{ytdlp = {url, formats, fresh}}` (online videos that aren't a
+plain file, D84), `start_ytdlp()` runs the backend's `download(spec, dir,
+cb)` into `parts_dir(path)` and `ytdlp_done()` moves `video.mkv` and its
+subtitles into place and copies the OpenSubtitles ones (`job.ytdlp`,
+`job.formats` kept for a later resume; `fresh`: new formats, the old
+parts are deleted); `have(job)` is the bytes on disk either way. `pause`, `resume`,
 `pause_all`, `resume_all`, `cancel` (deletes the partial file),
 `forget_path(path)` (file deleted), `shutdown()`, `counts()` → active,
-stopped/failed, done; `find(item)`, `can_download(item)`, `tag(item)`
+stopped/failed, done; `find(item)`, `find_path(path)` (the finished
+download saved there), `can_download(item)`, `tag(item)`
 (the label on server rows). Menu: `open_menu()` (progress once a second
 while open: `sample()` measures speed), `job_menu(job)`, `done_menu(job)`.
 `ctx.changed(job)`, `ctx.play_path`, `ctx.browse`, `ctx.delete` are set by
@@ -641,6 +664,62 @@ parent container for auto-play), `prepare(item)` (the local position),
 resume.json under `recent_key`), `set_watched` (local), `describe`,
 `fetch_range`, `video_info` (`VideoInfo.probe_url`).
 
+## `dvp/online.lua`: online videos (D84)
+
+Lists of links (`.m3u` files in library folders) as a backend of the
+router (`ID = "online"`, `NAME = "Online"`, `LOCAL_STATE = true`, one
+pseudo-server `MACHINE = "web"`). Pure (unit-tested): `split_url(url)` →
+scheme, host, path, query (http(s) only, no credentials or control
+characters), `normalize(url)` (scheme and host in lowercase), `is_youtube`,
+`youtube_id(url)` (watch, youtu.be, shorts, live, embed),
+`youtube_folder(url)` (a playlist or channel link in the form yt-dlp lists
+as one playlist), `canonical(url)` (YouTube's own form, else
+normalized; the key of a link), `file_name`, `is_direct` (a video file or manifest by extension:
+played as is), `is_manifest` (`.m3u8` / `.mpd`: downloaded by yt-dlp),
+`play_path(url)` (the link, or `ytdl://<canonical>`), `extinf_title`,
+`parse_m3u(text)` → links `{url, key, title, folder}` and skipped
+`{count, by}`, `main_reason(by)`, `fallback_label(url, clean)`, `site`,
+`oembed_url`, `recent_key` / `parse_recent_key` / `recent_ref`
+(`online:<canonical link>`), `stream_height(screen_h)`,
+`download_height(quality, device)`, `format_spec(height, device)` →
+yt-dlp `-f` and `-S`, `sub_langs(slang)` (`en($|-.*),es($|-.*)`),
+`common_args(cookies)`,
+`raw_options(sort, langs, cookies)` (mpv's `ytdl-raw-options`),
+`error_text(stderr)` → message, retry, `parse_info(json)` (a `-J`
+answer: title, channel, duration, live, size, format ids, playlist),
+`download_args(url, formats, dir, langs)`.
+
+Instance: `new(data_dir, {resume, cfg, config_dir, device})` loads
+`online.json` (`titles`; `lists`: the list or playlist each played video
+was played from, kept while resume.json has the video; `folders`: other
+sites' links yt-dlp was asked about, true for a playlist) and deletes
+cookies copies a crash left; `save()` keeps the 3000 most recent titles.
+`cookies(purpose)` (a private copy of `[online] cookies_file` with a name
+of its own, or nil), `drop_copy(copy)`, `shutdown()` (deletes the copies
+of runs still going), `ytdlp(args, purpose, cb)` (runs yt-dlp with the
+common arguments, deletes its copy after), `stream_options(screen_h)`
+→ `ytdl-format`, `ytdl-raw-options` (main.lua sets them in an `on_load`
+hook at priority 5) and `stream_done()` (drops that copy),
+`entry_for(link, list, name, pos)` (a video entry, or a folder for a
+playlist; a downloaded copy is the entry's path), `refresh_entries(entries)`
+(after downloads changed), `read_list(path, cb)` (`head -c`, given up
+after 10 s), `list(loc, cb, quiet)` (a list file, or `list_playlist` for
+kind "playlist": `yt-dlp --flat-playlist -J`, 200 entries; `quiet`: no
+title search), `fetch_titles(entries)` (oEmbed for YouTube videos, four
+at a time, yt-dlp batches of 15 for the rest, two at a time, which also
+mark playlists: `became_folder`; redrawn as titles arrive),
+`stop_titles()` (the list was left: browser's `cancel_listing`),
+`learned(key, title, channel, entries)`, `found_playlist(key, info)`,
+`resolve(id, key, siblings, cb)` (alone after 15 s), `item_for(path)` (a
+link, or a downloaded file through its download), `prepare` (the local
+position; records the video's list), `set_watched` (local), `describe`,
+`loaded(item)` (title from the hook's answer, file-loaded),
+`play_error(path)` (why the hook failed, end-file), `video_info(ref, cb)`
+(ffprobe for files and downloaded copies, else `yt-dlp -J` with the
+subtitle languages → `VideoInfo.from_ytdlp`), `download_info(job, cb)`
+(refuses playlists; new formats once if the kept ones are gone),
+`download(spec, dir, cb)`. `downloads` and `on_titles` are set by main.lua.
+
 ## `dvp/hdr.lua`: HDR choices (D52)
 
 `Hdr.new(cfg, device, notify)`: state `enabled` (`hdr`), `mapping`
@@ -733,8 +812,10 @@ file (remembered, else session, else config.ini). Picture: `player:set_zoom`
 Pure (unit-tested): `format_fps`, `format_bitrate` (bits/s), `format_size`,
 `hdr_label{dv_profile, transfer, hdr10plus}` ("Dolby Vision 8 · HDR10+";
 profile 5 without HDR10), `from_ffprobe(probe, frame, path)` and
-`from_plex(md, source)`, `from_jellyfin(it, source)` → a normalized description `{file, video,
-audio, subs}`, `server_source(service, server_name, connection)` →
+`from_plex(md, source)`, `from_jellyfin(it, source)`, `from_ytdlp(json, source)` (an
+online video: the formats yt-dlp chose; codec names, HDR from
+`dynamic_range`; Channel, Uploaded and Link rows, D84) → a normalized
+description `{file, video, audio, subs}`, `server_source(service, server_name, connection)` →
 "Plex · Home · local network" (the Source row, D56),
 `sections(d)` → `{title, rows = {label, value}}` (File starts with Source),
 `items(sections)` → menu items (headers + rows).
@@ -856,7 +937,8 @@ D28. `SubDownload.new(ctx, data_dir, api_url)`.
 - `stored(path)` / `load_stored(path)`: downloaded files of a video, added
   with `sub-add … auto <title> <lang>` from the `on_preloaded` hook.
 - Server videos (Plex D38, Jellyfin D55): `key` is `server_key(item)`
-  (`plex-…` / `jellyfin-…`, no network), search terms `server_info(item)`
+  (`plex-…` / `jellyfin-…` / `online-web-…`, no network; over 120 bytes,
+  the start and a hash), search terms `server_info(item)`
   (both pure), `hash_for(path, cb)` fetches the first and last 64 KiB from
   the server (`fetch_range`) for the exact-match hash. `server_files(item)`
   lists a server video's stored files, which a download copies next to
@@ -871,7 +953,8 @@ Downloads and deleting (D60): `download(entries)`, `download_season(entry)`,
 `deletable(entry)`, `delete_dialog(path, label)` (defaults to *Cancel*),
 `delete(path)`, `open_folder(path, select)` (stack built from the folder's
 source down), `play_path(path)`, `downloads_changed()` (deferred while a
-menu is open: `menu_closed()` catches up); server rows show `downloads:tag()` as a pill.
+menu is open: `menu_closed()` catches up; an open online list's rows get
+their new paths); server rows show `downloads:tag()` as a pill.
 
 State: `stack` of locations `{path, label, is_root?}`, `entries`,
 `selected`, `scroll`, `cursor[path]` (remembered selection per folder),
@@ -923,7 +1006,8 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
 - Media servers (D37, D55): `load_server(loc)` (async listing through the
   backend, `loading` state, drops late answers, `after_load` callback,
   e.g. to restore the cursor), `entry_state(e)` / `resume_position(e)`
-  (server state or resume.json), `sortable()` (not the server page, its
+  (server state or resume.json, under `local_key(path)`: the path, or a
+  downloaded online video's link, D85), `sortable()` (not the server page, its
   two lists, seasons or episodes), `plex_sign_in()` (code dialog, polls
   only while open), `plex_account_menu()`, `jellyfin_add()` (servers found
   on the LAN and in config.ini), `jellyfin_sign_in(server)` (Quick Connect
@@ -1020,7 +1104,7 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `scripts/steam_shortcut.py add\|artwork\|remove\|repair\|status` | Binary `shortcuts.vdf` reader/writer and artwork installer (D19). `repair` (also done by `add`) removes a `--branch=…` from the app's own shortcut (D44); `status` reports a pinned branch. Never writes while Steam runs. `save_shortcuts()` serialises first, then replaces the file atomically with a `.bak` (D22); `UInt64` keeps type-0x07 values lossless. |
 | `scripts/dev-run.sh [--window] [--gamescope] [--media DIR]` | Run from source with system mpv; config and data in `.dev/`. |
 | `tools/make-test-media.sh [DIR]` | Generates the synthetic test library. |
-| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `REMEMBER=no` sets `remember_settings`; `PLEX_WRITE=1` / `JELLYFIN_WRITE=1` allow progress reports to Plex / Jellyfin (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
+| `tools/headless-run.sh` | Runs the app in headless gamescope and drives it (see DEVELOPMENT.md). `KEEP=1` keeps resume data between runs; `COOKIES=FILE` sets `[online] cookies_file`; `SLANG=spa,eng` sets `subtitle_languages`; `SURROUND=1`, `OSMOCK=1`, `OSMOCK_LOGIN=1` set up the v0.2 features; `REMEMBER=no` sets `remember_settings`; `PLEX_WRITE=1` / `JELLYFIN_WRITE=1` allow progress reports to Plex / Jellyfin (read-only by default); `MPV_EXTRA` adds mpv arguments; `RATES=48,60` forces a refresh list (headless gamescope can't switch, so this exercises the request/verify path); `XWAYLAND2=1` runs the app on gamescope's second Xwayland like SteamOS game mode. |
 | `tools/mpv-ipc.py` | IPC step runner: key presses, screenshots, property reads. |
 | `helper/build.sh [OUTDIR]` | Builds the native helpers: refresh rate (D31), keep awake (D43), Jellyfin discovery (D55). |
 | `scripts/make-source-archive.py OUT [--manifest M]` | GPL corresponding-source archive of a release from the manifest's pinned sources (D36). |
@@ -1029,5 +1113,7 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
 | `tools/plex-dev-account.py DATA_DIR` | Writes a signed-in `plex.json` for tests from `.dev/plex/` (D37). |
 | `tools/jellyfin-dev-account.py login [URL]` / `DATA_DIR` | Quick Connect sign-in for tests (token in `.dev/jellyfin/`), then writes a signed-in `jellyfin.json` (D55). |
 | `tools/mock-opensubtitles.py [PORT]` | Fake OpenSubtitles API for tests (D30); used by `OSMOCK=1 tools/headless-run.sh`. |
-| `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists) and `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`). |
+| `tools/mock-online.py [--port 8767] [--rate KB] FOLDER` | Test server for online video lists (D84): files with Range, `/watch?file=…` pages yt-dlp's generic extractor plays (the yt-dlp path without YouTube; several `file=` make a playlist, `sub=<lang>:<file>` adds subtitle tracks), DASH manifests made with ffmpeg, `/status/<code>`; 127.0.0.1 only. |
+| `scripts/update-yt-dlp.py [--version TAG]` | Points the manifest's yt-dlp module at the newest release (zipapp checked against its SHA2-256SUMS, LICENSE) and THIRD_PARTY_NOTICES (D84); run weekly by `.github/workflows/update-yt-dlp.yml`, which opens a pull request. |
+| `tests/run.sh` | Runs all unit tests: `tests/run.lua` (Lua, inside mpv so `mp.*` exists), `tests/test_steam_shortcut.py` (Python unittest, fake `HOME`) and `tests/test_update_yt_dlp.py`. |
 | `.github/workflows/build.yml` | CI: unit tests, Flatpak bundle; on `v*` tags a GitHub release with the bundle and an installer tarball. |

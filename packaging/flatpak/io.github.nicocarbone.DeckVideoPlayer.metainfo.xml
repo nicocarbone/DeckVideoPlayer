@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.9.0" date="2026-11-19">
+      <description>
+        <p>Online videos: lists of links (YouTube videos, playlists and channels, other sites, video files) in the library, with downloads for offline viewing.</p>
+      </description>
+    </release>
     <release version="0.8.5" date="2026-11-15">
       <description>
         <p>CRT look with light, medium or strong scanlines, the same on every screen size.</p>

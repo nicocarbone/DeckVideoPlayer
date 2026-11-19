@@ -59,11 +59,17 @@ local function is_local(path)
     return path ~= nil and path:sub(1, 1) == "/"
 end
 
+local KEY_MAX = 120   -- bytes of a storage folder's name (Linux allows 255)
+
 -- Pure: storage key of a media server video (backend + server + item id,
 -- no network): "plex-<machine>-<ratingKey>", "jellyfin-<server>-<item>".
+-- An online video's id is its link, which can be long: then the start of
+-- it and a hash of all of it.
 function M.server_key(item)
-    return ((item.backend or "plex") .. "-" .. tostring(item.machine) .. "-" .. tostring(item.rating_key))
-        :gsub("[^%w%-]", "_")
+    local id = (item.backend or "plex") .. "-" .. tostring(item.machine) .. "-" .. tostring(item.rating_key)
+    local key = id:gsub("[^%w%-]", "_")
+    if #key <= KEY_MAX then return key end
+    return key:sub(1, KEY_MAX - 17) .. "-" .. util.hash_hex(id)
 end
 
 -- Pure: what to search for a media server video, from the server's own

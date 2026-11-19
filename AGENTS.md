@@ -22,6 +22,7 @@ non-trivial.
 | Plex (sign-in, servers, browse, playback, progress) | `…/dvp/plex.lua`, Plex parts of `…/dvp/browser.lua` and `…/main.lua`, `tools/plex-dev-account.py` |
 | Jellyfin (discovery, Quick Connect, browse, playback, progress) | `…/dvp/jellyfin.lua`, `helper/dvp-discover.c`, Jellyfin parts of `…/dvp/browser.lua`, `tools/jellyfin-dev-account.py` (D55) |
 | DLNA servers (SSDP discovery, ContentDirectory browsing) | `…/dvp/dlna.lua`, `helper/dvp-discover.c` (`--ssdp`), DLNA menus in `…/dvp/browser.lua`, `tools/mock-dlna.py` (D66) |
+| Online videos (`.m3u` lists of links, yt-dlp, playlists, cookies) | `…/dvp/online.lua`, yt-dlp transfers in `…/dvp/downloads.lua`, `ytdl` lines in `mpv.conf`, `tools/mock-online.py`, `scripts/update-yt-dlp.py` (D84) |
 | Plex / Jellyfin behind one interface | `…/dvp/servers.lua` (router used by browser, main, player, subtitles, video info) |
 | HTTP (curl) for all network features | `…/dvp/http.lua` |
 | Headphone surround | `…/dvp/surround.lua`, `app/share/deckvideoplayer/hrtf/` (made by `tools/equalize-hrtf.py`, D48) |
@@ -213,13 +214,25 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   and aspect ratio (D79, D80). Measured in headless gamescope at several
   sizes and in the Flatpak; the owner tried the test builds before
   release. Twelfth audit (ISSUES.md Part XII) reviewed in D80.
+- v0.9.0 (in progress, not released): online videos (D84,
+  `dvp/online.lua`): `.m3u` lists of links in library folders, YouTube
+  playlists and channels as folders, played through mpv's yt-dlp hook
+  confined to the app's `ytdl://` addresses, QuickJS-NG for YouTube,
+  downloads (yt-dlp + the bundled `ffmpeg`), an optional cookies file
+  (YouTube asks the owner's connection to sign in). Tested in headless
+  gamescope and the Flatpak with `tools/mock-online.py` (offline, the
+  yt-dlp path through its generic extractor) and real YouTube for titles,
+  playlists and channels. Thirteenth audit (ISSUES.md Part XIII) fixed
+  in D85, which also fixed maps saved empty in JSON stores losing later
+  keys (`util.plain_table`; resume.json since v0.1). mpv 0.42 waits for
+  0.42.1.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
-  v0.9.0: mpv 0.42 once 0.42.1 exists, the app's own signed Flatpak
-  repository on GitHub Pages, updated by CI on each tag (D81), and online
-  videos (`.m3u` lists of links, yt-dlp + QuickJS-NG, downloads). Flathub
-  and FlatPark not planned.
+  v0.9.0: mpv 0.42 once 0.42.1 exists, and online videos (in progress,
+  above). v0.10.0: the app's own signed
+  Flatpak repository on GitHub Pages, updated by CI on each tag (D81).
+  Flathub and FlatPark not planned.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on
   user request; secrets go on curl's stdin, never in argv. The only
   blocking calls are short ones inside mpv hooks, where playback waits

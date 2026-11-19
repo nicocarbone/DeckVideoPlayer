@@ -58,11 +58,16 @@ library artwork).
 - **DLNA**: find the media servers on your network (NAS units, PCs,
   routers) and play their videos; progress and *Recently played* are
   kept on the device.
+- **Online videos**: lists of links (a `.m3u` file in a library folder)
+  with YouTube videos, playlists and channels, other sites' videos or
+  video files, played with yt-dlp in HDR and surround when the video has
+  them, and downloadable for offline viewing
+  ([guide](docs/INSTALL.md#online-videos)).
 - **Network shares** (SMB): a NAS or PC share mounted by SteamOS plays
   like a local folder; a share that is asleep never freezes the app
   ([setup guide](docs/INSTALL.md#network-shares-smb)).
 - **Downloads** for offline playback: Plex and Jellyfin videos or whole
-  seasons, with their subtitles, and DLNA videos, to a folder of your
+  seasons, with their subtitles, DLNA videos and online videos, to a folder of your
   choice (also the microSD card). Local videos can be deleted from the library menu.
 - **Old SD video** (DVDs, TV recordings, XviD series): interlaced video
   is deinterlaced to a frame per field, and *Menu → Video* offers a CRT
@@ -334,8 +339,8 @@ procedures, including HDR and refresh-rate verification without a Deck.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md): renaming library sources, SMB
 shares without a system mount, next episode from *Continue watching*;
-online videos (lists of YouTube and other links, with downloads) and
-automatic updates from the app's own Flatpak repository (v0.9.0). Past releases:
+online videos (lists of YouTube and other links, with downloads, v0.9.0)
+and automatic updates from the app's own Flatpak repository (v0.10.0). Past releases:
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Questions
@@ -353,6 +358,10 @@ automatic updates from the app's own Flatpak repository (v0.9.0). Past releases:
   them. On a Deck, 4K60 AV1 can stutter with the hardware decoder;
   *Video → Decoding: Software* plays it more smoothly, using about twice
   the power.
+- **Does it play YouTube?** Videos, playlists and channels you put in a
+  list file, with yt-dlp: no search or recommendations. From some internet
+  connections YouTube wants a sign-in first; the app can use a cookies
+  file from your browser ([guide](docs/INSTALL.md#online-videos)).
 - **Other handhelds, Valve's Steam Machine, desktop Linux?** Untested.
   Anything running SteamOS's Game Mode (gamescope) may work; reports are
   welcome.

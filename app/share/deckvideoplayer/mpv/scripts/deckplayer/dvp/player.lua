@@ -101,6 +101,9 @@ end
 
 function M:start()
     self.active = true
+    -- Until the file is open (a server's answer, yt-dlp for an online
+    -- video): "Opening…" in the middle.
+    self.opening = true
     self.video_track = nil
     local name = util.basename(mp.get_property("path") or "")
     local item = self.ctx.servers:item_for(mp.get_property("path"))
@@ -117,7 +120,15 @@ function M:start()
 end
 
 -- Called by main.lua once the file's tracks are known.
+-- A title learned once the video opened (an online video, D84).
+function M:retitle(title)
+    if not title or title == "" then return end
+    self.title_text = title
+    self:render()
+end
+
 function M:on_file_loaded()
+    self.opening = false
     self.video_track = media.selected_track("video")
     self:render()
     self:update_marker_timer()
@@ -957,8 +968,10 @@ function M:render()
         bx = bx + w + 10
     end
 
-    -- Center pause indicator
-    if paused then
+    -- Center: opening, or the pause indicator
+    if self.opening then
+        a:text(W / 2, H / 2, "Opening…", {size = 30, bold = true, align = 5, outline = 1, color = t.subtext})
+    elseif paused then
         a:circle(W / 2, H / 2, 54, {color = t.black, opacity = 0.45})
         a:icon_pause(W / 2, H / 2, 44, {color = t.text, opacity = 0.95})
     end

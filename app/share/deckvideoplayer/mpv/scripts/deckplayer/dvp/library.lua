@@ -354,8 +354,19 @@ function M.sort_entries(entries, mode)
     return entries
 end
 
+-- Lists of online videos (dvp/online.lua, D84): a `.m3u` file is listed
+-- with the folders, opened by the "online" backend.
+M.LIST_EXT = "m3u"
+
+-- Pure: the entry of a list file.
+function M.list_entry(name, full, mtime)
+    return {name = name, path = full, is_dir = true, list = true, mtime = mtime,
+            server = {backend = "online", machine = "web", key = full, kind = "list"}}
+end
+
 -- Entries of folder `path` from `items` ({name, is_dir, is_file, mtime,
--- size}): folders, then video files, hidden ones only with show_hidden.
+-- size}): folders and lists of online videos, then video files, hidden
+-- ones only with show_hidden.
 local function build_entries(path, items, cfg, sort_mode)
     local exts = M._exts
     if not exts or M._exts_src ~= cfg.library.extensions then
@@ -369,6 +380,8 @@ local function build_entries(path, items, cfg, sort_mode)
             local full = util.join(path, name)
             if it.is_dir then
                 dirs[#dirs + 1] = {name = name, path = full, is_dir = true, mtime = it.mtime}
+            elseif it.is_file and util.extension(name) == M.LIST_EXT then
+                dirs[#dirs + 1] = M.list_entry(name, full, it.mtime)
             elseif it.is_file and exts[util.extension(name)] then
                 files[#files + 1] = {name = name, path = full, is_dir = false, mtime = it.mtime, size = it.size}
             end
@@ -378,7 +391,8 @@ local function build_entries(path, items, cfg, sort_mode)
     local out = {}
     for _, list in ipairs({dirs, files}) do
         for _, e in ipairs(list) do
-            e.label = M.display_name(e.name, e.is_dir, clean)
+            -- (A list's name without ".m3u", cleaned like a file's.)
+            e.label = M.display_name(e.name, e.is_dir and not e.list, clean)
             -- Sort by the cleaned label (name keeps the real file name).
             e.sort_name = e.label
             out[#out + 1] = e

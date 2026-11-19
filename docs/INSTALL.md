@@ -344,6 +344,88 @@ Notes:
   to bring along.
 - **Menu → DLNA servers → server → Remove from the library** forgets it.
 
+## Online videos
+
+YouTube videos, playlists and channels, videos on other sites, and links
+to video files can sit in your library as **lists**: a `.m3u` file in a
+library folder shows as a folder named after the file, and each line in
+it is a video. They play with [yt-dlp](https://github.com/yt-dlp/yt-dlp),
+which comes with the app.
+
+**Make a list** (Desktop Mode):
+
+1. Open the Dolphin file manager, go to **Videos** (or any library folder),
+   right-click → **Create New → Text File…** and name it, e.g.
+   `YouTube.m3u` (the name is what the library shows).
+2. Open it with Kate (or any text editor) and paste one link per line:
+
+   ```
+   https://www.youtube.com/watch?v=aqz-KE-bpKQ
+   https://youtu.be/eRsGyueVLvQ
+   https://www.youtube.com/@BlenderOfficial
+   https://www.youtube.com/playlist?list=PLa1F2ddGya_8u-HEvmfCVuS_OImW8HaLd
+   https://example.org/films/A%20Film.mp4
+   ```
+
+   Optional: a line `#EXTINF:-1,My title` just above a link names it.
+   Other lines starting with `#` are comments. Lists other apps make
+   (`.m3u` files) work too.
+3. Save. Back in Game Mode, the list is in the library; titles appear a
+   moment after you open it.
+
+What each kind of link does:
+- **A video** plays like any other: resume, watched marks, *Recently
+  played* (tagged *Online*), the audio and subtitle menus. Quality follows
+  the screen (1080p on the Deck, up to 4K on a 4K TV), in the video's
+  original audio language, with HDR and surround sound when the video has
+  them. Subtitles in your `subtitle_languages`, YouTube's automatic ones
+  when there are no others.
+- **A YouTube playlist or channel** is a folder inside the list: its
+  videos (a channel's 200 most recent), fetched each time you open it so
+  new uploads appear. `…/@name/shorts` or `…/@name/streams` lists those;
+  `…/@name/playlists` lists the channel's playlists as folders.
+- **Another site's playlist** becomes a folder once yt-dlp recognizes it.
+- **A link to a video file** (`.mp4`, `.mkv`, `.m3u8`…) plays directly.
+- Lines that aren't links are skipped; the list's header says how many.
+
+**Downloads**: *Menu → Download* on a video, or *Download all videos* on
+a list or playlist, saves them in `download_folder` (`config.ini`), in a
+folder named after the list, with subtitles. A downloaded video then
+plays from the file, also when opened from its list (no internet needed).
+Quality: 1080p on a Steam Deck, 4K elsewhere, keeping HDR and surround
+sound (`[online] download_quality` in `config.ini` changes it). Live
+streams can't be downloaded.
+
+**When YouTube asks to sign in.** From some internet connections YouTube
+refuses yt-dlp until you sign in ("YouTube asks to sign in on this
+connection"); age-restricted videos always need it. The app can use the
+cookies of a browser where you are signed in to YouTube:
+
+1. In a browser (on the Deck in Desktop Mode, or on a PC), install an
+   extension that exports cookies in the *cookies.txt* (Netscape) format.
+2. Open a **private window**, sign in to YouTube there, open a new tab and
+   close the YouTube tab, export the cookies for youtube.com as
+   `cookies.txt`, then **close the private window** without signing out.
+   (YouTube changes the cookies of an open YouTube tab often; cookies from
+   a session that is never used again keep working.)
+3. Put the file in `~/.config/deckvideoplayer/cookies.txt` (next to
+   `config.ini`). The app uses it from the next video on; it never
+   changes the file.
+
+Keep in mind:
+- Anyone with this file can use your Google account. Don't share it.
+- YouTube may block accounts used this way. **A spare account is safer.**
+- Delete the file to stop using it.
+
+Notes:
+- YouTube's terms don't allow watching outside its own apps. Like mpv,
+  Kodi and others, the app leaves that choice to you.
+- YouTube changes often break yt-dlp; app updates bring a newer one. When
+  videos that used to play stop playing ("The site refused the video"),
+  check for an update.
+- Members-only and private videos don't play. There is no search: lists
+  hold the links you add.
+
 ## Network shares (SMB)
 
 Videos on a NAS or a shared folder of a PC play once SteamOS mounts the

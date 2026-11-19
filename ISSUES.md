@@ -1,11 +1,259 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-11-14, v0.8.5 work):** every finding in Parts I–XII was checked
+**Status review (2026-11-19, v0.9.0 work):** every finding in Parts I–XIII was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
 reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78, XII: D80).
+VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78, XII: D80, XIII: D85).
+
+---
+
+# Part XIII — v0.9.0 Audit: Online Videos (`.m3u` Lists, yt-dlp, Cookies & Downloads) (2026-11-19)
+
+All `1008` Lua checks and `17` Python tests in `tests/run.sh` pass. The v0.9.0 online video implementation (`D84`: `dvp/online.lua`, `dvp/downloads.lua`, `dvp/videoinfo.lua`, `dvp/browser.lua`, `dvp/library.lua`, `dvp/player.lua`, `main.lua`, `mpv.conf`, `scripts/update-yt-dlp.py`, `.github/workflows/update-yt-dlp.yml`, and the Flatpak manifest) was audited and tested live against `mpv v0.41.0`, `yt-dlp 2026.03.17`, and `ffprobe`:
+* **yt-dlp confinement & protocol safety (`mpv.conf`, `dvp/online.lua`):** `ytdl_hook-exclude=.` with `ytdl_hook-include=` and `ytdl_hook-try_ytdl_first=no` keeps non-`ytdl://` streams away from `ytdl_hook`; HTML `<video src="file://...">` embeds are blocked by both `mpv`'s `ytdl_hook` (`Ignoring potentially unsafe url`) and `yt-dlp` downloads (`file:// URLs are disabled by default`); `mp.set_property_native("ytdl-raw-options", raw)` handles commas and `=` in paths cleanly; `VideoInfo.probe_url` (`-protocol_whitelist http,https,tcp,tls`) succeeds on both HTTP HLS (`.m3u8`) and DASH (`.mpd`) streams.
+* **CI updater (`.github/workflows/update-yt-dlp.yml`, `scripts/update-yt-dlp.py`):** GitHub Actions are SHA-pinned, `build.yml` has `workflow_dispatch`, `TAG_RE` validates release tags strictly, and `update-yt-dlp.py` verifies the zipapp against `SHA2-256SUMS` without attaching `GITHUB_TOKEN` to release downloads.
+
+Below are the verified security/concurrency issues, functional bugs, optimization opportunities, and pre-release items found in v0.9.0.
+
+---
+
+## 1. Security, Privacy & Concurrency (`dvp/online.lua`, `main.lua`)
+
+### 1.1. `dvp/online.lua` & `main.lua`: Shared per-purpose cookie files race across concurrent `yt-dlp` runs, and `online-cookies-play.txt` leaks on quit
+
+* **Severity:** High (Security / Privacy / Concurrency Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:cookies` lines 521–528, `M:ytdlp` lines 532–543, `M:stream_options` / `M:stream_done` lines 548–562, `M:list_playlist` line 654, `M:fetch_titles` line 765, `M:video_info` line 905, `M:download_info` line 928)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`shutdown` lines 607–614)
+* **Problems:**
+  1. **Concurrent deletion and clobbering of the same cookie copy:** `M:cookies(purpose)` always writes to the fixed path `<data_dir>/online-cookies-<purpose>.txt` (via `util.write_private` → `copy .. ".tmp"`). Multiple concurrent `yt-dlp` runs routinely share the same `purpose`:
+     * `M:fetch_titles` spawns every 15-link batch simultaneously with `purpose = "titles"`, and `M:list_playlist` also uses `"titles"`.
+     * `M:video_info` and `M:download_info` both use `purpose = "info"`.
+     When the faster run exits, `M:ytdlp` line 540 runs `os.remove(cookies)` while the slower run is still using (or about to write back via `save_cookies()`) that exact file. Verified live in `mpv` with two concurrent `on:ytdlp(..., "titles", ...)` calls (`0.05 s` and `0.35 s`): the fast run saw `EXISTS:0.05` and deleted the file before the slow run checked it (`MISSING:0.35`), causing `yt-dlp` to lose cookies or fail with `FileNotFoundError` in `save_cookies()` (and risking re-creating an unremoved file on disk if `save_cookies()` writes after the other run deleted it). Concurrent calls also race on `copy .. ".tmp"` inside `util.write_file_atomic`.
+  2. **`online-cookies-play.txt` leaks on quit and crashes:** While `mpv` invokes completion callbacks for async `yt-dlp` subprocesses on graceful quit (cleaning up `titles`/`download` copies), `main.lua`'s `shutdown` handler (lines 607–614) does not call `online:stream_done()`, and `Online.new` never sweeps stale copies from a prior crash or SteamOS force-close. Verified live in `mpv`: quitting after `online:stream_options(1080)` left `online-cookies-play.txt` (`mode 600`) on disk.
+* **Suggested Fix:**
+  * Give every `M:cookies(purpose)` call a unique filename using a monotonic sequence counter (e.g. `online-cookies-<purpose>-<seq>.txt`) so no two runs ever share a cookie copy or `.tmp` path.
+  * Call `online:stream_done()` in `main.lua`'s `shutdown` handler, and remove any leftover `online-cookies-*.txt` files in `Online.new` on startup.
+
+
+> **Status: Solved** (D85). Confirmed. Each yt-dlp run now gets a copy of its own (`online-cookies-<purpose>-<instance>-<n>.txt`); copies of runs still going when the app closes are deleted at shutdown (`Online:shutdown`, the playback copy included), and copies a crash left behind are deleted at the next start (never the user's own file). Tested in mpv with two overlapping runs (0.05 s and 0.35 s: each still had its copy at the end, both gone afterwards), and by quitting while a yt-dlp video was opening (no copy left).
+
+---
+
+### 1.2. `dvp/online.lua`: `fetch_titles` spawns unbounded concurrent `yt-dlp` processes, runs unnecessarily during *Recently played* playback, and withholds all title updates until the slowest batch finishes
+
+* **Severity:** High (Resource Exhaustion / Performance Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.common_args` line 354, `M:list` lines 644–645, `M:list_playlist` lines 676–677, `M:fetch_titles` lines 712–784, `M:resolve` line 801)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`M:download_season` line 603)
+* **Problems:**
+  1. **Unbounded `yt-dlp` concurrency:** While YouTube oEmbed requests are capped at `OEMBED_JOBS = 4` (lines 749–752), the loop `for first = 1, #other, BATCH do` (`BATCH = 15`, lines 753–783) launches **all `ceil(#other / 15)` `yt-dlp` Python subprocesses at once** with no concurrency limit and no `--socket-timeout` (`yt-dlp`'s default `socket_timeout` is `None`). A `.m3u` with hundreds of non-YouTube URLs or YouTube playlists/channels (up to `MAX_ENTRIES = 5000`) spawns dozens to hundreds of simultaneous `yt-dlp` processes, risking OOM or severe stalls on the Steam Deck.
+  2. **Hidden title scraping on playback and bulk download:** `Online:list` (line 645) and `Online:list_playlist` (line 677) unconditionally call `self:fetch_titles(entries)`, even when invoked by `Online:resolve` (playing one video from *Recently played*) or `Browser:download_season` (*Download all videos*), triggering full-list title scraping when the user is not viewing the folder.
+  3. **Head-of-line blocking for UI redraws:** `done()` (lines 730–735) only calls `self.on_titles()` once `pending == 0`. A single slow/unresponsive non-YouTube site in `other` prevents fast YouTube oEmbed titles from rendering on screen until that batch finishes.
+* **Suggested Fix:**
+  * Run `other` batches through a bounded worker queue (e.g. 1–2 concurrent `yt-dlp` processes, just like `oembed()`), and pass `--socket-timeout 15` in `M.common_args`.
+  * Call `self.on_titles()` incrementally as oEmbed/batch results arrive (saving once at the end or periodically).
+  * Skip `fetch_titles` when `list` / `list_playlist` is called from `Online:resolve` or `Browser:download_season`.
+
+
+> **Status: Partly solved** (D85). At most two yt-dlp title runs at a time (and four oEmbed requests); titles show as they arrive (a redraw at most every 0.5 s), saved once at the end; no title search for *Recently played* and *Download all videos* listings. Also: no new title run starts once the list is left (another folder, a video playing); the rest are asked for when it opens again. Unit-tested with a stand-in for yt-dlp. Declined: `--socket-timeout`. yt-dlp's default is not "no timeout": its request handlers fall back to 20 s (`DEFAULT_TIMEOUT = 20` in `yt_dlp/networking/common.py`), so an unresponsive site already times out.
+
+---
+
+### 1.3. `dvp/online.lua`: `parse_m3u` and `split_url` accept URLs containing ASCII control characters (including NUL)
+
+* **Severity:** Low (Hardening / Input Validation)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.split_url` lines 68–78, `M.parse_m3u` lines 222–228)
+* **Problem:** `line:match("^(%S+)")` excludes whitespace, not control bytes (`\000`–`\008`, `\014`–`\031`, `\127`), and `M.split_url` only checks `host:find("[@%s]")`. Verified: `Online.parse_m3u("https://example.com/a\001b.mp4\nhttps://example.com/x\000y.mp4\n")` returns `2` accepted links with `0` skipped (`u1_has_ctrl = true`).
+* **Suggested Fix:** Reject any URL matching `"%c"` in `M.split_url`.
+
+
+> **Status: Solved** (D85). `split_url` refuses any control character, so such lines are skipped as "not a web address". Unit tests.
+
+---
+
+## 2. Functional Bugs (`dvp/online.lua`, `dvp/downloads.lua`, `dvp/videoinfo.lua`, `dvp/browser.lua`, `dvp/subdownload.lua`)
+
+### 2.1. `dvp/online.lua`: `Online.sub_langs` emits `xx.*` regexes that match unrelated 3-letter subtitle languages (e.g. Estonian for Spanish, Javanese for Japanese, Filipino for Finnish)
+
+* **Severity:** Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.sub_langs`, lines 340–350)
+* **Problem:**
+  `M.sub_langs` turns two-letter codes into `two .. ".*"` (e.g. `en.*,es.*,ja.*,fi.*`) for `yt-dlp --sub-langs`. Because `yt-dlp` interprets `--sub-langs` entries as regexes where `.` matches any character, `es.*` matches `est` (Estonian), `ja.*` matches `jav` (Javanese), and `fi.*` matches `fil` (Filipino).
+  Verified directly against `yt_dlp.YoutubeDL.process_subtitles`: `['es.*', 'ja.*', 'fi.*', 'en.*']` matched `['en', 'en-orig', 'es', 'es-419', 'est', 'fil', 'jav']`, whereas `['es($|-.*)', 'ja($|-.*)', 'fi($|-.*)', 'en($|-.*)']` matched only `['en', 'en-orig', 'es', 'es-419']`.
+* **Suggested Fix:** Use `two .. "($|-.*)"` (or `two .. "(-.*)?"`) in `M.sub_langs` so only exact two-letter codes and subtag variants (`es`, `es-419`, `en-orig`) match.
+
+
+> **Status: Solved** (D85). `xx($|-.*)`. Checked with yt-dlp against a mock page with `es-419`, `est` and `en` tracks: `es.*` took `es-419` and `est`, the new pattern only `es-419`.
+
+---
+
+### 2.2. `dvp/downloads.lua`: Regional YouTube subtitle codes (`es-419`, `pt_BR`) are renamed to `.und.vtt`, and OpenSubtitles files downloaded while streaming are dropped for `yt-dlp` downloads
+
+* **Severity:** Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/downloads.lua` (`M.subtitle_paths` lines 110–124, `M.ytdlp_subs` lines 133–141, `M:start` lines 387–391 & 413, `M:ytdlp_done` lines 453–455)
+* **Problems:**
+  1. `Downloads.ytdlp_subs` extracts `^video%.([%w%-_]+)%.(%a+)$`, accepting digits and `_` (such as YouTube's standard `es-419` Latin American Spanish and `pt_BR`), but `Downloads.subtitle_paths` line 114 requires `s.lang:match("^%a[%a%-]*$")` (letters and `-` only). Verified: `video.es-419.vtt` and `video.pt_BR.vtt` are silently downgraded to `Movie.und.vtt` and `Movie.2.und.vtt` (unknown language in mpv).
+  2. `Downloads:start` lines 387–391 collects subtitles previously downloaded via OpenSubtitles (`self.ctx.subtitles:server_files(job)`), but line 413 branches to `self:start_ytdlp(job, run, backend, info.ytdlp)` without passing `subs`, so those OpenSubtitles `.srt` sidecars are never copied next to the downloaded `.mkv`.
+* **Suggested Fix:** Allow BCP-47 numeric region subtags (e.g. normalize `_` to `-` and match `^%a[%w%-]*$`, plus lowercase `ext` in `ytdlp_subs`) in `Downloads.subtitle_paths`, and pass `subs` through `start_ytdlp` / `ytdlp_done` (or `fetch_subtitles` for local file copies).
+
+
+> **Status: Solved** (D85). Subtitle languages may hold letters, digits and `-` (`_` becomes `-`, lowercase): `video.es-419.vtt` → `<Title>.es-419.vtt`, `pt_BR` → `.pt-br.`; `ytdlp_subs` lowercases the extension. The OpenSubtitles files of the video are copied next to a yt-dlp download too. Checked in headless gamescope: `<Title>.es-419.vtt`, `.en.vtt` and the OpenSubtitles `.fr.srt` next to the downloaded video, no Estonian file.
+
+---
+
+### 2.3. `dvp/online.lua` & `dvp/videoinfo.lua`: `Online:video_info` never lists subtitles for `yt-dlp` videos, and `VideoInfo.from_ytdlp` omits `DV` from its `hdr` flag
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:video_info`, line 905)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`M.from_ytdlp`, lines 404–425)
+* **Problems:**
+  1. `VideoInfo.from_ytdlp` populates `d.subs` from `j.requested_subtitles` (lines 418–425), yet `Online:video_info` runs `yt-dlp -J -f <format> -S <sort> -- <url>` without `--write-subs`, `--write-auto-subs`, or `--sub-langs`. Verified against `yt-dlp`: `j.subtitles` contained `['en']` while `j.requested_subtitles` was `None`; adding `--write-subs --write-auto-subs --sub-langs en.*` populated `j.requested_subtitles = ['en']`. Consequently, *Video info* never shows subtitles for online `yt-dlp` videos.
+  2. In `VideoInfo.from_ytdlp` lines 404–410, `local hdr = range:find("HDR") ~= nil or range == "HLG"` omits `range == "DV"`, even though line 409 sets `transfer` for `range == "DV"`. Verified: `dynamic_range = "DV"` produces `bit_depth = nil, primaries = nil, transfer = "smpte2084"`.
+* **Suggested Fix:** Pass `--write-subs`, `--write-auto-subs`, and `--sub-langs` (from `M.sub_langs`) in `Online:video_info` (or inspect `j.subtitles`), and add `or range == "DV"` to `hdr` in `VideoInfo.from_ytdlp`.
+
+
+> **Status: Solved** (D85). Video info asks yt-dlp for the subtitles playback would load (same languages): checked, *English* and *Spanish (Latin America)* listed, Estonian not. `DV` counts as HDR, and Dolby Vision codec names (`dvh1`/`dvhe`, `dav1`, `dva1`/`dvav`) map to HEVC, AV1 and H.264. Found meanwhile: tags with a region had no name (`ES-419`); now "Spanish (Latin America)", "English (US)", "English (original)" (YouTube's `en-orig`), in Video info and the subtitle menu.
+
+---
+
+### 2.4. `dvp/online.lua` & `dvp/downloads.lua`: Undetected playlists download all items into `video.mkv`; stale `job.formats` breaks retries; direct online downloads show `"?"` size; free-space check ignores temporary mux copy
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.parse_info` lines 425–441, `M:download_info` lines 920–943)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/downloads.lua` (`M:check_space` lines 355–364, `M:transferred` lines 494–499)
+* **Problems:**
+  1. **Playlist URLs not rejected in `parse_info` / `download_info`:** If a non-YouTube playlist URL is queued for download before `fetch_titles` marks it as a folder, `yt-dlp -J --no-playlist` still returns `_type = "playlist"` with `entries` (verified on a 2-video page: `_type = "playlist"`, `entries_len = 2`). `Online.parse_info` does not check `j._type == "playlist"`, returning `{title = "Multi", formats = nil, live = false}`; `yt-dlp` then downloads every playlist item sequentially into the same `video.mkv` target (`Playlist Multi: Downloading 2 items of 2`).
+  2. **Stale `job.formats` permanently poisons retries:** `Online:download_info` line 927 unconditionally reuses `if job.formats then format = job.formats end`. If a site's format IDs change between pause/failure and *Try again*, `job.formats` is never cleared and every retry fails with `"No playable format for this video"`.
+  3. **Finished direct online downloads show `"?"` size:** For direct video URLs (`Online:download_info` line 923), `info.size` is `nil`, and `Downloads:transferred` (lines 494–498) never sets `job.size = file_size(job.path)` (unlike `ytdlp_done` line 452), so completed direct downloads permanently display `"?"` in the Downloads menu.
+  4. **2× peak disk space during `ffmpeg` remux:** `Downloads.enough_space` checks `avail >= size - have + 256 MiB`, but `yt-dlp` downloads separate video and audio files into `.parts/` and muxes them into `video.mkv` before deleting the inputs, requiring roughly `2 × size` free space during muxing.
+* **Suggested Fix:**
+  * Reject `j._type == "playlist"` in `Online.parse_info` / `download_info` with a fatal message (and optionally mark `self.data.folders[url] = true`).
+  * Clear `job.formats` (and partial files) when a retry fails with `"requested format is not available"` or when no partial files exist on disk.
+  * Set `job.size = file_size(job.path)` after `os.rename` in `Downloads:transferred`.
+  * Require roughly `size` extra space (or `2 * size - have`) in `check_space` for `job.ytdlp` downloads.
+
+
+> **Status: Solved** (D85). (1) `parse_info` flags `_type` playlist and multi_video; downloading or Video info of such a link says "A playlist: open it to download its videos" / "…to see its videos", and the link becomes a folder (checked with yt-dlp on a two-video mock page). (2) Kept formats the site no longer offers ("No playable format"): new ones are chosen once and the old partial files deleted (checked with made-up format ids). (3) The size is read from the file after a curl download. (4) yt-dlp downloads need their size twice in the space check (parts plus the joined file).
+
+---
+
+### 2.5. `dvp/online.lua` & `dvp/videoinfo.lua`: Uppercase `HTTP://` / `HTTPS://` schemes break *Recently played* and *Video info*
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.split_url` line 71, `M.canonical` line 144, `M.recent_key` line 289, `M.parse_recent_key` line 294)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/videoinfo.lua` (`M.probe_url` line 480)
+* **Problem:**
+  `Online.split_url` accepts case-insensitive `HTTP://` / `HTTPS://`, and `Online.recent_key` saves `"online:HTTPS://..."`, but `Online.parse_recent_key` (`^online:(https?://.+)$`) and `VideoInfo.probe_url` (`^https?://`) only match lowercase schemes. Verified in `mpv`: `Online.parse_recent_key(Online.recent_key({key = "HTTPS://example.com/film.mp4"}))` returns `nil`, and `VideoInfo.probe_url("HTTPS://example.com/film.mp4", ...)` fails with `"not a web address"`.
+* **Suggested Fix:** Lowercase the scheme (and host) in `Online.canonical`, or match schemes case-insensitively in `Online.parse_recent_key` and `VideoInfo.probe_url`.
+
+
+> **Status: Solved** (D85). Links get a lowercase scheme and host when read (`Online.normalize`, also in `canonical`), so keys, *Recently played* and Video info always see `https://…`. Unit tests; an uppercase link played in headless gamescope.
+
+---
+
+### 2.6. `dvp/browser.lua` & `dvp/online.lua`: Completed downloads still stream (`ytdl://`) from an open list, and playing the file from *Downloaded* splits progress depending on session history
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`M:downloads_changed` lines 704–713, `M:delete` lines 642–647)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:entry_for` lines 598–601)
+* **Problems:**
+  1. When an online download completes while the user is viewing its `.m3u` list or playlist, `Browser:downloads_changed()` line 712 sees `loc and loc.server` and only calls `self:render()` instead of refreshing entries. The row shows `"Downloaded"`, yet `e.path` stays `"ytdl://..."`, so pressing Play streams over the network instead of playing the downloaded file.
+  2. `Online:entry_for` caches `self.items[path] = item` for the downloaded local file path. If the user opened the `.m3u` list first and then plays the file from the **Downloaded** folder, `servers:item_for(path)` maps it to `online:<url>`, so the local row in **Downloaded** never gets a resume/watched badge; in a new session where **Downloaded** is opened first, `self.items[path]` is empty, so progress is stored under the local path instead, creating two separate resume and *Recently played* entries for the same video. `Browser:delete(path)` also leaves the deleted path in `online.items`.
+* **Suggested Fix:** Refresh `e.path` (or reload when `loc.server.backend == "online"`) in `Browser:downloads_changed()`, clear `online.items[path]` on `delete`, and unify how downloaded online files resolve their resume key (e.g. look up `downloads` by path inside `Online:item_for` or keep local-folder plays separate cleanly).
+
+
+> **Status: Solved** (D85). (1) A download finishing (or deleted) updates the open list's rows (`Online:refresh_entries` from `Browser:downloads_changed`): checked, a video downloaded while its list was open then played from the file. (2) A downloaded copy is the same video wherever it is opened: `Online:item_for` finds a file through its finished download (no session cache, so nothing stale after a delete), and the library's rows for that file read and set the link's record (`Browser:local_key`). Checked: marked watched in the download folder, the list row showed it; one record in resume.json.
+
+---
+
+### 2.7. `dvp/online.lua`: All-titled `.m3u` lists never persist `data.lists` to `online.json`, and `save()` never prunes `data.lists` / `data.folders` entries absent from `data.titles`
+
+* **Severity:** Low–Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:save` lines 478–493, `M:list` lines 634–646)
+* **Problems:**
+  1. `Online:list` writes `self.data.lists[link.key] = path` (line 636) but relies on `fetch_titles`'s `done()` callback to call `self:save()`. Verified: opening a `.m3u` whose entries already have `#EXTINF` titles (or direct video links) never creates/updates `online.json` (`online_json_exists = false`), so after restart, *Recently played* loses `data.lists[key]` (breaking `autoplay_next` siblings, download list folder naming `item.show`, and Looks/subtitle memory `item.parent`).
+  2. `Online:save()` (lines 481–490) only prunes keys present in `self.data.titles`. Verified: adding `3050` keys to `data.lists` and `data.folders` without `data.titles` entries and calling `on:save()` left all `3050` entries unpruned (`lists = 3050`, `folders = 3050`), allowing `online.json` to grow without bound.
+* **Suggested Fix:** Call `self:save()` in `Online:list` when `self.data.lists` changed, and prune `data.lists` / `data.folders` independently of `data.titles`.
+
+
+> **Status: Solved** (D85), differently: a video's list is recorded when it plays (`prepare`) and saved then; at start, entries whose video is no longer in resume.json (at most 1000) are dropped; `folders` is capped at 3000 (videos first). Found while testing this: mpv's `parse_json` marks a table read from `[]`, and `format_json` writes it as `[]` again whatever keys were added. So `online.json` tables saved empty lost everything later, and so did `resume.json` (since v0.1: after the last record was deleted, no progress was kept across restarts). Fixed by copying what is read (`util.plain_table`); a unit test fails without it.
+
+---
+
+### 2.8. `dvp/subdownload.lua`: `SubDownload.server_key` exceeds Linux's 255-byte `NAME_MAX` for online URLs longer than ~244 characters
+
+* **Severity:** Low–Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/subdownload.lua` (`M.server_key` lines 64–67, `M:stored` line 161, `M:download` line 304)
+* **Problem:** `M.server_key` constructs `"online-web-" .. rating_key` sanitized with `gsub("[^%w%-]", "_")`. Because an online item's `rating_key` is its full URL (up to `URL_MAX = 2048`), URLs longer than ~244 bytes (e.g. signed CDN/query links) produce directory names over Linux's 255-byte limit (verified: a 295-byte URL yields `SUBKEY_LEN = 306`), causing `util.mkdir_p` and `readdir` to fail with `ENAMETOOLONG`.
+* **Suggested Fix:** For keys exceeding ~120 bytes, cap the prefix and append a short deterministic hash (preserving existing short keys for backward compatibility).
+
+
+> **Status: Solved** (D85). Keys over 120 bytes: the first 103 bytes, "-" and a 16-digit hash of the whole id (`util.hash_hex`, arithmetic only for Lua 5.1). Shorter keys are unchanged.
+
+---
+
+### 2.9. `dvp/online.lua` & `dvp/browser.lua`: `Online:read_list` has no timeout on hung shares (wedging `Browser.opening`), and *Download all videos* on folder-only lists displays `"Already in Downloads"`
+
+* **Severity:** Low (Bug / Reliability)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:read_list` lines 608–620, `M:list_playlist` line 654, `M:resolve` line 801)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`M:load_server` line 235, `M:open_server_recent` lines 443–451, `M:download` lines 584–595)
+* **Problems:**
+  1. Unlike `Browser:load_folder` (`LISTING_GIVE_UP`) and `Browser:recent_playlist` (`PLAYLIST_WAIT`), `Online:read_list` and `Online:list_playlist` discard their subprocess handles and have no timeout. If a `.m3u` lives on a hung SMB/NFS share and is opened from *Recently played*, `Online:resolve` never invokes its callback and `browser.opening` stays `true` permanently, blocking all other *Recently played* server entries until restart.
+  2. When *Download all videos* is triggered on a `.m3u` list or channel `/playlists` tab that contains only folders/playlists (no direct video items), `Browser:download` receives 0 items (`added == 0`) and displays `"Already in Downloads"` even though nothing was downloaded.
+* **Suggested Fix:** Return subprocess handles from `read_list` / `list_playlist` so `Browser:cancel_listing()` can abort them, add a fallback timeout in `Online:resolve` (falling back to `alone()`), and show `"No videos to download"` when `#items == 0` in `Browser:download`.
+
+
+> **Status: Solved** (D85). (1) A list file is given up after 10 s ("The list's folder isn't answering", the subprocess aborted), and *Recently played* plays the video alone if its list (or playlist) hasn't answered within 15 s. Tested with a FIFO and with a stand-in yt-dlp that hangs. The handles aren't passed to `cancel_listing`: the browser already ignores late answers. (2) "No videos to download here"; checked in headless gamescope.
+
+---
+
+## 3. Optimization Opportunities & Pre-Release Bookkeeping
+
+### 3.1. `dvp/online.lua`: Offline playback latency from *Recently played* for downloaded playlist videos, and blocking `chmod 600` per cookie copy
+
+* **Severity:** Low (Optimization)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:cookies` line 526, `M:resolve` lines 788–812), `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/util.lua` (`write_file_atomic` lines 131–139)
+* **Notes:**
+  1. When playing an already-downloaded video from *Recently played* whose `list_path` is a YouTube playlist/channel (`autoplay_next = yes`), `Online:resolve` runs `yt-dlp --flat-playlist -J` over the network before falling back to `alone()`, delaying offline playback until `yt-dlp` fails DNS/connect. A short timeout (or playing the local file directly when offline) improves offline responsiveness.
+  2. `Online:cookies` calls `util.write_private`, which spawns a synchronous `chmod 600` subprocess on every `yt-dlp` invocation (including inside the synchronous `on_load` priority 5 hook), even though `app/bin/deckvideoplayer` already runs with `umask 077` (keep `chmod` only when outside `umask 077`, or acceptable as minor defense-in-depth).
+
+
+> **Status: Partly solved** (D85). (1) Covered by 2.9's 15 s limit (offline, yt-dlp fails at once on name resolution). (2) Declined: the `chmod` takes a few ms, in the on_load hook where playback waits for yt-dlp anyway, and the copy must be private also without the launcher's `umask 077` (development runs).
+
+---
+
+### 3.2. Pre-Release Bookkeeping & Updater Hygiene (`CHANGELOG.md`, Flatpak Manifest, `scripts/update-yt-dlp.py`)
+
+* **Severity:** Info
+* **Location:**
+  * `CHANGELOG.md` line 8 (`## v0.9.0 (unreleased)`) vs `dvp/version.lua` (`"0.9.0"`) and `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` line 63 (`date="2026-11-19"`).
+  * `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.yml` lines 223–233 (`yt-dlp` module fetches `LICENSE` for `make-source-archive.py` but does not install it under `${FLATPAK_DEST}/share/licenses/yt-dlp/LICENSE`, unlike `inter-font` on line 240).
+  * `scripts/update-yt-dlp.py` lines 46–57: `current_tag` searches the entire manifest rather than scoping to the `yt-dlp` module block like `rewrite_manifest`, and `sums_entry` matches only lowercase hex `[0-9a-f]{64}`.
+
+
+> **Status: Partly solved** (D85). The changelog and metainfo dates are set when tagging (release steps, DEVELOPMENT.md §7). LICENSE: not a bug: flatpak-builder installs it by itself (`/app/share/licenses/io.github.nicocarbone.DeckVideoPlayer/yt-dlp/LICENSE`, checked in the build). `current_tag` now reads only the yt-dlp module, and checksums are accepted in either case (lowercased); tests added.
+
+---
+
+## 4. v0.9.0 (Part XIII) Summary Checklist
+
+> Done in D85, except `--socket-timeout` and the `chmod` (declined, see 1.2 and 3.1); the release dates are set when tagging.
+
+- [x] **Cookies (`dvp/online.lua`, `main.lua`):** Use a unique filename per `M:cookies(purpose)` call (monotonic counter) so concurrent `yt-dlp` runs never delete or clobber each other's cookie copy; call `online:stream_done()` in `main.lua`'s `shutdown` handler and sweep leftover `online-cookies-*.txt` files on startup.
+- [x] **Title Scraping (`dvp/online.lua`, `dvp/browser.lua`):** Bound concurrent `yt-dlp` batches in `fetch_titles`, pass `--socket-timeout` in `common_args`, trigger `on_titles()` incrementally, and skip `fetch_titles` when called from `Online:resolve` or `Browser:download_season`.
+- [x] **URL Validation & Schemes (`dvp/online.lua`, `dvp/videoinfo.lua`):** Reject control characters (`%c`) in `split_url`; lowercase schemes in `canonical` (or match case-insensitively in `parse_recent_key` and `VideoInfo.probe_url`).
+- [x] **Subtitles (`dvp/online.lua`, `dvp/downloads.lua`, `dvp/subdownload.lua`):** Change `M.sub_langs` from `xx.*` to `xx($|-.*)` so 3-letter codes (`est`, `jav`, `fil`) aren't matched; allow BCP-47 numeric/underscore language tags (`es-419`, `pt_BR`) in `Downloads.subtitle_paths`; copy OpenSubtitles sidecars on `yt-dlp` downloads; cap/hash `SubDownload.server_key` below 255 bytes.
+- [x] **Video Info (`dvp/online.lua`, `dvp/videoinfo.lua`):** Pass `--write-subs --write-auto-subs --sub-langs` in `Online:video_info` so `j.requested_subtitles` is populated, and include `range == "DV"` in `VideoInfo.from_ytdlp`'s `hdr` flag.
+- [x] **Downloads & State (`dvp/online.lua`, `dvp/downloads.lua`, `dvp/browser.lua`):** Reject `_type == "playlist"` in `Online.parse_info` / `download_info`; clear stale `job.formats` on retry; set `job.size = file_size(job.path)` in `Downloads:transferred`; account for ~2× peak space during `ffmpeg` muxing; update/reload open online lists when downloads finish and keep resume keys consistent between lists and *Downloaded*; save `data.lists` in `Online:list` and prune `data.lists`/`data.folders` in `save()`; add a timeout/cancel handle to `read_list` / `list_playlist` and handle empty folder-only lists in `Browser:download`.
+- [x] **Release & Updater (`CHANGELOG.md`, manifest, `scripts/update-yt-dlp.py`):** Date `CHANGELOG.md` when tagging `v0.9.0`, optionally install `yt-dlp`'s `LICENSE`, and scope `current_tag` to the `yt-dlp` module block.
 
 ---
 

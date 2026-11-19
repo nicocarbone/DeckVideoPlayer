@@ -19,7 +19,9 @@ function M.new(data_dir)
         local text = util.read_file(self.file)
         local data = text and utils.parse_json(text)
         if type(data) == "table" and type(data.entries) == "table" then
-            self.entries = data.entries
+            -- A copy: entries saved empty read back as a JSON array, which
+            -- would be written again as [] whatever was added (D85).
+            self.entries = util.plain_table(data.entries)
         end
     end
     return self

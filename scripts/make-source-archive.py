@@ -135,9 +135,12 @@ def main():
                     folder = name
                     log(kind, name, src["url"])
                     # GitHub API tarball URLs ("…/tarball/release-3.0.6") have no
-                    # archive extension: name them after the module.
+                    # archive extension: name them after the module. A plain
+                    # file (yt-dlp's zipapp, a LICENSE) keeps its own name.
                     base = src["url"].rstrip("/").rsplit("/", 1)[-1]
-                    fname = None if re.search(r"\.(tar\.\w+|tgz|zip)$", base) else f"{name}.tar.gz"
+                    fname = src.get("dest-filename")
+                    if not fname and kind == "archive" and not re.search(r"\.(tar\.\w+|tgz|zip)$", base):
+                        fname = f"{name}.tar.gz"
                     got = fetch_file(src["url"], src.get("sha256"), os.path.join(top, folder), fname)
                     index.append(f"| {name} | {src['url']} | `{src.get('sha256', '')}` | `{folder}/{got}` |")
                 elif kind == "dir":

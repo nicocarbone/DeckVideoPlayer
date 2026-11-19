@@ -54,9 +54,20 @@ local CODECS = {
     mpeg2video = "MPEG-2", mpeg4 = "MPEG-4", vc1 = "VC-1", prores = "ProRes",
 }
 
+-- Parts after a language in tags that have no name of their own here.
+local SUBTAGS = {["419"] = "Latin America", orig = "original"}
+
 function M.language(code)
     if not code or code == "" or NO_LANGUAGE[code:lower()] then return nil end
-    return LANGS[code:lower()] or code:upper()
+    local low = code:lower()
+    if LANGS[low] then return LANGS[low] end
+    -- A known language with a region or a variant ("es-419", "en-US",
+    -- YouTube's "en-orig"): "Spanish (Latin America)", "English (US)".
+    local base, sub = low:match("^(%a%a%a?)[-_](%w+)$")
+    if base and LANGS[base] then
+        return LANGS[base] .. " (" .. (SUBTAGS[sub] or (#sub == 2 and sub:upper()) or sub) .. ")"
+    end
+    return code:upper()
 end
 
 function M.codec(name, profile)

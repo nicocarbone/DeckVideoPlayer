@@ -294,6 +294,40 @@ to the metainfo, update `docs/ROADMAP.md` and the "Current state" of
 fails while the changelog section or the metainfo entry is missing;
 `scripts/release-notes.sh` prints the text CI will publish.
 
+`.github/workflows/update-yt-dlp.yml` (weekly, or by hand): runs
+`scripts/update-yt-dlp.py`; when yt-dlp has a new release it pushes a
+branch, opens a pull request and starts `build.yml` on it (pull requests
+opened with the workflow's token don't start workflows by themselves).
+Needs *Allow GitHub Actions to create and approve pull requests* in the
+repository's settings. Merge it after the build passes and an online
+video still plays with the bundle, then tag a release (D84).
+
+### Online videos (yt-dlp)
+
+`MODE=dev` uses the system mpv and whatever `yt-dlp` and `qjs` are first
+in `PATH`; `tools/headless-run.sh` puts `.dev/bin` first, so put the
+pinned versions there (the zipapp from yt-dlp's release, QuickJS-NG's
+`qjs-linux-x86_64` renamed `qjs`). `tools/mock-online.py FOLDER` serves
+test clips on 127.0.0.1:8767: files with Range (direct links, curl
+downloads), `/watch?file=…&title=…` pages that yt-dlp's generic extractor
+plays (the whole yt-dlp path, offline; `&file=` twice makes a page
+yt-dlp reads as a playlist, `&sub=es-419:subs/es.vtt` adds a subtitle
+track), and DASH manifests made with ffmpeg (video and audio apart, as
+YouTube's; one with HDR10 VP9 and SDR H.264, stereo and 5.1). `--rate KB`
+slows it down to stop a download midway. A list file in `MEDIA` points at
+them (`SLANG=spa,eng` sets the subtitle languages yt-dlp asks for):
+
+```sh
+tools/mock-online.py "$CLIPS" &
+MEDIA=/path/with/a/list.m3u tools/headless-run.sh -- key:DOWN key:ENTER sleep:8 gshot:/tmp/list.png
+COOKIES=/path/test-cookies.txt tools/headless-run.sh -- …   # [online] cookies_file
+```
+
+YouTube itself answers some connections (the owner's) with "Sign in to
+confirm you're not a bot" for every video: only titles (oEmbed),
+playlists and channels (flat listings) work there without a cookies file.
+Never commit a cookies file: it is a signed-in session.
+
 ### Plex (against a real server)
 
 Sign in once with a link code (creates `.dev/plex/client-id` and
@@ -400,6 +434,14 @@ DECISIONS.md or the README "Known limitations".
     no louder than before, no distortion or pumping in loud scenes; the
     info panel says `· TV speakers`. A stereo video sounds the same
     either way.
+18. Online videos (D84): a list with a YouTube video, a playlist, a
+    channel and a link to a file; titles appear; without a cookies file
+    on a connection YouTube challenges, the toast says so; with
+    `~/.config/deckvideoplayer/cookies.txt` (a spare account), a YouTube
+    video plays (time to start: QuickJS-NG), resumes, shows in *Recently
+    played*; an HDR video plays as HDR (OLED), a 5.1 one shows 5.1 in the
+    info panel; *Download* one, play it with Wi-Fi off from the list;
+    battery for a 1080p VP9 and an AV1 video against a local file.
 
 ## 9. Recipes for common changes
 

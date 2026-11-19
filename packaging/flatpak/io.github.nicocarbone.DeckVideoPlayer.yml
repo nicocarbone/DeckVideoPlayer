@@ -106,8 +106,9 @@ modules:
   # FFmpeg trimmed to what a player needs: every decoder/demuxer, hardware
   # decoding through VA-API and Vulkan, no encoders besides screenshot ones.
   # libmysofa (from the runtime) enables the sofalizer filter used for
-  # headphone surround. ffprobe (the only program built) reads the
-  # library's Video info panel.
+  # headphone surround. Programs: ffprobe reads the library's Video info
+  # panel; ffmpeg joins the video and audio yt-dlp downloads apart (D84,
+  # streams copied, nothing encoded).
   - name: ffmpeg
     config-opts:
       - --disable-debug
@@ -115,6 +116,7 @@ modules:
       - --disable-static
       - --disable-programs
       - --enable-ffprobe
+      - --enable-ffmpeg
       - --enable-shared
       - --enable-gpl
       - --enable-version3
@@ -197,6 +199,38 @@ modules:
         url: https://github.com/mpv-player/mpv.git
         tag: v0.41.0
         commit: 41f6a645068483470267271e1d09966ca3b9f413
+
+  # JavaScript runtime for yt-dlp (D84): YouTube's challenges need one
+  # (yt-dlp --js-runtimes quickjs). Only the qjs program is kept.
+  - name: quickjs-ng
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    cleanup:
+      - /bin/qjsc
+      - /lib/cmake
+    sources:
+      - type: git
+        url: https://github.com/quickjs-ng/quickjs.git
+        tag: v0.18.0
+        commit: d7215b0ad3fc2c562e8317fd9bca058fd4863804
+
+  # yt-dlp (D84): plays and downloads online videos from lists of links.
+  # The official zipapp (yt-dlp's Python sources, with yt-dlp-ejs, its
+  # JavaScript challenge solver), run by the runtime's Python. Updated by
+  # scripts/update-yt-dlp.py (weekly pull request from CI): YouTube changes
+  # often break older versions.
+  - name: yt-dlp
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 yt-dlp ${FLATPAK_DEST}/bin/yt-dlp
+    sources:
+      - type: file
+        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp
+        sha256: e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3
+      - type: file
+        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.10.26/LICENSE
+        sha256: 7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 
   # UI font (SIL Open Font License).
   - name: inter-font

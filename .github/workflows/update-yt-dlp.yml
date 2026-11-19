@@ -1,0 +1,63 @@
+name: Update yt-dlp
+
+# Online videos (D84) depend on yt-dlp, and YouTube changes often break
+# older versions. Every week this checks for a new yt-dlp release and, when
+# there is one, opens a pull request that points the Flatpak manifest at it
+# (scripts/update-yt-dlp.py: version and checksums) and starts the build
+# for it. Nothing is released automatically: a person reviews and merges
+# the pull request, then tags a release.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests"
+# (Settings → Actions → General → Workflow permissions).
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"   # Mondays, 07:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the update branch
+      pull-requests: write   # open the pull request
+      actions: write         # start the build for it
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Newest yt-dlp
+        id: up
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          out=$(scripts/update-yt-dlp.py)
+          echo "$out"
+          case "$out" in
+            "updated "*) echo "version=${out#updated }" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: Pull request
+        if: steps.up.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.up.outputs.version }}
+        run: |
+          branch="update-yt-dlp-$VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists: nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "Update yt-dlp to $VERSION"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" --title "Update yt-dlp to $VERSION" --body "yt-dlp $VERSION: https://github.com/yt-dlp/yt-dlp/releases/tag/$VERSION
+
+          Opened by the weekly *Update yt-dlp* workflow (scripts/update-yt-dlp.py): the Flatpak manifest's yt-dlp zipapp (checked against the release's SHA2-256SUMS) and LICENSE, and the version in THIRD_PARTY_NOTICES.md.
+
+          Before merging: the *Build* run for this branch passes, and an online video still plays with the bundle it built. After merging, tag a release to ship it."
+          # Pull requests opened with this token don't start workflows by
+          # themselves; a dispatched run does.
+          gh workflow run build.yml --ref "$branch"

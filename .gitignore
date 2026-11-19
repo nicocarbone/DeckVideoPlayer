@@ -4,3 +4,5 @@ build-dir/
 repo/
 dist/
 __pycache__/
+# Signed-in browser sessions for yt-dlp (D84): never in the repository.
+cookies*.txt

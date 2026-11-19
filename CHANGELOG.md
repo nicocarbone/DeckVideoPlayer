@@ -5,6 +5,41 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.9.0 (unreleased)
+
+### New
+
+- **Online videos.** Put links in a list file (`.m3u`, one link per line)
+  in a library folder and it shows as a folder of videos: YouTube videos,
+  other sites' videos, or links to video files. A YouTube playlist or
+  channel in the list is a folder of its own, with its latest videos.
+  Videos resume, get watched marks and appear in *Recently played*; they
+  play in HDR and with surround sound when the video has them, in its
+  original language. How to make a list: [docs/INSTALL.md](docs/INSTALL.md#online-videos).
+- **Download online videos** for offline viewing (*Menu → Download*, or
+  *Download all videos* on a list or playlist): 1080p on a Steam Deck,
+  4K elsewhere, keeping HDR and surround sound, with its subtitles. A
+  downloaded video plays from the file, also from its list, and keeps one
+  position and watched mark whether it is opened from the list or from
+  the download folder.
+- **YouTube sign-in with a cookies file.** Some internet connections get
+  "YouTube asks to sign in" (and age-restricted videos always need it):
+  the app can use cookies exported from a browser where you are signed in.
+  The guide says how, and why a spare account is safer.
+
+### Changed
+
+- **"Opening…"** shows in the middle of the screen while a video opens
+  (an online video, or a server that takes a moment to answer).
+- **Subtitle and audio languages with a region** have names: *Spanish
+  (Latin America)* instead of *ES-419*, *English (US)*.
+
+### Fixed
+
+- **Positions and watched marks stopped being kept** after deleting the
+  only video that had them (*Delete from this device…*): from then on
+  they were lost whenever the app closed.
+
 ## v0.8.5 (2026-11-15)
 
 ### New

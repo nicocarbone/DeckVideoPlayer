@@ -57,6 +57,10 @@ local SCHEMA = {
         gpu_context      = {default = "auto", type = "string"}, -- read by the launcher
         keep_awake       = {default = true, type = "bool"},
     },
+    online = {
+        download_quality = {default = "auto", type = "enum", values = {"auto", "720", "1080", "1440", "2160", "best"}},
+        cookies_file     = {default = "cookies.txt", type = "string"},
+    },
     plex = {
         allow_insecure_lan = {default = false, type = "bool"},
     },
