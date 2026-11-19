@@ -28,6 +28,15 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # The image's runtimes sit in its read-only lower layer and can be
+      # weeks older than Flathub's. Updating them in place fails on some
+      # runners with "Invalid cross-device link" (overlayfs can't rename
+      # those folders), so the build works on a copy of the installation in
+      # the job's own folder (D83).
+      - name: Flatpak installation outside the image
+        run: |
+          cp -a /var/lib/flatpak "$RUNNER_TEMP/flatpak"
+          echo "FLATPAK_SYSTEM_DIR=$RUNNER_TEMP/flatpak" >> "$GITHUB_ENV"
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40 # master 2026-10
         with:
           bundle: DeckVideoPlayer.flatpak
