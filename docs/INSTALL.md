@@ -471,6 +471,9 @@ Notes:
   check for an update.
 - Members-only and private videos don't play. There is no search: lists
   hold the links you add.
+- Sites yt-dlp can't read show *This site isn't supported* (Google Photos
+  links are one); [yt-dlp's list of sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
+  says which work.
 
 ## Network shares (SMB)
 

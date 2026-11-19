@@ -5,7 +5,7 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## v0.9.0 (unreleased)
+## v0.9.0 (2026-11-19)
 
 ### New
 
@@ -39,6 +39,9 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 - **Positions and watched marks stopped being kept** after deleting the
   only video that had them (*Delete from this device…*): from then on
   they were lost whenever the app closed.
+- **The installer on a PC shared by several people** no longer takes
+  another person's Steam for yours: it could ask you to close Steam when
+  only theirs was running.
 
 ## v0.8.5 (2026-11-15)
 

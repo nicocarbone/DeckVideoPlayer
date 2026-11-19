@@ -73,7 +73,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-15, v0.8.5)
+## Current state (2026-11-19, v0.9.0)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -214,7 +214,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   and aspect ratio (D79, D80). Measured in headless gamescope at several
   sizes and in the Flatpak; the owner tried the test builds before
   release. Twelfth audit (ISSUES.md Part XII) reviewed in D80.
-- v0.9.0 (in progress, not released): online videos (D84,
+- v0.9.0 (2026-11-19): online videos (D84,
   `dvp/online.lua`): `.m3u` lists of links in library folders, YouTube
   playlists and channels as folders, played through mpv's yt-dlp hook
   confined to the app's `ytdl://` addresses, QuickJS-NG for YouTube,
@@ -224,13 +224,13 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   yt-dlp path through its generic extractor) and real YouTube for titles,
   playlists and channels. Thirteenth audit (ISSUES.md Part XIII) fixed
   in D85, which also fixed maps saved empty in JSON stores losing later
-  keys (`util.plain_table`; resume.json since v0.1). mpv 0.42 waits for
-  0.42.1.
+  keys (`util.plain_table`; resume.json since v0.1). The owner tried the
+  test builds before release. mpv 0.42 moved out of v0.9.0: it waits
+  for 0.42.1, as a release of its own.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
-  v0.9.0: mpv 0.42 once 0.42.1 exists, and online videos (in progress,
-  above). v0.10.0: the app's own signed
+  mpv 0.42 once 0.42.1 exists. v0.10.0: the app's own signed
   Flatpak repository on GitHub Pages, updated by CI on each tag (D81).
   Flathub and FlatPark not planned.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on

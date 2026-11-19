@@ -170,11 +170,7 @@ on a 1080p screen) and in every picture mode and aspect ratio, and a
 phosphor mask scaled to the screen (D79, D80). Tested in headless gamescope
 and the Flatpak; the owner tried the test builds.
 
-v0.9.0 (planned): mpv 0.42 and libplacebo 7.387, once mpv 0.42.1 is out,
-with streaming tests for mpv's new libcurl backend (`--curl-enabled=no` as
-the fallback): waits for that release.
-
-Online videos, **implemented, in testing** (D84): a `.m3u` file in a
+v0.9.0 (released 2026-11-19): **online videos** (D84, D85): a `.m3u` file in a
 library folder is a list of links (YouTube videos, playlists and channels
 as folders, other sites, video files), played through mpv's yt-dlp hook
 (confined to the app's own `ytdl://` addresses) with QuickJS-NG for
@@ -185,12 +181,16 @@ connections where YouTube wants a sign-in (the owner's is one). yt-dlp is
 kept current by a weekly pull request (`scripts/update-yt-dlp.py`); until
 v0.10.0's repository, a fix reaches users as a release they install.
 Tested in headless gamescope and the Flatpak with `tools/mock-online.py`
-and, for titles, playlists and channels, real YouTube. Still to check, on
-the owner's Deck: playing and downloading YouTube with a cookies file,
-QuickJS-NG's start-up time, battery with VP9 and AV1 streams, and 5.1
-audio from YouTube (the mock can't say how many channels a stream has).
-Not in v0.9.0: search, thumbnails, sign-in other than cookies, more than
-200 videos of a playlist.
+and, for titles, playlists and channels, real YouTube; the owner tried the
+test builds before release. Not measured on a Deck: QuickJS-NG's start-up
+time, battery with VP9 and AV1 streams, and 5.1 audio from YouTube (the
+mock can't say how many channels a stream has). Not in v0.9.0: search,
+thumbnails, sign-in other than cookies, more than 200 videos of a
+playlist, Google Photos links (yt-dlp has no extractor for them).
+
+mpv 0.42 and libplacebo 7.387 (planned, moved out of v0.9.0): once mpv
+0.42.1 is out, with streaming tests for mpv's new libcurl backend
+(`--curl-enabled=no` as the fallback), as a release of its own.
 
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
