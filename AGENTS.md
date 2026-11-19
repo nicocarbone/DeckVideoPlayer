@@ -230,7 +230,8 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
-  mpv 0.42 once 0.42.1 exists. v0.10.0: the app's own signed
+  mpv 0.42 once 0.42.1 exists. Next release: CI actions moved to
+  Node.js 24 versions (ROADMAP). v0.10.0: the app's own signed
   Flatpak repository on GitHub Pages, updated by CI on each tag (D81).
   Flathub and FlatPark not planned.
 - Network code must stay asynchronous (`dvp/http.lua`) and only run on

@@ -192,6 +192,18 @@ mpv 0.42 and libplacebo 7.387 (planned, moved out of v0.9.0): once mpv
 0.42.1 is out, with streaming tests for mpv's new libcurl backend
 (`--curl-enabled=no` as the fallback), as a release of its own.
 
+For the next release, whichever it is: **CI actions on Node.js 24.** GitHub
+has deprecated Node.js 20 for actions and runs the ones built for it on
+Node 24 (a warning on v0.9.0's build, naming `actions/checkout` and
+`flatpak-builder`). Move every pinned action in `.github/workflows/` to a
+release built for Node 24: `actions/checkout` (v4 today, in `build.yml` and
+`update-yt-dlp.yml`), `actions/download-artifact` (v4),
+`softprops/action-gh-release` (v2) and
+`flathub-infra/flatpak-github-actions/flatpak-builder` (a 2026-10 master
+commit). Keep pinning by commit hash, read each one's release notes for
+changed behaviour, and check that a tag build shows no Node.js 20 warning
+and still publishes the release.
+
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
 from v0.9.0 by the owner):
