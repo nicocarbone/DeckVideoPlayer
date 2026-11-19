@@ -411,7 +411,7 @@ cookies of a browser where you are signed in to YouTube:
    *Allow in Incognito*.
 2. Open a **private window** (Ctrl+Shift+P in Firefox, Ctrl+Shift+N in
    Chrome) and sign in to YouTube there, preferably with a spare account
-   (see below).
+   (see *Why a spare account* below).
 3. In the same tab, go to `https://www.youtube.com/robots.txt`, and keep
    it the only tab of the private window. Still on youtube.com, but no
    YouTube page is running to change the cookies.
@@ -430,14 +430,42 @@ cookie (`.youtube.com`, `.google.com`). If videos still say "YouTube asks
 to sign in", the file isn't in that place under that name, or the session
 ended: export it again.
 
-Keep in mind:
-- Anyone with this file can use your Google account. Don't share it.
-- YouTube may block accounts used this way. **A spare account is safer.**
-- Delete the file to stop using it.
+**Why a spare account.** A cookies file is a signed-in session, and
+yt-dlp isn't one of YouTube's own apps, so two things can go wrong. A
+second Google account of your own, used only for this, keeps both away
+from the account you depend on:
+
+- **The file is a key to the whole Google account**, not only YouTube:
+  Gmail, Drive, Photos, payments. Anyone with a copy is signed in as you,
+  with no password or second step, until the session ends. It is plain
+  text in your home folder, and a Steam Deck doesn't encrypt its storage
+  or, unless you set one, ask for a password in Desktop Mode: a lost Deck,
+  a program or plugin you installed, or a backup of your home folder can
+  expose it. (The app only gives yt-dlp a private copy, deleted after each
+  use; like a browser, yt-dlp sends each site only that site's cookies.)
+- **YouTube may restrict or close an account used this way.** Its terms
+  don't allow watching or downloading outside its own apps and site, and
+  yt-dlp's own guide warns that accounts used with it can be blocked. If
+  that happens, it happens to the account in the file. Accept the
+  decision: don't make another account to get around it, which YouTube's
+  rules forbid.
+
+In practice:
+- Create the spare account the usual way, on Google's sign-up page, with
+  your own details.
+- It has none of your subscriptions, purchases or videos shared with your
+  main account. Age-restricted videos play only for an account YouTube
+  has confirmed belongs to an adult, through Google's own age check.
+- Treat the file like a password: don't share it, and keep it out of
+  cloud folders and repositories.
+- To stop, delete the file and sign that session out in your Google
+  Account (*Security → Your devices*). Do the same if the Deck is lost.
 
 Notes:
-- YouTube's terms don't allow watching outside its own apps. Like mpv,
-  Kodi and others, the app leaves that choice to you.
+- YouTube's terms allow watching only in YouTube's own apps and site, and
+  downloading only where YouTube offers it, so using the app with YouTube
+  (with or without a cookies file) goes against them. Like mpv, Kodi and
+  others, the app leaves that choice to you.
 - YouTube changes often break yt-dlp; app updates bring a newer one. When
   videos that used to play stop playing ("The site refused the video"),
   check for an update.

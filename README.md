@@ -361,7 +361,10 @@ and automatic updates from the app's own Flatpak repository (v0.10.0). Past rele
 - **Does it play YouTube?** Videos, playlists and channels you put in a
   list file, with yt-dlp: no search or recommendations. From some internet
   connections YouTube wants a sign-in first; the app can use a cookies
-  file from your browser ([guide](docs/INSTALL.md#online-videos)).
+  file from your browser, best from a spare account
+  ([guide](docs/INSTALL.md#online-videos), which also says why). YouTube's
+  terms only allow watching in its own apps and site: using it here is
+  your choice.
 - **Other handhelds, Valve's Steam Machine, desktop Linux?** Untested.
   Anything running SteamOS's Game Mode (gamescope) may work; reports are
   welcome.

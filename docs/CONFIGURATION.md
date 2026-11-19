@@ -66,7 +66,7 @@ per line, shown as a folder ([INSTALL](INSTALL.md#online-videos)).
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `download_quality` | `auto` \| `720` \| `1080` \| `1440` \| `2160` \| `best` | `auto` | Highest resolution of *Download* for online videos fetched with yt-dlp. `auto`: 1080p on a Steam Deck (also when docked), 2160p on other devices. HDR and surround sound are kept whenever the video has them. Streaming uses the screen's height instead (the smallest of 720p, 1080p, 1440p and 2160p at least as tall). Links to video files are downloaded as they are. |
-| `cookies_file` | path | `cookies.txt` | A cookies file in Netscape format, exported from a browser signed in to YouTube, for yt-dlp: needed when YouTube asks to "confirm you're not a bot" on your connection, and for age-restricted videos. A name without a folder is looked for in `~/.config/deckvideoplayer/`. Used only if it exists; yt-dlp gets a private copy and the file is never changed. It gives access to the account, and YouTube may block accounts used this way (a spare account is safer). How to export one: [INSTALL](INSTALL.md#online-videos). Empty: never. |
+| `cookies_file` | path | `cookies.txt` | A cookies file in Netscape format, exported from a browser signed in to YouTube, for yt-dlp: needed when YouTube asks to "confirm you're not a bot" on your connection, and for age-restricted videos. A name without a folder is looked for in `~/.config/deckvideoplayer/`. Used only if it exists; yt-dlp gets a private copy and the file is never changed. It gives access to the whole Google account, and YouTube may block accounts used this way (a spare account is safer). How to export one, and why a spare account: [INSTALL](INSTALL.md#online-videos). Empty: never. |
 
 ## `[plex]`
 
