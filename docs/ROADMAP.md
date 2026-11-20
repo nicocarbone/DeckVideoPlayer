@@ -188,11 +188,16 @@ mock can't say how many channels a stream has). Not in v0.9.0: search,
 thumbnails, sign-in other than cookies, more than 200 videos of a
 playlist, Google Photos links (yt-dlp has no extractor for them).
 
+v0.9.1 (released 2026-11-20): YouTube HDR videos with several audio
+languages played in SDR at 1080p, because streams with sound won the
+language sort; a video-only stream is now chosen first (D86). Checked in
+headless gamescope; the owner tried the test build on a Deck.
+
 mpv 0.42 and libplacebo 7.387 (planned, moved out of v0.9.0): once mpv
 0.42.1 is out, with streaming tests for mpv's new libcurl backend
 (`--curl-enabled=no` as the fallback), as a release of its own.
 
-For the next release, whichever it is: **CI actions on Node.js 24.** GitHub
+For the next release after v0.9.1 (a quick fix, released without it): **CI actions on Node.js 24.** GitHub
 has deprecated Node.js 20 for actions and runs the ones built for it on
 Node 24 (a warning on v0.9.0's build, naming `actions/checkout` and
 `flatpak-builder`). Move every pinned action in `.github/workflows/` to a

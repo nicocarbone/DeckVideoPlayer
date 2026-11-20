@@ -73,7 +73,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-19, v0.9.0)
+## Current state (2026-11-20, v0.9.1)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -227,6 +227,10 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   keys (`util.plain_table`; resume.json since v0.1). The owner tried the
   test builds before release. mpv 0.42 moved out of v0.9.0: it waits
   for 0.42.1, as a release of its own.
+- v0.9.1 (2026-11-20, D86): YouTube HDR videos with several audio
+  languages lost HDR (streams with sound won the `lang` sort); the format
+  choice takes a video-only stream first. The owner tried the test build
+  on a Deck.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

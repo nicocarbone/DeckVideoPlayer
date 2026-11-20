@@ -5,7 +5,7 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## v0.9.1 (unreleased)
+## v0.9.1 (2026-11-20)
 
 ### Fixed
 
