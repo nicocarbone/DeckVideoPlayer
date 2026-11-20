@@ -270,8 +270,11 @@ Manifest maintenance:
 
 `.github/workflows/build.yml`:
 - `tests`: installs mpv on Ubuntu and runs `tests/run.sh`.
-- `flatpak`: builds the bundle in `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08`,
-  on a copy of the image's Flatpak installation (`FLATPAK_SYSTEM_DIR`):
+- `flatpak`: builds the bundle with `flatpak/flatpak-github-actions`'
+  `flatpak-builder` action in the
+  `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08` image
+  (flathub-infra keeps only the images; its fork of the action is
+  archived, D87), on a copy of the image's Flatpak installation (`FLATPAK_SYSTEM_DIR`):
   updating the image's own runtimes failed with "Invalid cross-device
   link" (D83).
 - `release` (tags `v*`): attaches `DeckVideoPlayer.flatpak`,

@@ -2740,3 +2740,30 @@ against the code; all but two suggestions were applied:
   docked Deck. In headless gamescope (HDR, Deck OLED profile, the test
   cookies file): the video played with PQ / BT.2020, an HDR10
   swapchain and English audio.
+
+## D87. CI actions on Node.js 24
+
+- **Why:** GitHub deprecated Node.js 20 for actions and ran the pinned
+  ones on Node 24 with a warning (v0.9.0 and v0.9.1 builds).
+- **Pins** (still by commit hash, D39), each the latest release on
+  2026-11-20 with `runs.using: node24`:
+  - `actions/checkout` v4 → v7.0.1 (`build.yml`, `update-yt-dlp.yml`).
+    v6 keeps the token in a separate file that `.git/config` includes;
+    `update-yt-dlp.yml`'s `git push` uses it as before, and
+    `scripts/build-info.sh` in the Flatpak build only reads the commit.
+  - `flatpak-builder`: from `flathub-infra/flatpak-github-actions`
+    (archived April 2025; its README and issue 17 send users back
+    upstream and keep only the images) to
+    `flatpak/flatpak-github-actions` v6.8. Same inputs (`bundle`,
+    `manifest-path`, `branch`, `cache-key`), the same `flatpak` calls, the
+    same artifact name (`DeckVideoPlayer-x86_64.flatpak`). The container
+    image stays `ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08`,
+    and the copy of its installation (D83) still applies: the action runs
+    `flatpak`, which follows `FLATPAK_SYSTEM_DIR`.
+  - `actions/download-artifact` v4 → v8.0.2: v5 only moved downloads by
+    artifact id (we download all, by name, into `artifacts/` and `find`
+    the bundle); v8 fails on a digest mismatch instead of warning.
+  - `softprops/action-gh-release` v2 → v3.0.4: only the runtime changed.
+- **Checks:** the `tests` and `flatpak` jobs run on the push to `main`;
+  the `release` job (download-artifact, action-gh-release) only on the
+  next tag, so that release's run is the check for it.
