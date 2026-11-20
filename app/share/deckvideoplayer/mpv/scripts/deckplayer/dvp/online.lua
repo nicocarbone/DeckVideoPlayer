@@ -354,9 +354,15 @@ end
 -- there is nothing else), then the resolution up to `height`, HDR when
 -- the video has it, surround sound when it has it, then yt-dlp's own
 -- order. On a Deck above 1080p, no AV1 when there is anything else (D62).
+-- A video-only stream first (`bv`, then `bv*`): YouTube's streams with
+-- sound carry a language when a video has several, and sorted by
+-- language first they beat every HDR stream (D86).
 function M.format_spec(height, device)
     local deck = device == "deck-oled" or device == "deck-lcd"
-    local format = (deck and height > 1080) and "bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/bv*+ba/b" or "bv*+ba/b"
+    local format = "bv+ba/bv*+ba/b"
+    if deck and height > 1080 then
+        format = "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/" .. format
+    end
     return format, string.format("lang,res:%d,hdr:12,channels", height)
 end
 

@@ -2548,7 +2548,8 @@ projects:
   failed ("YouTube asks to sign in on this connection: add a cookies file
   (see the guide)", "This video is private"…, from yt-dlp's message;
   toast of 4 s).
-- **Format** (`format_spec`): `bv*+ba/b` sorted by `-S
+- **Format** (`format_spec`): `bv+ba/bv*+ba/b` (video-only first since
+  v0.9.1, D86) sorted by `-S
   lang,res:<height>,hdr:12,channels`: the original audio track first (the
   owner's choice: YouTube now adds AI-dubbed tracks, and only one track is
   fetched), then the resolution up to the height, HDR when the video has
@@ -2716,3 +2717,26 @@ against the code; all but two suggestions were applied:
   open, then played from the file, a watched mark shared by the download
   folder and the list, no cookies copy left after quitting while a
   video opened.
+
+## D86. Online videos: a video-only stream first, so HDR isn't lost
+
+- **Problem** (owner, on a Deck): some YouTube HDR videos played in SDR.
+  The format choice was `bv*+ba/b` sorted by `lang` first (D84: the
+  original audio track before YouTube's AI dubs). When a video has
+  several audio tracks, yt-dlp gives YouTube's HLS streams, which carry
+  sound, that track's language; the video-only DASH streams, where all
+  the HDR ones are, have none. `bv*` accepts streams with sound, so an
+  H.264 SDR HLS stream with the original language won before resolution
+  or HDR were compared: 1080p SDR on a Deck and also on a 4K TV.
+- **Fix:** `bv+ba/bv*+ba/b` (on a Deck above 1080p, the same with AV1
+  left out first, D62). `bv` only takes video-only streams, where every
+  language ties, so resolution and HDR decide; the language order still
+  picks the audio. Sites with only combined streams fall through to
+  `bv*+ba` and `b` as before. Downloads use the same choice.
+- **Tested:** yt-dlp's choice from a saved `-J` answer for a 4K HDR
+  video with seven audio tracks: before, `301-7` (H.264 SDR 1080p, HLS)
+  at any height; after, AV1 HDR10 1080p (`699`) with the original Opus
+  track for a Deck, AV1 HDR10 2160p elsewhere, VP9.2 HDR10 2160p on a
+  docked Deck. In headless gamescope (HDR, Deck OLED profile, the test
+  cookies file): the video played with PQ / BT.2020, an HDR10
+  swapchain and English audio.
