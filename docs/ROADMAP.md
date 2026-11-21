@@ -197,11 +197,11 @@ mpv 0.42 and libplacebo 7.387 (planned, moved out of v0.9.0): once mpv
 0.42.1 is out, with streaming tests for mpv's new libcurl backend
 (`--curl-enabled=no` as the fallback), as a release of its own.
 
-**CI actions on Node.js 24** (done after v0.9.1, D87): every pinned
+**CI actions on Node.js 24** (done, in v0.9.2, D87): every pinned
 action moved to a release built for Node 24, and `flatpak-builder` back to
 `flatpak/flatpak-github-actions` (the flathub-infra fork is archived). The
-release job's new versions run for the first time on the next tag: check
-that it publishes the release and shows no Node.js 20 warning.
+release job's new versions published v0.9.2, its first tag, with no
+warnings on any job.
 
 v0.9.2 (released 2026-11-21): quality of online videos. `[online]
 stream_quality` caps their resolution (`auto` = the screen's, as before:

@@ -2767,7 +2767,9 @@ against the code; all but two suggestions were applied:
   - `softprops/action-gh-release` v2 → v3.0.4: only the runtime changed.
 - **Checks:** the `tests` and `flatpak` jobs run on the push to `main`;
   the `release` job (download-artifact, action-gh-release) only on the
-  next tag, so that release's run is the check for it.
+  next tag, so that release's run is the check for it. It passed with
+  v0.9.2: the release published with its notes and files, and no
+  warnings on any job.
 
 ## D88. Online videos: a streaming quality setting
 
