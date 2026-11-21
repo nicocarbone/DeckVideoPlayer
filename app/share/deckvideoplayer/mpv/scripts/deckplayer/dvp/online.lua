@@ -330,8 +330,12 @@ end
 -- 720p upscaled).
 local HEIGHTS = {360, 480, 720, 1080, 1440, 2160}
 
--- Pure: the height to stream at on a `screen_h`-line screen.
-function M.stream_height(screen_h)
+-- Pure: the height to stream at on a `screen_h`-line screen, with
+-- [online] stream_quality: a number is that height on any screen, "auto"
+-- (or nothing) follows the screen (D88).
+function M.stream_height(screen_h, quality)
+    local n = tonumber(quality)
+    if n then return n end
     screen_h = tonumber(screen_h) or 1080
     for _, h in ipairs(HEIGHTS) do
         if h >= screen_h * 0.95 then return h end
@@ -629,11 +633,17 @@ function M:ytdlp(args, purpose, cb)
         end)
 end
 
+-- yt-dlp's -f and -S for streaming on a `screen_h`-line screen, with this
+-- config's stream_quality.
+function M:stream_format(screen_h)
+    return M.format_spec(M.stream_height(screen_h, self.cfg and self.cfg.online.stream_quality), self.device)
+end
+
 -- mpv's options for the yt-dlp hook, for a screen `screen_h` lines tall:
 -- format (ytdl-format) and raw (ytdl-raw-options), with a fresh copy of
 -- the cookies file. main.lua sets them just before the hook runs.
 function M:stream_options(screen_h)
-    local format, sort = M.format_spec(M.stream_height(screen_h), self.device)
+    local format, sort = self:stream_format(screen_h)
     local langs = self.cfg and M.sub_langs(self.cfg.playback.subtitle_languages) or nil
     self:stream_done()
     self.play_cookies = self:cookies("play")
@@ -1062,7 +1072,7 @@ function M:video_info(ref, cb)
             cb(d, err)
         end)
     end
-    local format, sort = M.format_spec(M.stream_height(self.screen_h), self.device)
+    local format, sort = self:stream_format(self.screen_h)
     local args = {"-J", "-f", format, "-S", sort}
     -- (The subtitles playback would load, as in raw_options.)
     local langs = self.cfg and M.sub_langs(self.cfg.playback.subtitle_languages) or ""

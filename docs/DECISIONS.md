@@ -2556,7 +2556,8 @@ projects:
   it, surround sound when it has it (owner: keep both whatever the
   device), then yt-dlp's own order. Height for streaming: the smallest of
   360/480/720/1080/1440/2160 at least as tall as the screen (1080p on the
-  Deck's 800 lines: sharper downscaled than 720p upscaled). On a Deck
+  Deck's 800 lines: sharper downscaled than 720p upscaled), or
+  `[online] stream_quality` since D88. On a Deck
   above 1080p (docked to a 4K TV), no AV1 when anything else exists (4K
   AV1 stutters on its decoder, D62). Subtitles in `subtitle_languages`
   (two-letter codes with any region or variant, `es($|-.*)`: `es-419`
@@ -2767,3 +2768,26 @@ against the code; all but two suggestions were applied:
 - **Checks:** the `tests` and `flatpak` jobs run on the push to `main`;
   the `release` job (download-artifact, action-gh-release) only on the
   next tag, so that release's run is the check for it.
+
+## D88. Online videos: a streaming quality setting
+
+- **Why** (owner): 1440p on a Deck. The 2:1 downscale to the 1280×720
+  picture matters little (mpv filters any ratio); what 1440p brings is
+  bitrate and colour. For a 4K HDR YouTube video (`-J` answer, D86):
+  AV1 HDR10 6.0 → 12.8 Mbit/s and VP9.2 HDR10 6.7 → 16.0 Mbit/s from
+  1080p to 1440p; its 4:2:0 colour planes are 1280×720, the picture's
+  size on a Deck, against 960×540 upscaled at 1080p. Costs: about 2.5
+  times the data, 1.8 times the pixels to decode (battery not measured).
+- **Setting:** `[online] stream_quality = auto | 720 | 1080 | 1440 |
+  2160`, in `config.ini` (rarely changed, no menu row). `auto`, the
+  default (owner: 1080p on a Deck for battery), is the screen's height as
+  before; a number is that height at most on any screen, a docked Deck's
+  TV included. No `best`: above 2160p is only for downloads. The Video
+  info panel asks yt-dlp with the same choice (`Online:stream_format`).
+- **AV1:** unchanged. On a Deck above 1080p AV1 is left out first (D62,
+  measured at 4K), so 1440p picks VP9.2 HDR10 (16.0 Mbit/s for the
+  example) rather than AV1 (12.8). If AV1 1440p60 proves smooth on a
+  Deck, the AV1 limit could move to above 1440p.
+- **Tested:** unit tests (heights from the setting and the screen, the
+  format for a Deck at 1440p, invalid values). On a Deck: pending (the
+  owner, with `1440`).

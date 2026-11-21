@@ -5,6 +5,16 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.9.2 (unreleased)
+
+### New
+
+- **Streaming quality for online videos**: `[online] stream_quality` in
+  `config.ini` sets the highest resolution they play at. The default
+  stays the screen's (1080p on a Steam Deck); `1440` gives a little more
+  detail and colour on a Deck's screen, for about 2.5 times the data and
+  more battery.
+
 ## v0.9.1 (2026-11-20)
 
 ### Fixed

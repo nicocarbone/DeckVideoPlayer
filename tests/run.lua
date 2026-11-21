@@ -1877,6 +1877,10 @@ end
     eq("stream height 4K", ON.stream_height(2160), 2160)
     eq("stream height 8K screen", ON.stream_height(4320), 2160)
     eq("stream height unknown", ON.stream_height(nil), 1080)
+    eq("stream height auto: the screen", ON.stream_height(800, "auto"), 1080)
+    eq("stream height set: deck 1440", ON.stream_height(800, "1440"), 1440)
+    eq("stream height set: lower than the screen", ON.stream_height(2160, "1080"), 1080)
+    eq("stream height set: 720", ON.stream_height(800, "720"), 720)
     eq("download height deck", ON.download_height("auto", "deck-oled"), 1080)
     eq("download height lcd", ON.download_height("auto", "deck-lcd"), 1080)
     eq("download height tv", ON.download_height("auto", "tv"), 2160)
@@ -2011,12 +2015,25 @@ end
     local dc = config.defaults()
     check("config online defaults", dc.online.download_quality == "auto" and dc.online.cookies_file == "cookies.txt")
     eq("config online quality", config.from_text("[online]\ndownload_quality = 1440\n").online.download_quality, "1440")
+    eq("config stream quality default", dc.online.stream_quality, "auto")
+    eq("config stream quality", config.from_text("[online]\nstream_quality = 1440\n").online.stream_quality, "1440")
+    local sq_cfg, sq_warn = config.from_text("[online]\nstream_quality = best\n")
+    check("config stream quality: no best", sq_cfg.online.stream_quality == "auto" and #sq_warn == 1)
 
     -- the backend: entries, progress, router
     local res = Resume.new(nil)
     local fake_dl = {}
     local cfgo = config.defaults()
     local on = ON.new(nil, {resume = res, cfg = cfgo, device = "deck-oled"})
+    -- streaming: the screen's height by default (1080p on a Deck), or stream_quality (D88)
+    eq("stream format: deck default 1080p", select(2, on:stream_format(800)), "lang,res:1080,hdr:12,channels")
+    eq("stream format: deck default AV1 fine", (on:stream_format(800)), "bv+ba/bv*+ba/b")
+    local cfg1440 = config.from_text("[online]\nstream_quality = 1440\n")
+    local f1440, s1440 = ON.new(nil, {resume = res, cfg = cfg1440, device = "deck-oled"}):stream_format(800)
+    check("stream format: deck 1440p, no AV1 first", s1440 == "lang,res:1440,hdr:12,channels"
+        and f1440:find("bv[vcodec!^=av01]+ba", 1, true) == 1)
+    eq("stream format: 1080 on a 4K TV", select(2, ON.new(nil, {cfg = config.from_text("[online]\nstream_quality = 1080\n"),
+        device = "tv"}):stream_format(2160)), "lang,res:1080,hdr:12,channels")
     local e1 = on:entry_for({url = W .. "&t=3", key = W, title = "Big Buck Bunny"}, "/v/Talks.m3u", "Talks", 1)
     check("online entry", e1.path == "ytdl://" .. W and e1.label == "Big Buck Bunny" and e1.server.parent == "/v/Talks.m3u"
         and e1.server.show == "Talks" and e1.server.kind == "online" and not e1.server.untitled)

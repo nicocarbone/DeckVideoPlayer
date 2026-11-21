@@ -394,7 +394,9 @@ folder named after the list, with subtitles. A downloaded video then
 plays from the file, also when opened from its list (no internet needed).
 Quality: 1080p on a Steam Deck, 4K elsewhere, keeping HDR and surround
 sound (`[online] download_quality` in `config.ini` changes it). Live
-streams can't be downloaded.
+streams can't be downloaded. Videos play at the screen's resolution
+(1080p on the Deck's own screen); `[online] stream_quality` sets another,
+such as `1440` for a little more detail at more data and battery.
 
 **When YouTube asks to sign in.** From some internet connections YouTube
 refuses yt-dlp until you sign in ("YouTube asks to sign in on this

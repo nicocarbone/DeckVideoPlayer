@@ -681,7 +681,7 @@ extension, not a wiki page: played as is), `is_manifest` (`.m3u8` / `.mpd`: down
 `parse_m3u(text)` → links `{url, key, title, folder}` and skipped
 `{count, by}`, `main_reason(by)`, `fallback_label(url, clean)`, `site`,
 `oembed_url`, `recent_key` / `parse_recent_key` / `recent_ref`
-(`online:<canonical link>`), `stream_height(screen_h)`,
+(`online:<canonical link>`), `stream_height(screen_h, quality)`,
 `download_height(quality, device)`, `format_spec(height, device)` →
 yt-dlp `-f` and `-S`, `sub_langs(slang)` (`en($|-.*),es($|-.*)`),
 `common_args(cookies)`,
@@ -698,7 +698,8 @@ cookies copies a crash left; `save()` keeps the 3000 most recent titles.
 `cookies(purpose)` (a private copy of `[online] cookies_file` with a name
 of its own, or nil), `drop_copy(copy)`, `shutdown()` (deletes the copies
 of runs still going), `ytdlp(args, purpose, cb)` (runs yt-dlp with the
-common arguments, deletes its copy after), `stream_options(screen_h)`
+common arguments, deletes its copy after), `stream_format(screen_h)`
+(`-f` and `-S` with `[online] stream_quality`), `stream_options(screen_h)`
 → `ytdl-format`, `ytdl-raw-options` (main.lua sets them in an `on_load`
 hook at priority 5) and `stream_done()` (drops that copy),
 `entry_for(link, list, name, pos)` (a video entry, or a folder for a

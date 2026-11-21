@@ -58,6 +58,7 @@ local SCHEMA = {
         keep_awake       = {default = true, type = "bool"},
     },
     online = {
+        stream_quality   = {default = "auto", type = "enum", values = {"auto", "720", "1080", "1440", "2160"}},
         download_quality = {default = "auto", type = "enum", values = {"auto", "720", "1080", "1440", "2160", "best"}},
         cookies_file     = {default = "cookies.txt", type = "string"},
     },
