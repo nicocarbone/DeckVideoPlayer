@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.9.2" date="2026-11-21">
+      <description>
+        <p>Quality of online videos: a setting for all of them, and a choice in the Video menu remembered for each list (1440p gives a little more detail on a Steam Deck's screen).</p>
+      </description>
+    </release>
     <release version="0.9.1" date="2026-11-20">
       <description>
         <p>YouTube HDR videos with several audio languages play in HDR again, at the screen's resolution.</p>

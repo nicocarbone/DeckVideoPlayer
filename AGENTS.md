@@ -73,7 +73,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-20, v0.9.1)
+## Current state (2026-11-21, v0.9.2)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -231,6 +231,12 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   languages lost HDR (streams with sound won the `lang` sort); the format
   choice takes a video-only stream first. The owner tried the test build
   on a Deck.
+- v0.9.2 (2026-11-21, D88, D89): quality of online videos:
+  `[online] stream_quality`, and *Quality* in the Video menu remembered
+  per list (`video-settings.json`), applied by reopening the video where
+  it was. Above 1080p on a Deck AV1 is still left out first (a 1440p AV1
+  test on a Deck is for later). CI actions on Node.js 24 (D87). The owner
+  tried the test build on a Deck.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

@@ -2789,8 +2789,8 @@ against the code; all but two suggestions were applied:
   example) rather than AV1 (12.8). If AV1 1440p60 proves smooth on a
   Deck, the AV1 limit could move to above 1440p.
 - **Tested:** unit tests (heights from the setting and the screen, the
-  format for a Deck at 1440p, invalid values). On a Deck: pending (the
-  owner, with `1440`).
+  format for a Deck at 1440p, invalid values). On a Deck: the owner
+  tried the v0.9.2 test build, with the Video menu's Quality (D89).
 
 ## D89. Online videos: Quality in the Video menu, per list
 
@@ -2835,5 +2835,6 @@ against the code; all but two suggestions were applied:
   in 1440p VP9 (no AV1 above 1080p on a Deck), the playlist kept, and
   the list's next video opened at 1440p VP9. After a restart on a 4K TV
   profile the list still played at 1440p (AV1 there), with *Auto* shown
-  as "Auto (2160p)". Screenshots at 1280×800 and 3840×2160. On a Deck:
-  pending. The 1440p AV1 test on a Deck is for later (owner).
+  as "Auto (2160p)". Screenshots at 1280×800 and 3840×2160. The same
+  check passed in the Flatpak build, and the owner tried the test build
+  on a Deck. The 1440p AV1 test on a Deck is for later (owner).

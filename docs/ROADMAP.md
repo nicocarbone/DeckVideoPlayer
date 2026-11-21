@@ -203,14 +203,14 @@ action moved to a release built for Node 24, and `flatpak-builder` back to
 release job's new versions run for the first time on the next tag: check
 that it publishes the release and shows no Node.js 20 warning.
 
-**Streaming quality setting** (after v0.9.1, D88): `[online]
-stream_quality` caps the resolution of online videos (`auto` = the
-screen's, as before: 1080p on a Deck), and *Quality* in the Video menu
-changes it for one list, remembered (D89). To try on a Deck with `1440`:
-smoothness of VP9.2 HDR 1440p60, the difference on screen, battery
-against 1080p; and whether AV1 1440p plays smoothly on the Deck's
-decoder (today avoided above 1080p, D62), which would allow it at 1440p
-(the owner: later).
+v0.9.2 (released 2026-11-21): quality of online videos. `[online]
+stream_quality` caps their resolution (`auto` = the screen's, as before:
+1080p on a Deck, D88), and *Quality* in the Video menu changes it for one
+list, remembered (D89). Checked in headless gamescope and the Flatpak
+with real YouTube; the owner tried the test build on a Deck. Still to
+measure on a Deck: battery at 1440p against 1080p; and whether AV1 1440p
+plays smoothly on the Deck's decoder (today avoided above 1080p, D62),
+which would allow it at 1440p (the owner: later).
 
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
