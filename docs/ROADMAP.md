@@ -205,10 +205,12 @@ that it publishes the release and shows no Node.js 20 warning.
 
 **Streaming quality setting** (after v0.9.1, D88): `[online]
 stream_quality` caps the resolution of online videos (`auto` = the
-screen's, as before: 1080p on a Deck). To try on a Deck with `1440`:
+screen's, as before: 1080p on a Deck), and *Quality* in the Video menu
+changes it for one list, remembered (D89). To try on a Deck with `1440`:
 smoothness of VP9.2 HDR 1440p60, the difference on screen, battery
 against 1080p; and whether AV1 1440p plays smoothly on the Deck's
-decoder (today avoided above 1080p, D62), which would allow it at 1440p.
+decoder (today avoided above 1080p, D62), which would allow it at 1440p
+(the owner: later).
 
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved

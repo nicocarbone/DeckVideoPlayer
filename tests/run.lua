@@ -1705,6 +1705,41 @@ do
     vm:start(a)
     vm:set("itm", nil)
     eq("video memory: entry emptied", vm:start(b), nil)
+
+    -- Quality of online videos, per list (D89)
+    local Memory = require "dvp.memory"
+    local function online_item(key, parent)
+        return {backend = "online", machine = "web", key = key, rating_key = key, kind = "online", parent = parent}
+    end
+    local v1, v2 = online_item("https://y/1", "/v/Talks.m3u"), online_item("https://y/2", "/v/Talks.m3u")
+    local v3 = online_item("https://y/3", "https://www.youtube.com/playlist?list=PLx")
+    local alone = online_item("https://y/4", nil)
+    eq("list key: list file", Memory.list_key(v1), "online:web:list:/v/Talks.m3u")
+    eq("list key: playlist", Memory.list_key(v3), "online:web:list:https://www.youtube.com/playlist?list=PLx")
+    eq("list key: no list, the video", Memory.list_key(alone), "online:web:item:https://y/4")
+    eq("list key: same as the video's own entry", Memory.list_key(alone), (Memory.keys(nil, alone)))
+    eq("list key: not online", Memory.list_key({backend = "plex", machine = "m", key = "1", parent = "/x"}), nil)
+    eq("list key: nothing", Memory.list_key(nil), nil)
+    eq("video normalize: quality", VM.normalize({quality = "1440"}).quality, "1440")
+    eq("video normalize: quality auto", VM.normalize({quality = "auto"}).quality, "auto")
+    eq("video normalize: bad quality", VM.normalize({quality = "best"}), nil)
+    eq("video normalize: quality as a number", VM.normalize({quality = 1440}), nil)
+    eq("quality keep: other than config", VM.quality_to_keep("1440", "auto"), "1440")
+    eq("quality keep: config's", VM.quality_to_keep("auto", "auto"), nil)
+    eq("quality keep: auto over config 1440", VM.quality_to_keep("auto", "1440"), "auto")
+    eq("quality keep: config unknown", VM.quality_to_keep("auto", nil), nil)
+    eq("video memory: no quality yet", vm:quality(v1), nil)
+    vm:set_quality(v1, "1440")
+    eq("video memory: quality", vm:quality(v1), "1440")
+    eq("video memory: quality for the list", vm:quality(v2), "1440")
+    eq("video memory: other list", vm:quality(v3), nil)
+    eq("video memory: not in a list", vm:quality(alone), nil)
+    vm:set_quality(alone, "720")
+    eq("video memory: a video alone", vm:quality(alone), "720")
+    eq("video memory: quality kept", VM.new(dir):quality(v2), "1440")
+    vm:set_quality(v2, nil)
+    eq("video memory: quality back to config", VM.new(dir):quality(v1), nil)
+    eq("video memory: quality, nothing online", vm:quality({backend = "plex", key = "1"}), nil)
     os.remove(util.join(dir, "video-settings.json"))
     os.remove(dir)
 
@@ -1881,6 +1916,9 @@ end
     eq("stream height set: deck 1440", ON.stream_height(800, "1440"), 1440)
     eq("stream height set: lower than the screen", ON.stream_height(2160, "1080"), 1080)
     eq("stream height set: 720", ON.stream_height(800, "720"), 720)
+    eq("quality label: a height", ON.quality_label("1440", 800), "1440p")
+    eq("quality label: auto on a Deck", ON.quality_label("auto", 800), "Auto (1080p)")
+    eq("quality label: auto on a 4K TV", ON.quality_label("auto", 2160), "Auto (2160p)")
     eq("download height deck", ON.download_height("auto", "deck-oled"), 1080)
     eq("download height lcd", ON.download_height("auto", "deck-lcd"), 1080)
     eq("download height tv", ON.download_height("auto", "tv"), 2160)
@@ -2034,6 +2072,24 @@ end
         and f1440:find("bv[vcodec!^=av01]+ba", 1, true) == 1)
     eq("stream format: 1080 on a 4K TV", select(2, ON.new(nil, {cfg = config.from_text("[online]\nstream_quality = 1080\n"),
         device = "tv"}):stream_format(2160)), "lang,res:1080,hdr:12,channels")
+    -- the Video menu's Quality, chosen for the list (D89), wins over config.ini
+    local chosen = {}
+    local onq = ON.new(nil, {resume = res, cfg = cfgo, device = "deck-oled"})
+    onq.remembered_quality = function(item) return chosen[item.parent] end
+    local qa, qb = {key = "a", parent = "/v/A.m3u"}, {key = "b", parent = "/v/B.m3u"}
+    chosen["/v/A.m3u"] = "1440"
+    eq("quality for: chosen for the list", onq:quality_for(qa), "1440")
+    eq("quality for: other list, config", onq:quality_for(qb), "auto")
+    eq("quality for: unknown link", onq:quality_for(nil), "auto")
+    local fq, sq = onq:stream_format(800, qa)
+    check("stream format: the list's 1440p on a Deck", sq == "lang,res:1440,hdr:12,channels"
+        and fq:find("bv[vcodec!^=av01]+ba", 1, true) == 1)
+    eq("stream format: other list at the screen's", select(2, onq:stream_format(800, qb)), "lang,res:1080,hdr:12,channels")
+    chosen["/v/B.m3u"] = "auto"
+    local onq14 = ON.new(nil, {resume = res, cfg = cfg1440, device = "deck-oled"})
+    onq14.remembered_quality = onq.remembered_quality
+    eq("quality for: auto chosen over config 1440", select(2, onq14:stream_format(800, qb)), "lang,res:1080,hdr:12,channels")
+    eq("stream options: the list's format", select(1, onq:stream_options(800, qa)), fq)
     local e1 = on:entry_for({url = W .. "&t=3", key = W, title = "Big Buck Bunny"}, "/v/Talks.m3u", "Talks", 1)
     check("online entry", e1.path == "ytdl://" .. W and e1.label == "Big Buck Bunny" and e1.server.parent == "/v/Talks.m3u"
         and e1.server.show == "Talks" and e1.server.kind == "online" and not e1.server.untitled)

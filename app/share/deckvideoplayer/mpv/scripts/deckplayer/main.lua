@@ -335,6 +335,16 @@ ctx.looks = Looks.new(memory_dir)
 ctx.submemory = SubMemory.new(memory_dir)
 ctx.videomemory = VideoMemory.new(memory_dir)
 hdr.on_choice = function(field, value) ctx.videomemory:set(field, value) end
+-- An online video's Quality chosen in the Video menu, per list (D89).
+online.remembered_quality = function(item) return ctx.videomemory:quality(item) end
+-- The current video again from where it is, e.g. at another Quality: the
+-- yt-dlp hook asks for the new format. The playlist stays as it is.
+ctx.reopen = function()
+    local path = state.current_path
+    if not path then return end
+    state.pending_start[path] = mp.get_property_number("time-pos")
+    mp.commandv("playlist-play-index", "current")
+end
 local browser = Browser.new(ctx)
 local player = Player.new(ctx)
 -- The Video menu's rows and the info panel depend on whether the video is
@@ -401,7 +411,7 @@ mp.add_hook("on_load", 5, function()
     local path = mp.get_property("path") or ""
     if path:sub(1, 7) ~= "ytdl://" then return end
     if mp.del_property then pcall(mp.del_property, "user-data/mpv/ytdl/json-subprocess-result") end
-    local format, raw = online:stream_options(mp.get_property_number("osd-height"))
+    local format, raw = online:stream_options(mp.get_property_number("osd-height"), online:item_for(path))
     mp.set_property("ytdl-format", format)
     mp.set_property_native("ytdl-raw-options", raw)
 end)

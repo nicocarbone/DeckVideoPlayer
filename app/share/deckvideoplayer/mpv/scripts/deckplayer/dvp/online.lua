@@ -343,6 +343,13 @@ function M.stream_height(screen_h, quality)
     return 2160
 end
 
+-- Pure: a Quality as the Video menu shows it (D89): "1440p", or "Auto
+-- (1080p)" with the height the screen gets.
+function M.quality_label(quality, screen_h)
+    if tonumber(quality) then return quality .. "p" end
+    return "Auto (" .. M.stream_height(screen_h) .. "p)"
+end
+
 -- Pure: the height downloads are made at ([online] download_quality):
 -- "auto" is 1080p on a Steam Deck (also when docked: 4K AV1 stutters on
 -- its decoder, D62) and 2160p elsewhere.
@@ -633,17 +640,26 @@ function M:ytdlp(args, purpose, cb)
         end)
 end
 
--- yt-dlp's -f and -S for streaming on a `screen_h`-line screen, with this
--- config's stream_quality.
-function M:stream_format(screen_h)
-    return M.format_spec(M.stream_height(screen_h, self.cfg and self.cfg.online.stream_quality), self.device)
+-- The Quality `item` plays at: the one chosen in the Video menu for its
+-- list (D89; `remembered_quality(item)`, set by main.lua, asks
+-- dvp/videomemory.lua), else [online] stream_quality (D88).
+function M:quality_for(item)
+    local q = item and self.remembered_quality and self.remembered_quality(item)
+    return q or (self.cfg and self.cfg.online.stream_quality) or "auto"
 end
 
--- mpv's options for the yt-dlp hook, for a screen `screen_h` lines tall:
--- format (ytdl-format) and raw (ytdl-raw-options), with a fresh copy of
--- the cookies file. main.lua sets them just before the hook runs.
-function M:stream_options(screen_h)
-    local format, sort = self:stream_format(screen_h)
+-- yt-dlp's -f and -S for streaming `item` (nil: an unknown link) on a
+-- `screen_h`-line screen.
+function M:stream_format(screen_h, item)
+    return M.format_spec(M.stream_height(screen_h, self:quality_for(item)), self.device)
+end
+
+-- mpv's options for the yt-dlp hook, for `item` on a screen `screen_h`
+-- lines tall: format (ytdl-format) and raw (ytdl-raw-options), with a
+-- fresh copy of the cookies file. main.lua sets them just before the hook
+-- runs.
+function M:stream_options(screen_h, item)
+    local format, sort = self:stream_format(screen_h, item)
     local langs = self.cfg and M.sub_langs(self.cfg.playback.subtitle_languages) or nil
     self:stream_done()
     self.play_cookies = self:cookies("play")
@@ -1072,7 +1088,7 @@ function M:video_info(ref, cb)
             cb(d, err)
         end)
     end
-    local format, sort = self:stream_format(self.screen_h)
+    local format, sort = self:stream_format(self.screen_h, ref)
     local args = {"-J", "-f", format, "-S", sort}
     -- (The subtitles playback would load, as in raw_options.)
     local langs = self.cfg and M.sub_langs(self.cfg.playback.subtitle_languages) or ""

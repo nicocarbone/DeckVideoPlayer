@@ -14,6 +14,10 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
   stays the screen's (1080p on a Steam Deck); `1440` gives a little more
   detail and colour on a Deck's screen, for about 2.5 times the data and
   more battery.
+- **Quality in the Video menu** for online videos: *Auto* (the screen's),
+  720p, 1080p, 1440p or 2160p, remembered for the list the video plays
+  from (its `.m3u` file, playlist or channel). The video reopens where it
+  was, at the new quality, after a few seconds.
 
 ## v0.9.1 (2026-11-20)
 

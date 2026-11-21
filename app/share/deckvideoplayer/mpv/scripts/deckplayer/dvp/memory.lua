@@ -40,6 +40,17 @@ function M.keys(path, item)
     return video, video
 end
 
+-- Pure: where an online video's Quality is kept (D89): with the list it
+-- plays from (a list file, or a playlist's or channel's address), else
+-- with the video itself. nil for anything else.
+function M.list_key(item)
+    if type(item) ~= "table" or item.backend ~= "online" then return nil end
+    local base = "online:" .. tostring(item.machine) .. ":"
+    if type(item.parent) == "string" and item.parent ~= "" then return base .. "list:" .. item.parent end
+    local id = item.rating_key or item.key
+    return id and (base .. "item:" .. tostring(id)) or nil
+end
+
 local function prune(entries)
     local list = {}
     for key, e in pairs(entries) do list[#list + 1] = {key = key, t = e.t or 0} end

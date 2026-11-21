@@ -13,6 +13,9 @@ local M = {}
 -- hwdec = auto: VA-API, then Vulkan, then mpv's safe fallbacks.
 M.HWDEC_AUTO = "vaapi,vulkan,auto-safe"
 
+-- [online] stream_quality, also the Video menu's Quality (D88, D89).
+M.STREAM_QUALITIES = {"auto", "720", "1080", "1440", "2160"}
+
 M.DEFAULT_EXTENSIONS = "mkv,mp4,m4v,avi,mov,wmv,flv,webm,ts,m2ts,mts,mpg,mpeg,mpe,vob,ogv,ogm,3gp,3g2,divx,xvid,rm,rmvb,asf,f4v,hevc,h264,264,265,av1,ivf,y4m,dv,mxf,nut"
 
 -- Each entry: default value and parser type.
@@ -58,7 +61,7 @@ local SCHEMA = {
         keep_awake       = {default = true, type = "bool"},
     },
     online = {
-        stream_quality   = {default = "auto", type = "enum", values = {"auto", "720", "1080", "1440", "2160"}},
+        stream_quality   = {default = "auto", type = "enum", values = M.STREAM_QUALITIES},
         download_quality = {default = "auto", type = "enum", values = {"auto", "720", "1080", "1440", "2160", "best"}},
         cookies_file     = {default = "cookies.txt", type = "string"},
     },

@@ -770,6 +770,42 @@ function M:hdr_items(items)
     end
 end
 
+-- The online video playing through yt-dlp (D84), or nil: its Quality row.
+function M:online_item()
+    local path = mp.get_property("path") or ""
+    if path:sub(1, 7) ~= "ytdl://" then return nil end
+    local item = self.ctx.servers:item_for(path)
+    return item and item.backend == "online" and item or nil
+end
+
+-- Quality of an online video (D89): the height yt-dlp is asked for,
+-- remembered for the list it plays from. Choosing opens the video again
+-- where it is (a few seconds: yt-dlp runs again).
+function M:quality_items(item)
+    local online, screen_h = self.ctx.online, mp.get_property_number("osd-height")
+    local current = online:quality_for(item)
+    local items = {}
+    for _, q in ipairs(config.STREAM_QUALITIES) do
+        items[#items + 1] = {label = online.quality_label(q, screen_h), checked = q == current,
+                             action = function() self:set_quality(item, q) end}
+    end
+    return items
+end
+
+function M:open_quality_menu(item)
+    local items = self:quality_items(item)
+    self.ctx.menu:open({title = "Quality", style = "side", items = items, selected = selected_index(items)})
+end
+
+function M:set_quality(item, quality)
+    local online = self.ctx.online
+    if quality == online:quality_for(item) then return end
+    self.ctx.videomemory:set_quality(item, VideoMemory.quality_to_keep(quality, self.cfg.online.stream_quality))
+    self.ctx.toast("Quality: " .. online.quality_label(quality, mp.get_property_number("osd-height"))
+                   .. (item.parent and " for this list" or " for this video"), 3)
+    self.ctx.reopen()
+end
+
 function M:video_items()
     local items = {}
     -- Video tracks only when there is a choice (cover art doesn't count).
@@ -788,6 +824,15 @@ function M:video_items()
             }
         end
         items[#items + 1] = {separator = true}
+    end
+    local online_item = self:online_item()
+    if online_item then
+        local online = self.ctx.online
+        items[#items + 1] = {label = "Quality",
+            value = function()
+                return online.quality_label(online:quality_for(online_item), mp.get_property_number("osd-height"))
+            end,
+            action = function() self:open_quality_menu(online_item) end}
     end
     items[#items + 1] = {label = "Picture",
         value = function()

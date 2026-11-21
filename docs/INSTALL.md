@@ -113,7 +113,8 @@ See the controls table in the [README](../README.md#controls). Notes:
 - Videos after the chosen one in the same folder play automatically
   (`autoplay_next`).
 - **Video menu** (*Menu → Video*) holds *Picture*, *Match refresh rate*,
-  *Decoding* and, on HDR screens, the HDR settings below.
+  *Decoding* and, on HDR screens, the HDR settings below; for online
+  videos also *Quality* ([Online videos](#online-videos)).
 - **Decoding** (Video menu): hardware (default, saves battery) or
   software for the current video. On a Steam Deck, 4K AV1 videos can
   stutter with the hardware decoder; software plays them smoother at
@@ -394,9 +395,15 @@ folder named after the list, with subtitles. A downloaded video then
 plays from the file, also when opened from its list (no internet needed).
 Quality: 1080p on a Steam Deck, 4K elsewhere, keeping HDR and surround
 sound (`[online] download_quality` in `config.ini` changes it). Live
-streams can't be downloaded. Videos play at the screen's resolution
-(1080p on the Deck's own screen); `[online] stream_quality` sets another,
-such as `1440` for a little more detail at more data and battery.
+streams can't be downloaded.
+
+**Quality**: videos play at the screen's resolution (1080p on the Deck's
+own screen). *Menu → Video → Quality* picks another for the list the
+video plays from (its `.m3u` file, playlist or channel), remembered for
+its other videos too: `1440p` gives a little more detail and colour on a
+Deck at about 2.5 times the data and more battery; `720p` saves data.
+The video reopens where it was after a few seconds. `[online]
+stream_quality` in `config.ini` sets the quality of every other list.
 
 **When YouTube asks to sign in.** From some internet connections YouTube
 refuses yt-dlp until you sign in ("YouTube asks to sign in on this

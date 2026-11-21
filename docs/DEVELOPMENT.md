@@ -444,7 +444,9 @@ DECISIONS.md or the README "Known limitations".
     video plays (time to start: QuickJS-NG), resumes, shows in *Recently
     played*; an HDR video plays as HDR (OLED), a 5.1 one shows 5.1 in the
     info panel; *Download* one, play it with Wi-Fi off from the list;
-    battery for a 1080p VP9 and an AV1 video against a local file.
+    battery for a 1080p VP9 and an AV1 video against a local file;
+    *Video → Quality: 1440p* reopens the video where it was, the badge
+    says 1440p, the list's next video too, and after a restart.
 
 ## 9. Recipes for common changes
 

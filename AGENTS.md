@@ -11,7 +11,7 @@ non-trivial.
 |---|---|
 | Library screen | `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` |
 | Playback overlay, track menus, info panel | `…/dvp/player.lua` |
-| Choices remembered per movie or season | `…/dvp/memory.lua` (store, keys), `…/dvp/submemory.lua` (subtitles, D72), `…/dvp/videomemory.lua` (Picture, HDR, D73) |
+| Choices remembered per movie or season | `…/dvp/memory.lua` (store, keys), `…/dvp/submemory.lua` (subtitles, D72), `…/dvp/videomemory.lua` (Picture, HDR, D73; online Quality per list, D89) |
 | Menus/dialogs component | `…/dvp/menu.lua` |
 | Drawing primitives, icons, button glyphs, theme | `…/dvp/ui.lua` |
 | Button → action mapping | `…/dvp/input.lua` |

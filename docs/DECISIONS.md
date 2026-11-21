@@ -2779,7 +2779,7 @@ against the code; all but two suggestions were applied:
   size on a Deck, against 960×540 upscaled at 1080p. Costs: about 2.5
   times the data, 1.8 times the pixels to decode (battery not measured).
 - **Setting:** `[online] stream_quality = auto | 720 | 1080 | 1440 |
-  2160`, in `config.ini` (rarely changed, no menu row). `auto`, the
+  2160`, in `config.ini` (no menu row at first; D89 added one, per list). `auto`, the
   default (owner: 1080p on a Deck for battery), is the screen's height as
   before; a number is that height at most on any screen, a docked Deck's
   TV included. No `best`: above 2160p is only for downloads. The Video
@@ -2791,3 +2791,49 @@ against the code; all but two suggestions were applied:
 - **Tested:** unit tests (heights from the setting and the screen, the
   format for a Deck at 1440p, invalid values). On a Deck: pending (the
   owner, with `1440`).
+
+## D89. Online videos: Quality in the Video menu, per list
+
+- **Why** (owner): the choice depends on the moment and the video (a
+  hotspot or Wi-Fi, battery, a 4K nature video or a talk), which is what
+  menu rows are for (settings in `config.ini`, a row for what people
+  switch often). Asked as a toggle between "1080p/AV1" and "1440p/VP9";
+  heights are offered instead: the codec follows from the height and the
+  video (many have no AV1; on a Deck D62 leaves AV1 out above 1080p, a
+  limit a later 1440p AV1 test may move), and on a docked Deck's 4K TV
+  "1440p" would be lower than *Auto*.
+- **Row:** *Quality* in the Video menu, only for a video playing through
+  yt-dlp (`ytdl://`; links to video files play as they are). Its value is
+  the quality in force: "Auto (1080p)" with the screen's height, or
+  "1440p". A opens a list (*Auto*, 720p, 1080p, 1440p, 2160p) rather than
+  ◀ ▶, because every change reopens the video: one reopen per choice.
+- **Applying:** mpv's yt-dlp hook reads `ytdl-format` and
+  `ytdl-raw-options` only when a file opens, so the video is opened again
+  with `playlist-play-index current` (the playlist, i.e. the list's next
+  videos, stays) from the position put in `state.pending_start` (no
+  "Resumed at" toast). It takes a few seconds, as yt-dlp runs again; a
+  3 s toast says "Quality: 1440p for this list". Volume, speed and pause
+  carry over (global properties); Decoding is saved on unload and
+  restored; Picture and HDR come from memory as at any start.
+- **Memory** (owner: per list, rather than until the app closes): the
+  `.m3u` file, or the playlist's or channel's address, the video is
+  listed from (`item.parent`; known for *Recently played* too, through
+  the list each link was last played from). Key `online:web:list:<list>`
+  in `video-settings.json` (D73's store), field `quality`; a video with
+  no known list keeps it as its own (`online:web:item:<link>`). Choosing
+  `config.ini`'s value removes it, so the list follows `config.ini`
+  again. With `remember_settings = no` it lasts until the app closes, as
+  the other menu choices. A list's choice applies on any screen, a
+  docked Deck's TV too, as a number in `config.ini` does. Video info in
+  the library asks yt-dlp with the list's quality; downloads keep
+  `download_quality`.
+- **Tested:** unit tests (list keys, stored values, what is kept, memory
+  per list across restarts, the format from a list's choice over
+  `config.ini`). Headless gamescope with real YouTube (the test cookies
+  file), two videos in a list: on the Deck profile a 4K HDR video at
+  *Auto* played 1080p AV1; at 1:00, *Quality: 1440p* reopened it at 1:00
+  in 1440p VP9 (no AV1 above 1080p on a Deck), the playlist kept, and
+  the list's next video opened at 1440p VP9. After a restart on a 4K TV
+  profile the list still played at 1440p (AV1 there), with *Auto* shown
+  as "Auto (2160p)". Screenshots at 1280×800 and 3840×2160. On a Deck:
+  pending. The 1440p AV1 test on a Deck is for later (owner).

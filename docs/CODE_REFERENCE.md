@@ -101,6 +101,7 @@ Responsibilities:
   | `hdr` | HDR choices (`dvp/hdr.lua`, D52) |
   | `subtitles` | online subtitle search/download (`dvp/subdownload.lua`) |
   | `play(list, start)` | load `list[1]` (replace) with start position `start` (nil: the saved position, if any), append the rest |
+  | `reopen()` | the current video again from where it is (`playlist-play-index current`, the playlist kept; D89: another Quality) |
   | `stop()` | `stop` → idle → browser (progress is saved by on_unload) |
   | `quit()` | restore refresh rate, `quit` (progress is saved by on_unload) |
   | `quit_dialog()` | "Quit?" dialog |
@@ -682,6 +683,7 @@ extension, not a wiki page: played as is), `is_manifest` (`.m3u8` / `.mpd`: down
 `{count, by}`, `main_reason(by)`, `fallback_label(url, clean)`, `site`,
 `oembed_url`, `recent_key` / `parse_recent_key` / `recent_ref`
 (`online:<canonical link>`), `stream_height(screen_h, quality)`,
+`quality_label(quality, screen_h)` ("1440p", "Auto (1080p)"),
 `download_height(quality, device)`, `format_spec(height, device)` →
 yt-dlp `-f` and `-S`, `sub_langs(slang)` (`en($|-.*),es($|-.*)`),
 `common_args(cookies)`,
@@ -698,8 +700,11 @@ cookies copies a crash left; `save()` keeps the 3000 most recent titles.
 `cookies(purpose)` (a private copy of `[online] cookies_file` with a name
 of its own, or nil), `drop_copy(copy)`, `shutdown()` (deletes the copies
 of runs still going), `ytdlp(args, purpose, cb)` (runs yt-dlp with the
-common arguments, deletes its copy after), `stream_format(screen_h)`
-(`-f` and `-S` with `[online] stream_quality`), `stream_options(screen_h)`
+common arguments, deletes its copy after), `quality_for(item)` (the
+Video menu's Quality for its list through `remembered_quality(item)`,
+which main.lua points at `videomemory:quality`, else `[online]
+stream_quality`, D89), `stream_format(screen_h, item)` (`-f` and `-S`
+with that quality; Video info uses it too), `stream_options(screen_h, item)`
 → `ytdl-format`, `ytdl-raw-options` (main.lua sets them in an `on_load`
 hook at priority 5) and `stream_done()` (drops that copy),
 `entry_for(link, list, name, pos)` (a video entry, or a folder for a
@@ -784,7 +789,11 @@ episode, the video's otherwise; nil, nil for a bare URL). Instance:
 at most 1000 entries; nil dir: nothing read or written, entries last until
 the app closes, which is how `remember_settings = no` works), `get(key)`,
 `set(key, field, value)` (nil removes; an entry left empty goes),
-`forget(path)` (the video's own entry, not its season's).
+`forget(path)` (the video's own entry, not its season's). Pure:
+`list_key(item)` → `online:web:list:<list>` for an online video from a
+list file, playlist or channel (`item.parent`), else its own
+`online:web:item:<link>` (the same as its `keys` video key); nil for
+anything else (D89).
 
 ## `dvp/submemory.lua`: remembered subtitle settings (D72)
 
@@ -805,6 +814,9 @@ fields `enabled`, `mapping`, `peak`, `itm` (`Hdr.CHOICES`) and `picture`
 ("fit" / "fill" / "stretch", or `{crop, w, h}`). Pure: `normalize(entry)`,
 `normalize_picture(p)`, `crop_for(picture, w, h)`. Instance:
 `start(path, item)` → the entry or nil, `set(field, value)`, `forget(path)`.
+Online videos' Quality (D89), field `quality` (`config.STREAM_QUALITIES`)
+under `Memory.list_key(item)`: `quality(item)`, `set_quality(item, value)`;
+pure `quality_to_keep(choice, configured)` (nil when it is config.ini's).
 The HDR rows report through `hdr.on_choice`; `hdr:use(saved)` applies at each
 file (remembered, else session, else config.ini). Picture: `player:set_zoom`
 → `remember_picture(mode)`; `restore_picture(saved)`, `restore_crop()`.
@@ -1059,7 +1071,10 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   `open_subtitle_menu` (with "Off", then *Download subtitles…* when
   `ctx.subtitles:available(path)`),
   `open_video_menu` (D52: video tracks when there is more than one,
-  picture (fit / fill = `panscan 1` / stretch = `keepaspect no`), match
+  *Quality* for an online video playing through yt-dlp (`online_item()`;
+  `open_quality_menu(item)` lists `quality_items(item)`, and
+  `set_quality(item, q)` remembers it for the list and calls
+  `ctx.reopen()`, D89), picture (fit / fill = `panscan 1` / stretch = `keepaspect no`), match
   refresh rate (`toggle_refresh()`, shown when `display.refresh_possible`),
   decoding (`toggle_decoding()`: `file-local-options/hwdec` from the pure
   `hwdec_choice(software, configured)`, D62), then `hdr_items()` from
