@@ -2873,4 +2873,5 @@ against the code; all but two suggestions were applied:
   pulls, too soon, repeats, press events). In headless gamescope with
   4 ms bursts: chatter and the stick case one chapter each, two pulls
   0.4 s apart two, L2 likewise; the old code jumped 3 with the same
-  burst. On a Deck: pending.
+  burst. The same check passed in the Flatpak build, and the owner
+  confirmed the test build on a Deck (v0.9.3).

@@ -73,7 +73,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-21, v0.9.2)
+## Current state (2026-11-22, v0.9.3)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -237,6 +237,10 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   it was. Above 1080p on a Deck AV1 is still left out first (a 1440p AV1
   test on a Deck is for later). CI actions on Node.js 24 (D87). The owner
   tried the test build on a Deck.
+- v0.9.3 (2026-11-22, D90): one L2 / R2 pull is one press (mpv's analog
+  trigger keys have no hysteresis): the trigger keys have complex
+  bindings, debounced by `input.trigger_pull`. The owner confirmed the
+  test build on a Deck.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.

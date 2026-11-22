@@ -212,6 +212,12 @@ measure on a Deck: battery at 1440p against 1080p; and whether AV1 1440p
 plays smoothly on the Deck's decoder (today avoided above 1080p, D62),
 which would allow it at 1440p (the owner: later).
 
+v0.9.3 (released 2026-11-22): L2 / R2 jumped several chapters per pull
+on a Deck, because mpv turns the analog triggers into key presses with
+no hysteresis; a trigger press now counts only after its events settle
+(D90). Checked in headless gamescope and the Flatpak with key events
+milliseconds apart; the owner confirmed the test build on a Deck.
+
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
 from v0.9.0 by the owner):
