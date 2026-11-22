@@ -2257,6 +2257,83 @@ end
         for i, a in ipairs(args) do if a == "--" then return args[i + 1] end end
     end
     check("titles: the rest when the list opens again", #runs == 2 and first_link(runs[1].args) == "https://example.org/v46")
+    do
+        -- playlists: what a flat listing shows (D91)
+        local PL = "https://www.youtube.com/playlist?list=PLtest"
+        local pl = ON.playlist_links({title = "Talks", channel = "Chan", entries = {
+            {url = "https://www.youtube.com/watch?v=aaaaaaaaaaa", title = " One "},
+            {url = "https://youtu.be/aaaaaaaaaaa", title = "Again"},
+            {url = "https://www.youtube.com/watch?v=bbbbbbbbbbb", title = "  "},
+            {url = "https://www.youtube.com/playlist?list=PLin", title = "Inner"},
+            {_type = "playlist", url = "https://example.org/show", title = "Show"},
+            {url = "ftp://example.org/x"}, "junk", {webpage_url = "https://example.org/v.mp4"}}}, PL)
+        local l = pl.links
+        check("playlist links", pl.name == "Talks" and pl.channel == "Chan" and #l == 5
+            and l[1].key == "https://www.youtube.com/watch?v=aaaaaaaaaaa" and l[1].title == "One" and not l[1].folder
+            and l[2].title == nil and l[3].folder and l[3].key == "https://www.youtube.com/playlist?list=PLin"
+            and l[4].folder and l[5].url == "https://example.org/v.mp4")
+        check("playlist links: no title, no entries", ON.playlist_links({}, PL).name == "YouTube playlist PLtest"
+            and #ON.playlist_links({entries = "x"}, PL).links == 0)
+        -- a listing is kept for LISTING_KEEP seconds, by the wall clock
+        local K = ON.LISTING_KEEP
+        check("listing fresh", ON.listing_fresh({t = 100}, 100) and ON.listing_fresh({t = 100}, 100 + K - 1))
+        check("listing old", not ON.listing_fresh({t = 100}, 100 + K) and not ON.listing_fresh({t = 100}, 99)
+            and not ON.listing_fresh(nil, 100) and not ON.listing_fresh({}, 100))
+        -- shown again without asking yt-dlp, with current progress
+        local rk = Resume.new(nil)
+        local ok = ON.new(nil, {resume = rk, cfg = cfgo})
+        local now = 1000
+        ok.clock = function() return now end
+        local kruns = {}
+        function ok.ytdlp(_, args, _, cb) kruns[#kruns + 1] = {args = args, cb = cb} end
+        local got, gerr
+        local function open(url)
+            got, gerr = nil, nil
+            ok:list({key = url, kind = "playlist"}, function(e, err) got, gerr = e, err end, true)
+        end
+        local answer = {status = 0, stdout = '{"title":"Talks","entries":['
+            .. '{"url":"https://www.youtube.com/watch?v=aaaaaaaaaaa","title":"One"},'
+            .. '{"url":"https://www.youtube.com/watch?v=bbbbbbbbbbb","title":"Two"}]}'}
+        open(PL)
+        check("listing: asked", #kruns == 1 and got == nil)
+        kruns[1].cb(answer)
+        check("listing: shown", got and #got == 2 and got[1].label == "One" and got[2].server.parent == PL
+            and got[1].server.show == "Talks" and ok:title_of(PL) == "Talks"
+            and ok:title_of("https://www.youtube.com/watch?v=bbbbbbbbbbb") == "Two")
+        local first = got
+        rk:update("online:" .. first[1].server.key, 30, 100)
+        open(PL)
+        check("listing: kept, not asked again", #kruns == 1 and got and #got == 2 and got[2].label == "Two"
+            and got[1].path == first[1].path and got[2].pos == 2)
+        check("listing: entries made again, progress current", got[1] ~= first[1] and got[1].state
+            and got[1].state.pos == 30 and first[1].state == nil)
+        now = now + K - 1
+        open(PL)
+        eq("listing: still kept", #kruns, 1)
+        now = now + 1
+        open(PL)
+        check("listing: asked again when old", #kruns == 2 and got == nil)
+        kruns[2].cb({status = 1, stderr = "ERROR: Unable to download API page"})
+        check("listing: error", got == nil and gerr ~= nil)
+        open(PL)
+        eq("listing: an error isn't kept", #kruns, 3)
+        kruns[3].cb(answer)
+        ok:forget_listings()
+        open(PL)
+        eq("listing: Reload library asks again", #kruns, 4)
+        kruns[4].cb(answer)
+        -- at most 20 playlists: the oldest goes
+        for i = 1, 20 do
+            now = now + 1
+            open(PL .. i)
+            kruns[#kruns].cb(answer)
+        end
+        local n = #kruns
+        open(PL .. "1")
+        check("listing: the newest kept", #kruns == n and got and #got == 2)
+        open(PL)
+        check("listing: the oldest gone", #kruns == n + 1 and first_link(kruns[n + 1].args) == PL)
+    end
     for _, n in ipairs(util.readdir(dir, "files") or {}) do os.remove(dir .. "/" .. n) end
     os.remove(dir)
 end)()

@@ -22,7 +22,10 @@
 -- A playlist or a channel (YouTube's, known by its address, or another
 -- site's, once yt-dlp says it is one) shows as a folder in the list:
 -- opening it asks yt-dlp for its videos (titles only, no video page each:
--- about a second), the most recent PLAYLIST_MAX of a channel.
+-- a second or a few), the most recent PLAYLIST_MAX of a channel. The
+-- listing is kept in memory for LISTING_KEEP seconds (D91): showing the
+-- playlist again (after a video, back from a playlist in it, "Recently
+-- played") doesn't wait for yt-dlp; "Reload library" asks again.
 --
 -- Same interface as dvp/dlna.lua (dvp/servers.lua), with progress,
 -- watched marks and "Recently played" kept in resume.json under
@@ -51,6 +54,8 @@ M.LOCAL_STATE = true
 M.MACHINE = "web"
 M.LIST_EXT = "m3u"
 M.YTDLP = "yt-dlp"
+-- Seconds a playlist's listing is shown again without asking yt-dlp (D91).
+M.LISTING_KEEP = 30 * 60
 
 local LIST_MAX = 1024 * 1024   -- bytes of a list file
 local MAX_ENTRIES = 5000       -- links of one list, at most
@@ -60,6 +65,7 @@ local OEMBED_JOBS = 4          -- title requests at a time
 local BATCH = 15               -- links per yt-dlp title run
 local YTDLP_JOBS = 2           -- yt-dlp title runs at a time
 local PLAYLIST_MAX = 200       -- videos listed of a playlist or channel
+local LISTINGS_MAX = 20        -- playlists whose listing is kept (D91)
 local READ_WAIT = 10           -- seconds a list file may take to read
 local RESOLVE_WAIT = 15        -- seconds "Recently played" waits for a list
 local TITLES_SHOW = 0.5        -- seconds between redraws while titles arrive
@@ -486,6 +492,36 @@ function M.parse_info(j)
             playlist = (j._type == "playlist" or j._type == "multi_video") or nil}
 end
 
+-- Pure: what a flat yt-dlp listing `j` of playlist `url` shows: {name,
+-- channel, links}, links {url, key, title, folder} in its order, each
+-- link once; playlists in it (a channel's playlists tab) are folders.
+function M.playlist_links(j, url)
+    local listing = {name = type(j.title) == "string" and j.title or M.fallback_label(url),
+                     channel = j.channel or j.uploader, links = {}}
+    local seen = {}
+    for _, e in ipairs(type(j.entries) == "table" and j.entries or {}) do
+        local link = type(e) == "table" and (e.url or e.webpage_url)
+        if type(link) == "string" and M.split_url(link) then
+            local key = M.canonical(link)
+            if not seen[key] then
+                seen[key] = true
+                local folder = e._type == "playlist" or (e.ie_key == "YoutubeTab") or M.youtube_folder(link) ~= nil
+                local title = type(e.title) == "string" and util.trim(e.title) ~= "" and util.trim(e.title) or nil
+                listing.links[#listing.links + 1] = {url = link, key = key, title = title, folder = folder or nil}
+            end
+        end
+    end
+    return listing
+end
+
+-- Pure: whether a listing kept at `kept.t` is still shown at `now`
+-- (os.time: the wall clock, so a Deck's sleep counts; a clock set back
+-- makes it old).
+function M.listing_fresh(kept, now)
+    return type(kept) == "table" and type(kept.t) == "number" and type(now) == "number"
+        and now >= kept.t and now - kept.t < M.LISTING_KEEP
+end
+
 ---------------------------------------------------------------------------
 -- Instance
 ---------------------------------------------------------------------------
@@ -524,6 +560,8 @@ function M.new(data_dir, opts)
         self.cookies_src = name:sub(1, 1) == "/" and name or nil
     end
     self.items = {}         -- path played for a link -> item
+    self.listings = {}      -- playlist address -> its last listing (D91)
+    self.clock = os.time    -- (tests set their own)
     self.no_title = {}      -- links whose title was asked for (this session)
     self.titles_run = 0     -- the title search going on (stop_titles ends it)
     self.downloads = nil    -- dvp/downloads.lua, set by main.lua
@@ -782,33 +820,61 @@ end
 
 -- The videos of a playlist or channel, as yt-dlp lists them (flat: no
 -- page of each video is fetched). Playlists inside it (a channel's
--- playlists tab) are folders too.
+-- playlists tab) are folders too. A listing from the last LISTING_KEEP
+-- seconds is shown again without asking (D91); only its links are kept,
+-- so progress, watched marks and downloads are always current.
 function M:list_playlist(loc, cb, quiet)
     local url = loc.key
+    local function show(listing)
+        local entries = {}
+        for _, link in ipairs(listing.links) do
+            entries[#entries + 1] = self:entry_for(link, url, listing.name, #entries + 1)
+        end
+        cb(entries)
+        if not quiet then self:fetch_titles(entries) end
+    end
+    local kept = self:kept_listing(url)
+    if kept then return show(kept) end
     self:ytdlp({"--flat-playlist", "-J", "--playlist-end", tostring(PLAYLIST_MAX), "--", url}, "titles", function(res)
         local j = res.status == 0 and utils.parse_json(res.stdout or "") or nil
         if type(j) ~= "table" then return cb(nil, (M.error_text(res.stderr))) end
-        local name = type(j.title) == "string" and j.title or M.fallback_label(url)
-        if loc.untitled or not self:title_of(url) then self:learned(url, name, j.channel or j.uploader) end
-        local entries, seen = {}, {}
-        for _, e in ipairs(type(j.entries) == "table" and j.entries or {}) do
-            local link = type(e) == "table" and (e.url or e.webpage_url)
-            if type(link) == "string" and M.split_url(link) then
-                local key = M.canonical(link)
-                if not seen[key] then
-                    seen[key] = true
-                    local folder = e._type == "playlist" or (e.ie_key == "YoutubeTab") or M.youtube_folder(link) ~= nil
-                    local title = type(e.title) == "string" and util.trim(e.title) ~= "" and util.trim(e.title) or nil
-                    if title and not folder then self.data.titles[key] = {title = title, t = os.time()} end
-                    entries[#entries + 1] = self:entry_for({url = link, key = key, title = title, folder = folder or nil},
-                                                           url, name, #entries + 1)
-                end
-            end
+        local listing = M.playlist_links(j, url)
+        if loc.untitled or not self:title_of(url) then self:learned(url, listing.name, listing.channel) end
+        for _, link in ipairs(listing.links) do
+            if link.title and not link.folder then self.data.titles[link.key] = {title = link.title, t = os.time()} end
         end
         self:save()
-        cb(entries)
-        if not quiet then self:fetch_titles(entries) end
+        self:keep_listing(url, listing)
+        show(listing)
     end)
+end
+
+-- The listing of playlist `url` if it is recent enough, else nil (and an
+-- old one is dropped).
+function M:kept_listing(url)
+    local kept = self.listings[url]
+    if not kept then return nil end
+    if M.listing_fresh(kept, self.clock()) then return kept end
+    self.listings[url] = nil
+    return nil
+end
+
+-- Keeps playlist `url`'s listing (an answer, never an error), at most
+-- LISTINGS_MAX of them: the oldest goes.
+function M:keep_listing(url, listing)
+    listing.t = self.clock()
+    self.listings[url] = listing
+    local n, oldest = 0, nil
+    for u, l in pairs(self.listings) do
+        n = n + 1
+        if not oldest or l.t < self.listings[oldest].t then oldest = u end
+    end
+    if n > LISTINGS_MAX then self.listings[oldest] = nil end
+end
+
+-- "Reload library": playlists are asked for again.
+function M:forget_listings()
+    self.listings = {}
 end
 
 -- A title arrived for `key`: kept, and shown on the entries that have it.

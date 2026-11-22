@@ -744,7 +744,11 @@ function M:open_menu()
         items[1] = {label = "Sort by", value = function() return self.sort == "name" and "Name" or "Date" end,
                     adjust = function() self:toggle_sort() end}
     end
-    table.insert(items, {label = "Reload library", action = function() self:reload() end})
+    table.insert(items, {label = "Reload library", action = function()
+        -- (Playlists too, not the listing kept from minutes ago: D91.)
+        if self.ctx.online then self.ctx.online:forget_listings() end
+        self:reload()
+    end})
     if not self:at_start() then
         table.insert(items, {label = "Go to library start", action = function()
             local top = self.stack[1]

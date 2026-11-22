@@ -382,9 +382,12 @@ What each kind of link does:
   them. Subtitles in your `subtitle_languages`, YouTube's automatic ones
   when there are no others.
 - **A YouTube playlist or channel** is a folder inside the list: its
-  videos (a channel's 200 most recent), fetched each time you open it so
-  new uploads appear. `…/@name/shorts` or `…/@name/streams` lists those;
-  `…/@name/playlists` lists the channel's playlists as folders.
+  videos (a channel's 200 most recent), fetched from YouTube when you
+  open it (a few seconds). For 30 minutes after that it shows again at
+  once (after a video, coming back to it); then it is fetched again, so
+  new uploads appear. *Menu → Reload library* fetches it right away.
+  `…/@name/shorts` or `…/@name/streams` lists those; `…/@name/playlists`
+  lists the channel's playlists as folders.
 - **Another site's playlist** becomes a folder once yt-dlp recognizes it.
 - **A link to a video file** (`.mp4`, `.mkv`, `.m3u8`…) plays directly.
 - Lines that aren't links are skipped; the list's header says how many.

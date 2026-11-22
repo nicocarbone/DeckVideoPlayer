@@ -714,10 +714,16 @@ hook at priority 5) and `stream_done()` (drops that copy),
 playlist; a downloaded copy is the entry's path), `refresh_entries(entries)`
 (after downloads changed), `read_list(path, cb)` (`head -c`, given up
 after 10 s), `list(loc, cb, quiet)` (a list file, or `list_playlist` for
-kind "playlist": `yt-dlp --flat-playlist -J`, 200 entries; `quiet`: no
-title search), `fetch_titles(entries)` (oEmbed for YouTube videos, four
-at a time, yt-dlp batches of 15 for the rest, two at a time, which also
-mark playlists: `became_folder`; redrawn as titles arrive),
+kind "playlist": `yt-dlp --flat-playlist -J`, 200 entries, read by pure
+`playlist_links(j, url)`; `quiet`: no title search). A playlist's
+listing (its links only; entries are made again each time, with current
+progress) is kept in memory for `LISTING_KEEP` (30 min, by `os.time`,
+pure `listing_fresh(kept, now)`), at most 20 playlists:
+`kept_listing(url)`, `keep_listing(url, listing)`, `forget_listings()`
+(browser's *Reload library*; D91). `fetch_titles(entries)` (oEmbed
+for YouTube videos, four at a time, yt-dlp batches of 15 for the rest,
+two at a time, which also mark playlists: `became_folder`; redrawn as
+titles arrive),
 `stop_titles()` (the list was left: browser's `cancel_listing`),
 `learned(key, title, channel, entries)`, `found_playlist(key, info)`,
 `resolve(id, key, siblings, cb)` (alone after 15 s), `item_for(path)` (a
@@ -1005,7 +1011,8 @@ State: `stack` of locations `{path, label, is_root?}`, `entries`,
   lists its own folder asynchronously (plays alone after `PLAYLIST_WAIT`
   = 5 s, D64); a server recent goes through `open_server_recent()`
   (`backend:resolve`, D50, D55).
-- `open_menu()`: sort (only where `sortable()`), reload, go to library
+- `open_menu()`: sort (only where `sortable()`), reload (also online
+  playlists' kept listings: `online:forget_listings()`, D91), go to library
   start (whenever not `at_start()`), mark watched / unwatched (both for a
   partly watched video; `mark(entry, watched)` goes to the server, updating a
   *Recently played* copy, or resume.json), remove from Continue watching

@@ -5,6 +5,16 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.9.4 (unreleased)
+
+### Changed
+
+- **YouTube playlists and channels open faster the second time**: coming
+  back to one after a video, or going back to it from a playlist inside
+  it, shows it at once instead of waiting a few seconds for YouTube. The
+  app asks YouTube again after 30 minutes, or right away with *Menu →
+  Reload library*, so a new upload can take up to 30 minutes to appear.
+
 ## v0.9.3 (2026-11-22)
 
 ### Fixed

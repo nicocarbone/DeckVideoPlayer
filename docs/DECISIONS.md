@@ -2875,3 +2875,50 @@ against the code; all but two suggestions were applied:
   0.4 s apart two, L2 likewise; the old code jumped 3 with the same
   burst. The same check passed in the Flatpak build, and the owner
   confirmed the test build on a Deck (v0.9.3).
+
+## D91. Online videos: a playlist's listing kept for 30 minutes
+
+- **Problem** (owner): YouTube playlists and channels take a while to
+  load each time, even when nothing changed. Each showing ran
+  `yt-dlp --flat-playlist -J` (D84), and the library shows a listing
+  again more often than it seems: after every video (the library comes
+  back on idle), on going back from a playlist inside a channel, and
+  for *Recently played* with the videos after it. Measured on the
+  development PC: a 43-video playlist 1.2 s, a channel's 200 newest
+  2.4 s (its 30 newest 1.1 s), yt-dlp's own start 0.4 s of each; a Deck
+  is slower (not measured).
+- **No cheap check for changes:** yt-dlp has no conditional request, a
+  playlist's `modified_date` comes in the same answer, and YouTube's RSS
+  feeds only show the 15 newest videos (no removals or new order). So
+  the gain is in not waiting, not in a faster check.
+- **Choice:** the last good listing of each playlist is kept in memory
+  (`Online.listings`) for `LISTING_KEEP` = 30 minutes and shown again
+  without asking yt-dlp. Only its links (address, key, title, folder
+  flag) and name are kept; entries are made from them each time
+  (`entry_for`), so progress, watched marks, downloads and titles or
+  playlists learned since are current. Errors are never kept. At most 20
+  playlists (the oldest goes). *Reload library* forgets them all
+  (`forget_listings`). Pure `playlist_links(j, url)` (the old parsing,
+  moved) and `listing_fresh(kept, now)`.
+- **Clock:** `os.time` (the wall clock). mpv's `mp.get_time` is
+  `CLOCK_MONOTONIC_RAW`, which stops while the Deck sleeps: a listing
+  from before a night's sleep would have looked minutes old. A clock set
+  back makes a listing old, never older ones new.
+- **Not done:** saving listings to disk and showing them at once on the
+  first open while yt-dlp checks in the background. It would make the
+  first open instant too, but the list could change under the cursor,
+  the library would get a listing twice, and offline it would show
+  videos that can't play: more to get wrong. Listing fewer than 200
+  videos of a channel was not done either (older videos would be gone).
+- **Limits:** a new upload can take up to 30 minutes to appear (or
+  *Reload library*). A video deleted from YouTube meanwhile still shows
+  and fails to play with the usual message. The first open after the
+  app starts waits as before. `.m3u` lists were not slow (a local file;
+  titles already cached in `online.json`); Plex, Jellyfin and DLNA
+  listings are unchanged (their watched marks come from the server).
+- **Tested:** unit tests (parsing, freshness, kept and asked again,
+  progress current on a kept listing, errors not kept, Reload, the
+  20-playlist limit). In headless gamescope with real YouTube: a
+  playlist listed once; after stopping a video at 2:00 it showed again
+  at once with that progress, and on going back and in again; *Reload
+  library* listed it again (seen in the log's yt-dlp runs).
