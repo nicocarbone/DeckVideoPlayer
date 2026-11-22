@@ -771,7 +771,9 @@ function M:hdr_items(items)
 end
 
 -- The online video playing through yt-dlp (D84), or nil: its Quality row.
+-- Not while it is still opening: it could not be reopened yet (D92).
 function M:online_item()
+    if self.opening then return nil end
     local path = mp.get_property("path") or ""
     if path:sub(1, 7) ~= "ytdl://" then return nil end
     local item = self.ctx.servers:item_for(path)

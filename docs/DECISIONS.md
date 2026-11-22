@@ -2922,3 +2922,55 @@ against the code; all but two suggestions were applied:
   playlist listed once; after stopping a video at 2:00 it showed again
   at once with that progress, and on going back and in again; *Reload
   library* listed it again (seen in the log's yt-dlp runs).
+
+## D92. Fourteenth audit (ISSUES.md Part XIV, v0.9.1–v0.9.4)
+
+Gemini's audit of v0.9.1 up to the v0.9.4 test build. Every finding was
+checked against the code: six fixed, two suggestions declined, the
+release bookkeeping done at the tag as always.
+
+- **Videos with no sound (XIV 1.1):** `bv+ba/bv*+ba/b` needs an audio
+  stream to join, or a stream with both; a video whose streams are all
+  video-only (no audio at all) matched nothing ("No playable format").
+  The gap dates from v0.9.0 (`bv*+ba/b`). Now `…/b/bv`, and
+  `bv[vcodec!^=av01]` in the Deck's no-AV1 part above 1080p. Checked
+  with yt-dlp's own `build_format_selector` (the bundled 2026.10.26) on
+  made-up format lists: such a video now gets its best video stream
+  (VP9 rather than AV1 on a Deck at 1440p); normal YouTube formats,
+  combined-only formats and generic links (codecs unknown) get what
+  they got before.
+- **A 0-line screen (XIV 1.2):** `stream_height` took 0 at face value
+  (360p). An unknown or non-positive height counts as 1080. Not seen in
+  use (the window has its size before any video plays), but the guard
+  costs nothing.
+- **Video info from Recently played (XIV 1.3):** its ref knows the link
+  only, so `quality_for` looked under the video's own key, not its
+  list's. It now takes the list the video was last played from
+  (`data.lists`), as playback (`resolve`) does.
+- **Quality while opening (XIV 1.4):** the row is left out until the
+  video has opened (`online_item()` is nil while `opening`), like Look
+  and Grain; an open Video menu gains it when the file loads. Reopening
+  a video that is still opening was not attempted: its start position
+  is already used up by then (taken in the `on_load` hook).
+- **Playlist titles (XIV 1.5):** a blank title counts as none; a
+  playlist without a title shows a label made from its link but no
+  longer stores that label as its title (it stays untitled, so its
+  title is asked for once per session, like any untitled link).
+- **Listings from the future (XIV 1.6):** `keep_listing` drops listings
+  no longer fresh before removing the oldest, so one stamped before the
+  clock was set back can't push out a fresh one.
+- **Declined (XIV 2.1):** (1) joining a second request for a playlist
+  still being listed: it only happens when the playlist is left and
+  opened again within the second or two of the first run; both answers
+  are good and the later one is kept. Sharing one run between callers
+  (quiet or not, each with its own callback) is more code than the
+  extra run costs. (2) The second render on a kept listing: two updates
+  of the same overlay in one call, on a button press; mpv draws the
+  screen once in its next loop, and nothing runs while idle. Changing
+  the library's listing flow for it would risk the cursor handling.
+- **Tested:** unit tests (1127 checks): the format strings, a 0-line
+  screen, Recently played's list Quality, blank and missing playlist
+  titles, a listing from the future dropped first (the last three fail
+  without the fix). In headless gamescope with real YouTube: the Video
+  menu opened while a video was opening had no Quality row; once the
+  video played, the same open menu showed *Quality: Auto (1080p)*.

@@ -1,11 +1,174 @@
 # Code Audit: Findings & Optimization Opportunities
 
-**Status review (2026-11-19, v0.9.0 work):** every finding in Parts I–XIII was checked
+**Status review (2026-11-22, v0.9.4 work):** every finding in Parts I–XIV was checked
 against the code. Each has a **Status** line: *Solved*, *Partly solved*
 (the rest declined, with the reason), *Not solved (declined)* with the
 reason, *Accepted (by design)*, or *Not a bug* (the finding doesn't match the code). The reasoning for each part is in
 `docs/DECISIONS.md` (Part I: D20–D26, II: D35, III: D39, IV: D40, V: D45,
-VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78, XII: D80, XIII: D85).
+VI: D49, VII: D53, VIII: D59, IX: D68, X: D70, XI: D78, XII: D80, XIII: D85,
+XIV: D92).
+
+---
+
+# Part XIV — v0.9.1–v0.9.4 Audit: HDR Format Selection, Online Stream Quality, Trigger Debouncing & Playlist Cache (2026-11-22)
+
+All `1116` Lua checks and `17` Python tests in `tests/run.sh` pass. The point releases since `v0.9.0` (`D86`–`D91`: `dvp/online.lua`, `dvp/player.lua`, `dvp/videomemory.lua`, `dvp/memory.lua`, `dvp/input.lua`, `dvp/browser.lua`, `dvp/config.lua`, `main.lua`, `.github/workflows/build.yml`, and `.github/workflows/update-yt-dlp.yml`) were audited and tested against `yt-dlp 2026.03.17` and `mpv v0.41.0`:
+* **CI actions on Node.js 24 (D87):** all four updated action pins (`actions/checkout`, `flatpak/flatpak-github-actions/flatpak-builder`, `actions/download-artifact`, `softprops/action-gh-release`) use full 40-character commit SHAs and retain minimal workflow permissions (`contents: read` default, elevated per job only where needed).
+* **Analog trigger debouncing (`dvp/input.lua`, D90):** `M.trigger_pull` uses independent per-trigger state tables, monotonic `mp.get_time()`, and properly updates `st.last` on `up`/`repeat` events without blocking the opposite trigger or delaying the first pull. No issues found.
+* **Security / vulnerability check:** no new injection, sandbox-escape, or secret-handling issues were introduced in `v0.9.1`–`v0.9.4`; `VideoMemory.normalize` validates stored `quality` values strictly against `config.STREAM_QUALITIES`.
+
+Below are the verified bugs, optimization opportunities, and pre-release items found in `v0.9.1`–`v0.9.4`.
+
+---
+
+## 1. Functional Bugs (`dvp/online.lua`, `dvp/player.lua`, `main.lua`)
+
+### 1.1. `dvp/online.lua` (v0.9.1, D86): `M.format_spec` (`bv+ba/bv*+ba/b`) fails with *"No playable format"* on silent video-only streams
+
+* **Severity:** Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.format_spec`, lines 377–384)
+* **Problem:**
+  ```lua
+  local format = "bv+ba/bv*+ba/b"
+  if deck and height > 1080 then
+      format = "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/" .. format
+  end
+  ```
+  In `yt-dlp`, `bv+ba` and `bv*+ba` require a separate audio-only stream (`ba`), and `b` only matches combined streams containing **both** video and audio. For any video that has only a video-only stream and no audio track (`acodec = "none"`, e.g. silent clips on YouTube/Vimeo/Reddit or muted embeds), `yt-dlp` selects nothing and fails with `"No playable format for this video"`.
+  Verified directly against `yt_dlp.YoutubeDL.build_format_selector`:
+  * `bv+ba/bv*+ba/b` and the Deck `> 1080` variant both return `[]` on a `1080p` video-only stream (`vcodec = 'avc1.640028', acodec = 'none'`).
+  * Appending `/bv` (`bv+ba/bv*+ba/b/bv`) selects the stream (`['137']`).
+  *(Note: on a site offering both a low-resolution video-only + audio-only pair and a higher-resolution combined stream, `bv+ba` also takes precedence over `b`, verified `['vo360+ao']` over `comb1080`, which is an expected trade-off of D86 for multi-audio YouTube HDR.)*
+* **Suggested Fix:** Append `/bv` (or `/b*`) as the final fallback in `M.format_spec` (and `/bv[vcodec!^=av01]` before the AV1 fallback on a Deck above 1080p).
+
+
+> **Status: Solved** (D92). Confirmed with yt-dlp's own `build_format_selector` (2026.10.26) on made-up format lists: a video with only video streams matched nothing. Now `bv+ba/bv*+ba/b/bv`, and `bv[vcodec!^=av01]` before the AV1 fallback on a Deck above 1080p (such a video gets VP9 there). Normal, combined-only and generic (unknown codec) format lists choose what they chose before. The gap dated from v0.9.0 (`bv*+ba/b`). Unit tests.
+
+---
+
+### 1.2. `dvp/online.lua` & `main.lua` (v0.9.2, D88/D89): `Online.stream_height(0)` returns `360` (360p) instead of falling back to `1080`
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.stream_height` lines 342–350, `M.quality_label` lines 354–357)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`on_load` priority 5, line 414)
+* **Problem:**
+  ```lua
+  function M.stream_height(screen_h, quality)
+      local n = tonumber(quality)
+      if n then return n end
+      screen_h = tonumber(screen_h) or 1080
+      for _, h in ipairs(HEIGHTS) do
+          if h >= screen_h * 0.95 then return h end
+      end
+      return 2160
+  end
+  ```
+  In Lua, `0` is truthy, so `tonumber(0) or 1080` evaluates to `0`, and `HEIGHTS[1]` (`360 >= 0`) matches immediately. `main.lua` line 414 passes `mp.get_property_number("osd-height")` directly (unlike `main.lua` line 610, which explicitly guards `(d.h or 0) > 0` before updating `online.screen_h`). Whenever `osd-height` is `0` (e.g. before the window is sized), streaming silently picks **360p** and the menu shows `"Auto (360p)"`.
+  Verified in `mpv`: `Online.stream_height(0)` → `360`, `Online.stream_height(0, "auto")` → `360`, `Online.quality_label("auto", 0)` → `"Auto (360p)"` (whereas `nil` returns `1080` / `"Auto (1080p)"`).
+* **Suggested Fix:** Treat non-positive heights as unknown: `screen_h = tonumber(screen_h); if not screen_h or screen_h <= 0 then screen_h = 1080 end` (and optionally fall back to `self.screen_h` in `Online:stream_options`).
+
+
+> **Status: Solved** (D92). An unknown or non-positive height counts as 1080 in `stream_height` (so also in `quality_label`). Not seen in use (the window is sized before a video plays), but the guard is free. Unit tests.
+
+---
+
+### 1.3. `dvp/online.lua` (v0.9.2, D89): *Video info* from *Recently played* ignores the list's remembered *Quality*
+
+* **Severity:** Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.recent_ref` lines 330–332, `M:video_info` line 1157)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/memory.lua` (`M.list_key`, lines 46–52)
+* **Problem:**
+  Entries in *Recently played* carry `ref = Online.recent_ref("web", url)`, which sets `parent = nil` even when `self.data.lists[url]` knows which `.m3u` list or playlist the video was played from. When the user presses **View** (*Video info*) on a *Recently played* online video, `Online:video_info(ref, cb)` calls `self:stream_format(self.screen_h, ref)` → `Memory.list_key(ref)`, which falls back to `online:web:item:<url>` instead of `online:web:list:<list_path>`.
+  Verified in `mpv`: after setting Quality to `1440` for a list, `on:quality_for(list_item)` returns `"1440"`, while `on:quality_for(Online.recent_ref("web", url))` returns `"auto"` (even with `on.data.lists[url] = list_path` set). As a result, *Video info* reports the wrong resolution/codec compared to what playback (via `Online:resolve`, which restores `parent`) will actually play.
+* **Suggested Fix:** In `Online:video_info` (or `Online:quality_for`), when `ref.parent` is nil and `self.data.lists[ref.key]` exists, pass a ref with `parent = self.data.lists[ref.key]` (or look up `self.data.lists[item.key]` inside `quality_for`).
+
+
+> **Status: Solved** (D92). `quality_for` takes the list a ref without one was last played from (`data.lists`), as playback does; the ref itself is left alone. Unit tests.
+
+---
+
+### 1.4. `dvp/player.lua` & `main.lua` (v0.9.2, D89): Changing *Quality* while a video is still opening shows the toast and saves the setting, but `ctx.reopen()` silently does nothing
+
+* **Severity:** Low–Medium (Bug)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/player.lua` (`M:online_item` lines 774–779, `M:set_quality` lines 800–807)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/main.lua` (`ctx.reopen`, lines 342–347)
+* **Problem:**
+  After `start-file` fires (while `"Opening…"` is shown and `yt-dlp` is still fetching the stream), `state.screen` is `"player"`, `mp.get_property("path")` is already `"ytdl://..."`, and `player:online_item()` returns the item — so the user can open **Menu → Video → Quality** and pick a new quality before `file-loaded` arrives. `set_quality` stores the choice in `videomemory` and shows the 3 s toast `"Quality: 1440p for this list"`, then calls `ctx.reopen()`. Because `state.current_path` is only set in `file-loaded` (line 531), `ctx.reopen()` sees `state.current_path == nil` and returns immediately, leaving the current video loading at the old quality and the Video menu open.
+* **Suggested Fix:** In `ctx.reopen`, fall back to `state.loading_path` when `state.current_path` is nil (only storing `state.pending_start[path] = mp.get_property_number("time-pos")` when `state.current_path` is already loaded), or hide/disable *Quality* while `self.opening` is true.
+
+
+> **Status: Solved** (D92), with the second suggestion: *Quality* is left out of the Video menu while the video is opening (`online_item()` is nil while `opening`), and an open Video menu gains it when the file loads (checked in headless gamescope with real YouTube). Reopening a video that is still opening was not done: its start position has already been taken in the `on_load` hook.
+
+---
+
+### 1.5. `dvp/online.lua` (v0.9.4, D91): `playlist_links` returns empty `name` for `j.title == ""`, and `list_playlist` persists `fallback_label(url)` into `online.json` when `j.title` is missing
+
+* **Severity:** Medium (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M.playlist_links` lines 498–500, `M:list_playlist` lines 841–842)
+* **Problems:**
+  1. Line 499 checks `type(j.title) == "string" and j.title or M.fallback_label(url)` without trimming or checking `~= ""` (unlike line 509 for item titles). Verified: `{title = ""}` yields `listing.name = ""` and `{title = "   "}` yields `listing.name = "   "`, which also propagates as an empty `item.show`.
+  2. When `j.title` is `nil` (missing from yt-dlp's JSON), `listing.name` falls back to `M.fallback_label(url)` (e.g. `"YouTube playlist PL12345"`), and line 842 unconditionally passes `listing.name` to `self:learned(url, listing.name, listing.channel)` — permanently writing the fallback placeholder string into `online.json` `data.titles[url]` as a learned title.
+* **Suggested Fix:** Trim `j.title` in `M.playlist_links` and keep a separate `title` field (`title = trimmed ~= "" and trimmed or nil`, `name = title or M.fallback_label(url)`), calling `self:learned(url, listing.title, listing.channel)` only when `listing.title` is non-nil.
+
+
+> **Status: Solved** (D92). `playlist_links` trims the title and keeps it apart (`title`, nil without one; `name` = title or the label from the link); only a real title is learned. Unit tests.
+
+---
+
+### 1.6. `dvp/online.lua` (v0.9.4, D91): `keep_listing` pins stale future-dated entries after a backward clock jump, evicting fresh playlists instead
+
+* **Severity:** Low (Bug)
+* **Location:** `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:keep_listing`, lines 864–873)
+* **Problem:**
+  `M.listing_fresh(kept, now)` correctly rejects entries with `kept.t > now` (handling a clock set backward, e.g. NTP correcting a fast RTC after boot). However, `M:keep_listing` evicts purely by minimum `l.t` (`l.t < self.listings[oldest].t`) without purging expired/unfresh entries first.
+  Verified in `mpv`: caching one playlist at `t = 2000000000`, moving the clock back to `1795000000`, and caching 20 fresh playlists kept the stale future-dated entry (`FUTURE_IS_FRESH = false`, `FUTURE_STILL_KEPT = true`) while evicting a fresh playlist instead.
+* **Suggested Fix:** In `M:keep_listing`, remove any entry where `not M.listing_fresh(l, now)` before counting/evicting the oldest remaining entry.
+
+
+> **Status: Solved** (D92). `keep_listing` drops listings that are no longer fresh (a future one included) before removing the oldest. A unit test fails without it.
+
+---
+
+## 2. Optimization Opportunities & Pre-Release Bookkeeping
+
+### 2.1. `dvp/online.lua` & `dvp/browser.lua` (v0.9.4, D91): Duplicate in-flight `list_playlist` calls and double `browser:render()` on cache hits
+
+* **Severity:** Low (Optimization)
+* **Location:**
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/online.lua` (`M:list_playlist`, lines 826–850)
+  * `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/browser.lua` (`M:load_server` lines 232–250, `M:show` lines 297–307, `M:reload` lines 309–316, `M:enter` lines 345–351, `M:go_back` lines 353–374)
+* **Notes:**
+  1. **Coalescing in-flight playlist fetches:** If a user opens an uncached playlist, backs out before `yt-dlp --flat-playlist -J` finishes (1–3+ s), and opens it again (or plays a video from *Recently played* while it is loading), `list_playlist` spawns a second concurrent `yt-dlp` subprocess for the exact same `url` instead of attaching the new callback to the in-flight request (or aborting the old one).
+  2. **Double render on cache hits:** When `self:kept_listing(url)` hits, `list_playlist` invokes `cb(entries)` synchronously inside `Browser:load_server()`, which runs `select_path` and `self:render()`, and then `Browser:show()` / `reload()` / `enter()` / `go_back()` immediately calls `select_path` (when `not self.loading`) and `self:render()` a second time in the same tick. Checking `if not self.loading` or skipping the redundant render in `load_server` avoids drawing the browser OSD twice per cached navigation.
+
+
+> **Status: Not solved (declined)** (D92). (1) Only when a playlist is left and opened again while its first listing runs (a second or two); both answers are good and the later one is kept. Sharing one run between callers with their own callbacks and `quiet` flags is more code than the extra run costs. (2) Two updates of the same overlay in one call, on a button press; mpv draws once in its next loop and nothing runs while idle. Changing the library's listing flow for it would risk its cursor handling.
+
+---
+
+### 2.2. Pre-Release Bookkeeping (`v0.9.4`)
+
+* **Severity:** Info
+* **Location:**
+  * `CHANGELOG.md` line 8 (`## v0.9.4 (unreleased)`) vs `app/share/deckvideoplayer/mpv/scripts/deckplayer/dvp/version.lua` (`"0.9.3"`) and `packaging/flatpak/io.github.nicocarbone.DeckVideoPlayer.metainfo.xml` (latest `<release>` is `0.9.3`).
+* **Note:** Bump `version.lua`, add `<release version="0.9.4">` to `metainfo.xml`, and date `CHANGELOG.md` when tagging `v0.9.4`.
+
+
+> **Status: Accepted (by design)**. Done at the v0.9.4 tag, as for every release (`docs/DEVELOPMENT.md` §7; `tests/run.sh` checks the CHANGELOG section and the metainfo `<release>`).
+
+---
+
+## 3. v0.9.1–v0.9.4 (Part XIV) Summary Checklist
+
+> Done in D92, except the two optional items of 2.1 (declined, see there); *Quality* is left out while a video opens rather than reopened; the release bookkeeping is done when tagging.
+
+- [x] **Format Selection (`dvp/online.lua`, v0.9.1):** Add `/bv` (or `/b*`) fallback in `M.format_spec` so silent video-only streams don't fail with *"No playable format"*.
+- [x] **Streaming Quality (`dvp/online.lua`, `dvp/player.lua`, `main.lua`, v0.9.2):** Treat `screen_h <= 0` as unknown (`1080`) in `M.stream_height`; resolve `self.data.lists[ref.key]` as `parent` in `Online:video_info` / `quality_for` so *Video info* from *Recently played* uses the list's remembered Quality; handle `ctx.reopen()` (or guard *Quality*) when called while a video is still opening (`state.current_path == nil`).
+- [x] **Playlist Cache (`dvp/online.lua`, `dvp/browser.lua`, v0.9.4):** Trim `j.title` in `M.playlist_links` and keep real `title` separate from `fallback_label(url)` so empty titles fall back properly and missing titles aren't persisted to `online.json`; purge non-fresh entries in `M:keep_listing` before evicting by oldest `t`; optionally coalesce duplicate in-flight `list_playlist` runs and avoid double-rendering on synchronous cache hits.
+- [ ] **Release Bookkeeping (`v0.9.4`):** Update `dvp/version.lua`, `metainfo.xml`, and `CHANGELOG.md` when tagging `v0.9.4`.
 
 ---
 

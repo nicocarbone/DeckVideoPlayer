@@ -338,11 +338,13 @@ local HEIGHTS = {360, 480, 720, 1080, 1440, 2160}
 
 -- Pure: the height to stream at on a `screen_h`-line screen, with
 -- [online] stream_quality: a number is that height on any screen, "auto"
--- (or nothing) follows the screen (D88).
+-- (or nothing) follows the screen (D88). An unknown screen (nil, or 0
+-- before the window has a size) counts as 1080 lines.
 function M.stream_height(screen_h, quality)
     local n = tonumber(quality)
     if n then return n end
-    screen_h = tonumber(screen_h) or 1080
+    screen_h = tonumber(screen_h)
+    if not screen_h or screen_h <= 0 then screen_h = 1080 end
     for _, h in ipairs(HEIGHTS) do
         if h >= screen_h * 0.95 then return h end
     end
@@ -373,12 +375,13 @@ end
 -- order. On a Deck above 1080p, no AV1 when there is anything else (D62).
 -- A video-only stream first (`bv`, then `bv*`): YouTube's streams with
 -- sound carry a language when a video has several, and sorted by
--- language first they beat every HDR stream (D86).
+-- language first they beat every HDR stream (D86). Last, a video with
+-- no sound at all: no audio stream to join, and `b` wants both (D92).
 function M.format_spec(height, device)
     local deck = device == "deck-oled" or device == "deck-lcd"
-    local format = "bv+ba/bv*+ba/b"
+    local format = "bv+ba/bv*+ba/b/bv"
     if deck and height > 1080 then
-        format = "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/" .. format
+        format = "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/bv[vcodec!^=av01]/" .. format
     end
     return format, string.format("lang,res:%d,hdr:12,channels", height)
 end
@@ -492,12 +495,17 @@ function M.parse_info(j)
             playlist = (j._type == "playlist" or j._type == "multi_video") or nil}
 end
 
--- Pure: what a flat yt-dlp listing `j` of playlist `url` shows: {name,
+-- Pure: what a flat yt-dlp listing `j` of playlist `url` shows: {title
+-- (nil without one), name (the title, else a label made from the link),
 -- channel, links}, links {url, key, title, folder} in its order, each
 -- link once; playlists in it (a channel's playlists tab) are folders.
 function M.playlist_links(j, url)
-    local listing = {name = type(j.title) == "string" and j.title or M.fallback_label(url),
-                     channel = j.channel or j.uploader, links = {}}
+    local title = type(j.title) == "string" and util.trim(j.title) or ""
+    local listing = {title = title ~= "" and title or nil,
+                     channel = type(j.channel) == "string" and j.channel
+                         or (type(j.uploader) == "string" and j.uploader or nil),
+                     links = {}}
+    listing.name = listing.title or M.fallback_label(url)
     local seen = {}
     for _, e in ipairs(type(j.entries) == "table" and j.entries or {}) do
         local link = type(e) == "table" and (e.url or e.webpage_url)
@@ -682,6 +690,12 @@ end
 -- list (D89; `remembered_quality(item)`, set by main.lua, asks
 -- dvp/videomemory.lua), else [online] stream_quality (D88).
 function M:quality_for(item)
+    -- ("Recently played" knows a video by its link only: its list is the
+    -- one it was last played from, as when it plays.)
+    if item and item.parent == nil and type(item.key) == "string" and self.data.lists[item.key] then
+        item = {backend = M.ID, machine = item.machine or M.MACHINE, key = item.key, rating_key = item.key,
+                kind = "online", parent = self.data.lists[item.key]}
+    end
     local q = item and self.remembered_quality and self.remembered_quality(item)
     return q or (self.cfg and self.cfg.online.stream_quality) or "auto"
 end
@@ -839,7 +853,10 @@ function M:list_playlist(loc, cb, quiet)
         local j = res.status == 0 and utils.parse_json(res.stdout or "") or nil
         if type(j) ~= "table" then return cb(nil, (M.error_text(res.stderr))) end
         local listing = M.playlist_links(j, url)
-        if loc.untitled or not self:title_of(url) then self:learned(url, listing.name, listing.channel) end
+        -- (Only a real title: without one the playlist stays untitled.)
+        if listing.title and (loc.untitled or not self:title_of(url)) then
+            self:learned(url, listing.title, listing.channel)
+        end
         for _, link in ipairs(listing.links) do
             if link.title and not link.folder then self.data.titles[link.key] = {title = link.title, t = os.time()} end
         end
@@ -860,14 +877,20 @@ function M:kept_listing(url)
 end
 
 -- Keeps playlist `url`'s listing (an answer, never an error), at most
--- LISTINGS_MAX of them: the oldest goes.
+-- LISTINGS_MAX of them: those no longer fresh go (also any from "the
+-- future" after the clock was set back), then the oldest.
 function M:keep_listing(url, listing)
-    listing.t = self.clock()
+    local now = self.clock()
+    listing.t = now
     self.listings[url] = listing
     local n, oldest = 0, nil
     for u, l in pairs(self.listings) do
-        n = n + 1
-        if not oldest or l.t < self.listings[oldest].t then oldest = u end
+        if not M.listing_fresh(l, now) then
+            self.listings[u] = nil
+        else
+            n = n + 1
+            if not oldest or l.t < self.listings[oldest].t then oldest = u end
+        end
     end
     if n > LISTINGS_MAX then self.listings[oldest] = nil end
 end

@@ -685,10 +685,11 @@ extension, not a wiki page: played as is), `is_manifest` (`.m3u8` / `.mpd`: down
 `parse_m3u(text)` → links `{url, key, title, folder}` and skipped
 `{count, by}`, `main_reason(by)`, `fallback_label(url, clean)`, `site`,
 `oembed_url`, `recent_key` / `parse_recent_key` / `recent_ref`
-(`online:<canonical link>`), `stream_height(screen_h, quality)`,
+(`online:<canonical link>`), `stream_height(screen_h, quality)` (an
+unknown or 0-line screen counts as 1080),
 `quality_label(quality, screen_h)` ("1440p", "Auto (1080p)"),
 `download_height(quality, device)`, `format_spec(height, device)` →
-yt-dlp `-f` and `-S`, `sub_langs(slang)` (`en($|-.*),es($|-.*)`),
+yt-dlp `-f` and `-S` (ends in `/bv`: a video with no sound, D92), `sub_langs(slang)` (`en($|-.*),es($|-.*)`),
 `common_args(cookies)`,
 `raw_options(sort, langs, cookies)` (mpv's `ytdl-raw-options`),
 `error_text(stderr)` → message, retry, `parse_info(json)` (a `-J`
@@ -704,7 +705,8 @@ cookies copies a crash left; `save()` keeps the 3000 most recent titles.
 of its own, or nil), `drop_copy(copy)`, `shutdown()` (deletes the copies
 of runs still going), `ytdlp(args, purpose, cb)` (runs yt-dlp with the
 common arguments, deletes its copy after), `quality_for(item)` (the
-Video menu's Quality for its list through `remembered_quality(item)`,
+Video menu's Quality for its list (a *Recently played* ref without one:
+`data.lists`, D92) through `remembered_quality(item)`,
 which main.lua points at `videomemory:quality`, else `[online]
 stream_quality`, D89), `stream_format(screen_h, item)` (`-f` and `-S`
 with that quality; Video info uses it too), `stream_options(screen_h, item)`
@@ -715,11 +717,13 @@ playlist; a downloaded copy is the entry's path), `refresh_entries(entries)`
 (after downloads changed), `read_list(path, cb)` (`head -c`, given up
 after 10 s), `list(loc, cb, quiet)` (a list file, or `list_playlist` for
 kind "playlist": `yt-dlp --flat-playlist -J`, 200 entries, read by pure
-`playlist_links(j, url)`; `quiet`: no title search). A playlist's
+`playlist_links(j, url)`: `title` nil without one, `name` then a label
+from the link; `quiet`: no title search). A playlist's
 listing (its links only; entries are made again each time, with current
 progress) is kept in memory for `LISTING_KEEP` (30 min, by `os.time`,
 pure `listing_fresh(kept, now)`), at most 20 playlists:
-`kept_listing(url)`, `keep_listing(url, listing)`, `forget_listings()`
+`kept_listing(url)`, `keep_listing(url, listing)` (drops listings no
+longer fresh first), `forget_listings()`
 (browser's *Reload library*; D91). `fetch_titles(entries)` (oEmbed
 for YouTube videos, four at a time, yt-dlp batches of 15 for the rest,
 two at a time, which also mark playlists: `became_folder`; redrawn as
@@ -1081,7 +1085,8 @@ Layout constants: `HEADER_H`, `FOOTER_H`, `ROW_H`, `ROW_GAP`, `FS`.
   `open_subtitle_menu` (with "Off", then *Download subtitles…* when
   `ctx.subtitles:available(path)`),
   `open_video_menu` (D52: video tracks when there is more than one,
-  *Quality* for an online video playing through yt-dlp (`online_item()`;
+  *Quality* for an online video playing through yt-dlp (`online_item()`,
+  nil while it is still opening, D92;
   `open_quality_menu(item)` lists `quality_items(item)`, and
   `set_quality(item, q)` remembers it for the list and calls
   `ctx.reopen()`, D89), picture (fit / fill = `panscan 1` / stretch = `keepaspect no`), match

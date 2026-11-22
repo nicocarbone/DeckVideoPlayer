@@ -1936,6 +1936,9 @@ end
     eq("stream height 4K", ON.stream_height(2160), 2160)
     eq("stream height 8K screen", ON.stream_height(4320), 2160)
     eq("stream height unknown", ON.stream_height(nil), 1080)
+    eq("stream height: no window size yet", ON.stream_height(0), 1080)
+    eq("stream height: negative", ON.stream_height(-1, "auto"), 1080)
+    eq("quality label: no window size yet", ON.quality_label("auto", 0), "Auto (1080p)")
     eq("stream height auto: the screen", ON.stream_height(800, "auto"), 1080)
     eq("stream height set: deck 1440", ON.stream_height(800, "1440"), 1440)
     eq("stream height set: lower than the screen", ON.stream_height(2160, "1080"), 1080)
@@ -1950,12 +1953,13 @@ end
     eq("download height best", ON.download_height("best", "tv"), 4320)
     local f1, s1 = ON.format_spec(2160, "deck-oled")
     eq("format deck 4K: no AV1 first", f1,
-       "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/bv+ba/bv*+ba/b")
+       "bv[vcodec!^=av01]+ba/bv*[vcodec!^=av01]+ba/b[vcodec!^=av01]/bv[vcodec!^=av01]/bv+ba/bv*+ba/b/bv")
     eq("format sort: original audio, resolution, HDR, surround", s1, "lang,res:2160,hdr:12,channels")
     local f2 = ON.format_spec(1080, "deck-oled")
-    eq("format deck 1080: AV1 fine", f2, "bv+ba/bv*+ba/b")
-    eq("format tv 4K: AV1 fine", (ON.format_spec(2160, "tv")), "bv+ba/bv*+ba/b")
+    eq("format deck 1080: AV1 fine", f2, "bv+ba/bv*+ba/b/bv")
+    eq("format tv 4K: AV1 fine", (ON.format_spec(2160, "tv")), "bv+ba/bv*+ba/b/bv")
     check("format: a video-only stream first (D86)", f2:find("bv+ba", 1, true) == 1)
+    check("format: a video with no sound last (D92)", f1:sub(-3) == "/bv" and f2:sub(-3) == "/bv")
     eq("sub langs", ON.sub_langs("eng,spa"), "en($|-.*),es($|-.*)")
     eq("sub langs default", ON.sub_langs(""), "en($|-.*)")
     eq("sub langs dedupe", ON.sub_langs("por,pt-br,pob"), "pt($|-.*)")
@@ -2089,7 +2093,7 @@ end
     local on = ON.new(nil, {resume = res, cfg = cfgo, device = "deck-oled"})
     -- streaming: the screen's height by default (1080p on a Deck), or stream_quality (D88)
     eq("stream format: deck default 1080p", select(2, on:stream_format(800)), "lang,res:1080,hdr:12,channels")
-    eq("stream format: deck default AV1 fine", (on:stream_format(800)), "bv+ba/bv*+ba/b")
+    eq("stream format: deck default AV1 fine", (on:stream_format(800)), "bv+ba/bv*+ba/b/bv")
     local cfg1440 = config.from_text("[online]\nstream_quality = 1440\n")
     local f1440, s1440 = ON.new(nil, {resume = res, cfg = cfg1440, device = "deck-oled"}):stream_format(800)
     check("stream format: deck 1440p, no AV1 first", s1440 == "lang,res:1440,hdr:12,channels"
@@ -2105,6 +2109,12 @@ end
     eq("quality for: chosen for the list", onq:quality_for(qa), "1440")
     eq("quality for: other list, config", onq:quality_for(qb), "auto")
     eq("quality for: unknown link", onq:quality_for(nil), "auto")
+    -- "Recently played" knows the link only: the list it was played from (D92)
+    local qr = ON.recent_ref("web", "https://example.org/r")
+    eq("quality for: recent, list unknown", onq:quality_for(qr), "auto")
+    onq.data.lists["https://example.org/r"] = "/v/A.m3u"
+    eq("quality for: recent, its list's", onq:quality_for(qr), "1440")
+    check("quality for: the ref is left alone", qr.parent == nil)
     local fq, sq = onq:stream_format(800, qa)
     check("stream format: the list's 1440p on a Deck", sq == "lang,res:1440,hdr:12,channels"
         and fq:find("bv[vcodec!^=av01]+ba", 1, true) == 1)
@@ -2273,7 +2283,11 @@ end
             and l[2].title == nil and l[3].folder and l[3].key == "https://www.youtube.com/playlist?list=PLin"
             and l[4].folder and l[5].url == "https://example.org/v.mp4")
         check("playlist links: no title, no entries", ON.playlist_links({}, PL).name == "YouTube playlist PLtest"
-            and #ON.playlist_links({entries = "x"}, PL).links == 0)
+            and ON.playlist_links({}, PL).title == nil and #ON.playlist_links({entries = "x"}, PL).links == 0)
+        local pb = ON.playlist_links({title = "   ", channel = 5, uploader = "Up"}, PL)
+        check("playlist links: blank title (D92)", pb.title == nil and pb.name == "YouTube playlist PLtest"
+            and pb.channel == "Up")
+        eq("playlist links: title trimmed", ON.playlist_links({title = " Talks "}, PL).title, "Talks")
         -- a listing is kept for LISTING_KEEP seconds, by the wall clock
         local K = ON.LISTING_KEEP
         check("listing fresh", ON.listing_fresh({t = 100}, 100) and ON.listing_fresh({t = 100}, 100 + K - 1))
@@ -2333,6 +2347,26 @@ end
         check("listing: the newest kept", #kruns == n and got and #got == 2)
         open(PL)
         check("listing: the oldest gone", #kruns == n + 1 and first_link(kruns[n + 1].args) == PL)
+        -- a playlist without a title: shown with a label, none learned (D92)
+        local PN = "https://www.youtube.com/playlist?list=PLnotitle"
+        open(PN)
+        kruns[#kruns].cb({status = 0, stdout = '{"entries":[{"url":"https://www.youtube.com/watch?v=ccccccccccc"}]}'})
+        check("listing: no title", got and #got == 1 and got[1].server.show == "YouTube playlist PLnotitle"
+            and ok:title_of(PN) == nil)
+        -- a listing from "the future" (the clock set back) goes first, not a fresh one (D92)
+        ok:forget_listings()
+        now = 5000
+        open(PL)
+        kruns[#kruns].cb(answer)
+        now = 2000
+        for i = 1, 20 do
+            now = now + 1
+            open(PL .. i)
+            kruns[#kruns].cb(answer)
+        end
+        n = #kruns
+        open(PL .. "1")
+        check("listing: future one dropped, fresh ones kept", #kruns == n and ok.listings[PL] == nil)
     end
     for _, n in ipairs(util.readdir(dir, "files") or {}) do os.remove(dir .. "/" .. n) end
     os.remove(dir)

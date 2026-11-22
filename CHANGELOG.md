@@ -15,6 +15,16 @@ Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
   app asks YouTube again after 30 minutes, or right away with *Menu →
   Reload library*, so a new upload can take up to 30 minutes to appear.
 
+### Fixed
+
+- **Online videos with no sound at all didn't play** ("No playable
+  format"). They play now.
+- **Video info from *Recently played*** showed the quality the screen
+  gets, not the one chosen in the Video menu for the video's list.
+- **Quality chosen while a video was still opening** was saved but not
+  applied until the next video. *Quality* now appears in the Video menu
+  once the video has opened.
+
 ## v0.9.3 (2026-11-22)
 
 ### Fixed
