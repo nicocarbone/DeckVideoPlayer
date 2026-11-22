@@ -230,7 +230,10 @@ A, `_RIGHT` = B, `_LEFT` = X, `_UP` = Y, `GAMEPAD_START` = Menu,
 `GAMEPAD_BACK` = View, shoulders, triggers, D-pad, left stick) plus keyboard
 keys for development. `REPEATABLE` actions auto-repeat while held (mpv's
 `input-ar-delay/rate`). `init(dispatch)` registers one forced binding per
-key.
+key. The two gamepad triggers (`ANALOG`) get complex bindings instead: the
+pure `trigger_pull(st, event, now)` counts a down as a pull only after
+`SETTLE` (0.12 s) without events of that trigger and `COOLDOWN` (0.25 s)
+after its last pull (D90).
 
 ## `dvp/library.lua`: sources and listings
 

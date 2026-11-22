@@ -1672,6 +1672,30 @@ do
     os.remove(dir)
 end
 
+-- Analog triggers: one pull is one press (D90)
+do
+    local Input = require "dvp.input"
+    local function pulls(events)
+        local st, n = {}, 0
+        for _, ev in ipairs(events) do
+            if Input.trigger_pull(st, ev[1], ev[2]) then n = n + 1 end
+        end
+        return n
+    end
+    eq("trigger: one pull", pulls({{"down", 10}, {"up", 10.2}}), 1)
+    eq("trigger: chatter at the threshold", pulls({{"down", 10}, {"up", 10.004}, {"down", 10.008},
+        {"up", 10.012}, {"down", 10.016}, {"up", 10.3}, {"down", 10.304}, {"up", 10.308}}), 1)
+    eq("trigger: a stick's release while held", pulls({{"down", 10}, {"up", 10.05}, {"down", 10.053},
+        {"up", 10.25}}), 1)
+    eq("trigger: two pulls", pulls({{"down", 10}, {"up", 10.15}, {"down", 10.45}, {"up", 10.6}}), 2)
+    eq("trigger: too soon after a pull", pulls({{"down", 10}, {"up", 10.02}, {"down", 10.2}}), 1)
+    eq("trigger: repeats don't count", pulls({{"down", 10}, {"repeat", 10.5}, {"repeat", 10.55}}), 1)
+    eq("trigger: a press event", pulls({{"press", 10}, {"press", 11}}), 2)
+    eq("trigger: up alone", pulls({{"up", 10}}), 0)
+    check("trigger keys are analog only", Input.ANALOG.GAMEPAD_RIGHT_TRIGGER and Input.ANALOG.GAMEPAD_LEFT_TRIGGER
+        and not Input.ANALOG.END)
+end
+
 -- Video menu choices remembered per movie or season (D73)
 do
     local VM = require "dvp.videomemory"

@@ -5,6 +5,14 @@ text of its GitHub release (CI extracts it, see `docs/DEVELOPMENT.md` §7),
 so write it for people installing the app, and add one for every release.
 Design details behind each change are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## v0.9.3 (unreleased)
+
+### Fixed
+
+- **L2 / R2 jumped several chapters at once** on a Steam Deck (seen with
+  a Plex film): the triggers are analog, and one pull could count as
+  several presses. One pull now moves one chapter.
+
 ## v0.9.2 (2026-11-21)
 
 ### New

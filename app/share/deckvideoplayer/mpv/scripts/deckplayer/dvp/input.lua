@@ -33,12 +33,42 @@ local REPEATABLE = {
                             -- must not go on to the next chapter
 }
 
+-- Analog triggers (D90): mpv turns them into key presses at a fixed
+-- threshold with no hysteresis, so one pull crossing it slowly gives
+-- down/up/down… within milliseconds, and so does a touch on a stick while
+-- a trigger is held (its "up" ends the trigger's press in mpv). A pull
+-- counts only when the trigger's events have been quiet for SETTLE
+-- seconds and COOLDOWN seconds after the last pull. It acts at once: no
+-- delay on a single pull.
+M.ANALOG = {GAMEPAD_LEFT_TRIGGER = true, GAMEPAD_RIGHT_TRIGGER = true}
+M.SETTLE, M.COOLDOWN = 0.12, 0.25
+
+-- Pure: whether a trigger's key event ("down", "up", "repeat", "press")
+-- at `now` (seconds) is a new pull. `st` keeps the time of the trigger's
+-- last event and of its last pull.
+function M.trigger_pull(st, event, now)
+    local quiet = st.last == nil or now - st.last >= M.SETTLE
+    st.last = now
+    if event ~= "down" and event ~= "press" then return false end
+    if not quiet or (st.pull and now - st.pull < M.COOLDOWN) then return false end
+    st.pull = now
+    return true
+end
+
 function M.init(dispatch)
     for action, keys in pairs(M.KEYS) do
         for i, key in ipairs(keys) do
-            mp.add_forced_key_binding(key, "dvp-" .. action .. "-" .. i, function()
-                dispatch(action)
-            end, {repeatable = REPEATABLE[action] or false})
+            local name = "dvp-" .. action .. "-" .. i
+            if M.ANALOG[key] then
+                local st = {}
+                mp.add_forced_key_binding(key, name, function(e)
+                    if M.trigger_pull(st, e.event, mp.get_time()) then dispatch(action) end
+                end, {complex = true})
+            else
+                mp.add_forced_key_binding(key, name, function()
+                    dispatch(action)
+                end, {repeatable = REPEATABLE[action] or false})
+            end
         end
     end
 end

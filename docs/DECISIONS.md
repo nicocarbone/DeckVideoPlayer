@@ -2840,3 +2840,37 @@ against the code; all but two suggestions were applied:
   as "Auto (2160p)". Screenshots at 1280×800 and 3840×2160. The same
   check passed in the Flatpak build, and the owner tried the test build
   on a Deck. The 1440p AV1 test on a Deck is for later (owner).
+
+## D90. Analog triggers: one pull, one press
+
+- **Problem** (owner, a film through Plex): L2 / R2 jumped several
+  chapters at once on a Deck. mpv's gamepad input
+  (`input/sdl_gamepad.c`) turns a trigger into a key at 67 % of its
+  travel with no hysteresis: every axis event above that sends a key
+  down, every one between 6 % and 67 % a key up. A pull crossing the
+  threshold with a little noise gives down, up, down… within
+  milliseconds. And while a trigger is held, any other key's up (a stick
+  touched: its 6–67 % band sends ups too) ends the trigger's press in mpv
+  (`interpret_key` releases the current key on any up), so the trigger's
+  next movement is a new down. The app's bindings acted on every down:
+  one chapter each.
+- **Reproduced** in headless gamescope over IPC (`keydown` / `keyup`
+  4 ms apart, a scratch script; `tools/mpv-ipc.py` waits 0.25 s between
+  steps, too slow for this): three crossings jumped 3 chapters, a stick's
+  release while R2 was held 2.
+- **Fix:** the two gamepad trigger keys get complex bindings (down, up,
+  repeat). A down counts as a pull only when that trigger's events have
+  been quiet for 0.12 s (`SETTLE`) and 0.25 s have passed since its last
+  pull (`COOLDOWN`); a pull acts at once, with no delay. Pure
+  `input.trigger_pull(st, event, now)`. The keyboard keys of the same
+  actions (Home / End) are unchanged. mpv is not patched: development
+  runs use the system mpv, and the rule is small.
+- **Limits:** deliberate pulls less than 0.25 s apart count once. A
+  trigger held perfectly still for more than 0.25 s while a stick is
+  touched can still count once more when it is let go (no trigger events
+  in between to show it was still held).
+- **Tested:** unit tests (chatter, a stick's release while held, two
+  pulls, too soon, repeats, press events). In headless gamescope with
+  4 ms bursts: chatter and the stick case one chapter each, two pulls
+  0.4 s apart two, L2 likewise; the old code jumped 3 with the same
+  burst. On a Deck: pending.
