@@ -218,6 +218,14 @@ no hysteresis; a trigger press now counts only after its events settle
 (D90). Checked in headless gamescope and the Flatpak with key events
 milliseconds apart; the owner confirmed the test build on a Deck.
 
+v0.9.4 (released 2026-11-23): YouTube playlists and channels are kept
+in memory for 30 minutes, so coming back to one after a video is
+instant (D91; *Reload library* asks again). Fourteenth audit fixed in
+D92: online videos with no audio stream play, Video info from
+*Recently played* uses the list's Quality, no Quality row while a video
+opens. Checked in headless gamescope and the Flatpak with real YouTube;
+the owner tried the test builds on a Deck.
+
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
 from v0.9.0 by the owner):

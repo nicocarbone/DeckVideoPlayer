@@ -2921,7 +2921,9 @@ against the code; all but two suggestions were applied:
   20-playlist limit). In headless gamescope with real YouTube: a
   playlist listed once; after stopping a video at 2:00 it showed again
   at once with that progress, and on going back and in again; *Reload
-  library* listed it again (seen in the log's yt-dlp runs).
+  library* listed it again (seen in the log's yt-dlp runs). The same
+  in the Flatpak build, and the owner tried the test builds on a Deck
+  (v0.9.4).
 
 ## D92. Fourteenth audit (ISSUES.md Part XIV, v0.9.1–v0.9.4)
 
@@ -2973,4 +2975,5 @@ release bookkeeping done at the tag as always.
   titles, a listing from the future dropped first (the last three fail
   without the fix). In headless gamescope with real YouTube: the Video
   menu opened while a video was opening had no Quality row; once the
-  video played, the same open menu showed *Quality: Auto (1080p)*.
+  video played, the same open menu showed *Quality: Auto (1080p)*. The
+  owner tried the test build on a Deck (v0.9.4).

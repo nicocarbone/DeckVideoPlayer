@@ -168,7 +168,7 @@ Below are the verified bugs, optimization opportunities, and pre-release items f
 - [x] **Format Selection (`dvp/online.lua`, v0.9.1):** Add `/bv` (or `/b*`) fallback in `M.format_spec` so silent video-only streams don't fail with *"No playable format"*.
 - [x] **Streaming Quality (`dvp/online.lua`, `dvp/player.lua`, `main.lua`, v0.9.2):** Treat `screen_h <= 0` as unknown (`1080`) in `M.stream_height`; resolve `self.data.lists[ref.key]` as `parent` in `Online:video_info` / `quality_for` so *Video info* from *Recently played* uses the list's remembered Quality; handle `ctx.reopen()` (or guard *Quality*) when called while a video is still opening (`state.current_path == nil`).
 - [x] **Playlist Cache (`dvp/online.lua`, `dvp/browser.lua`, v0.9.4):** Trim `j.title` in `M.playlist_links` and keep real `title` separate from `fallback_label(url)` so empty titles fall back properly and missing titles aren't persisted to `online.json`; purge non-fresh entries in `M:keep_listing` before evicting by oldest `t`; optionally coalesce duplicate in-flight `list_playlist` runs and avoid double-rendering on synchronous cache hits.
-- [ ] **Release Bookkeeping (`v0.9.4`):** Update `dvp/version.lua`, `metainfo.xml`, and `CHANGELOG.md` when tagging `v0.9.4`.
+- [x] **Release Bookkeeping (`v0.9.4`):** Update `dvp/version.lua`, `metainfo.xml`, and `CHANGELOG.md` when tagging `v0.9.4`.
 
 ---
 
