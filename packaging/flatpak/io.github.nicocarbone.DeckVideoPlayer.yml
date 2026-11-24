@@ -226,10 +226,10 @@ modules:
       - install -Dm755 yt-dlp ${FLATPAK_DEST}/bin/yt-dlp
     sources:
       - type: file
-        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp
-        sha256: e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3
+        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.11.23/yt-dlp
+        sha256: e8665ed64d6b9172773e812f891fb707a0cb1ee8d9ef4fc1acb00cabee4c5256
       - type: file
-        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.10.26/LICENSE
+        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.11.23/LICENSE
         sha256: 7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
 
   # UI font (SIL Open Font License).
