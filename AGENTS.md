@@ -251,7 +251,11 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   update pull request (`gh workflow run update-yt-dlp.yml` starts it by
   hand; the PR's own `pull_request` build waits for approval, the
   workflow's dispatched build is the one to check). Its CI bundle played
-  real YouTube in headless gamescope before merging.
+  real YouTube in headless gamescope before merging, and the owner
+  confirmed v0.9.5 on a Deck. YouTube's new player (rolled out gradually
+  from 2026-11-23) broke v0.9.4's yt-dlp 2026.10.26 ("No playable
+  format": its challenge solving failed, yt-dlp issue 18123): a bundled
+  yt-dlp can stop working at any time, so release its updates soon.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
