@@ -23,7 +23,7 @@ as `DeckVideoPlayer-<version>-sources.tar.gz`
 | [libXpresent](https://gitlab.freedesktop.org/xorg/lib/libxpresent) | 1.0.2 | MIT/X11 | |
 | [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/) | 0.0.8 | MPL-1.1 / GPL-2.0-or-later / LGPL-2.1-or-later | subtitle encoding detection |
 | [zimg](https://github.com/sekrit-twc/zimg) | 3.0.6 | WTFPL | scaling |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.10.26 | Unlicense | online videos (D84); the official zipapp (Python sources), with [yt-dlp-ejs](https://github.com/yt-dlp/ejs) (Unlicense), which bundles meriyah (ISC) and astring (MIT), their notices kept in `yt_dlp_ejs/yt/solver/lib.min.js` |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 2026.11.23 | Unlicense | online videos (D84); the official zipapp (Python sources), with [yt-dlp-ejs](https://github.com/yt-dlp/ejs) (Unlicense), which bundles meriyah (ISC) and astring (MIT), their notices kept in `yt_dlp_ejs/yt/solver/lib.min.js` |
 | [QuickJS-NG](https://github.com/quickjs-ng/quickjs) | 0.18.0 | MIT | JavaScript runtime for yt-dlp (`qjs`) |
 | [Inter](https://rsms.me/inter/) font | 4.1 | SIL Open Font License 1.1 | UI font |
 
