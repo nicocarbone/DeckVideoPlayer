@@ -60,6 +60,11 @@
   <url type="donation">https://ko-fi.com/nicocarbone</url>
   <releases>
     <!-- Set the date when tagging the release (docs/DEVELOPMENT.md §7). -->
+    <release version="0.9.5" date="2026-11-24">
+      <description>
+        <p>yt-dlp 2026.11.23, which works around recent changes on YouTube's side.</p>
+      </description>
+    </release>
     <release version="0.9.4" date="2026-11-23">
       <description>
         <p>YouTube playlists and channels open at once when shown again within 30 minutes, online videos with no sound play, and two fixes to the Quality choice.</p>

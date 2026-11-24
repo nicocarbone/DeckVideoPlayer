@@ -226,6 +226,14 @@ D92: online videos with no audio stream play, Video info from
 opens. Checked in headless gamescope and the Flatpak with real YouTube;
 the owner tried the test builds on a Deck.
 
+v0.9.5 (released 2026-11-24): yt-dlp 2026.11.23 (YouTube workarounds:
+a temporary signature fix, YouTube's `web` client out of the defaults),
+the first release made from the update pull request; the weekly run had
+missed it by hours, so it was started by hand. The bundle CI built for
+the pull request listed a playlist and played a video in headless
+gamescope with real YouTube before merging (2026.10.26 still worked
+here too).
+
 v0.10.0 (planned): the first version published in the app's own Flatpak
 repository on GitHub Pages (D81), so installs update themselves (moved
 from v0.9.0 by the owner):

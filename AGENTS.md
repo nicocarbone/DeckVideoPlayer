@@ -73,7 +73,7 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   tests: `dev-run.sh` and `headless-run.sh` use `.dev/`;
   `steam_shortcut.py` should be tested against a fake `HOME`.
 
-## Current state (2026-11-23, v0.9.4)
+## Current state (2026-11-24, v0.9.5)
 
 - v0.1.0: local folders + removable media, resume, watched markers,
   refresh-rate matching, HDR passthrough, track menus, Flatpak + SteamOS
@@ -247,6 +247,11 @@ Visual changes: take screenshots with `tools/headless-run.sh` at 1280×800
   audit (ISSUES.md Part XIV) fixed in D92: every format choice ends in
   `/bv` (videos with no audio stream), no *Quality* row while a video
   opens. The owner tried the test builds on a Deck.
+- v0.9.5 (2026-11-24): yt-dlp 2026.11.23, the first release through the
+  update pull request (`gh workflow run update-yt-dlp.yml` starts it by
+  hand; the PR's own `pull_request` build waits for approval, the
+  workflow's dispatched build is the one to check). Its CI bundle played
+  real YouTube in headless gamescope before merging.
 - Planned: see `docs/ROADMAP.md`. Next, in order: rename library sources
   (the UI's first text field), in-app SMB (libsmb2 helper), NFS,
   copies from network shares, next episode from *Continue watching*.
